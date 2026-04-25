@@ -14,15 +14,20 @@ interface PendingCheckState {
   settled: boolean
   timeoutId: number
   networkEvidence: NavigationNetworkEvidence | null
+  webRequestListeners: WebRequestListenerSet | null
   resolve: (result: NavigationCheckResult) => void
+}
+
+interface WebRequestListenerSet {
+  beforeRequest: (details: chrome.webRequest.WebRequestBodyDetails) => void
+  beforeRedirect: (details: chrome.webRequest.WebRedirectionResponseDetails) => void
+  headersReceived: (details: chrome.webRequest.WebResponseHeadersDetails) => void
+  completed: (details: chrome.webRequest.WebResponseCacheDetails) => void
+  errorOccurred: (details: chrome.webRequest.WebResponseErrorDetails) => void
 }
 
 const pendingChecks = new Map<number, PendingCheckState>()
 const pendingCheckIds = new Map<string, number>()
-const mainFrameRequestFilter: chrome.webRequest.RequestFilter = {
-  urls: ['http://*/*', 'https://*/*'],
-  types: ['main_frame']
-}
 
 chrome.runtime.onMessage.addListener((message: NavigationCheckMessage | NavigationCancelMessage, _sender, sendResponse) => {
   if (message?.type === 'availability:cancel') {
@@ -121,78 +126,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   )
 })
 
-chrome.webRequest.onBeforeRequest.addListener((details) => {
-  const state = getPendingRequestState(details)
-  if (!state) {
-    return
-  }
-
-  getOrCreateNetworkEvidence(state, details)
-}, mainFrameRequestFilter)
-
-chrome.webRequest.onBeforeRedirect.addListener((details) => {
-  const state = getPendingRequestState(details)
-  if (!state) {
-    return
-  }
-
-  const evidence = getOrCreateNetworkEvidence(state, details)
-  const elapsedMs = getElapsedMs(evidence.timing.requestStartMs, details.timeStamp)
-  evidence.redirects.push({
-    url: details.url,
-    redirectUrl: details.redirectUrl,
-    statusCode: Number(details.statusCode) || 0,
-    ...(Number.isFinite(elapsedMs) ? { elapsedMs } : {})
-  })
-  evidence.statusCode = Number(details.statusCode) || evidence.statusCode
-  evidence.statusLine = details.statusLine || evidence.statusLine
-  evidence.finalUrl = details.redirectUrl || evidence.finalUrl
-  evidence.fromCache = Boolean(details.fromCache)
-}, mainFrameRequestFilter)
-
-chrome.webRequest.onHeadersReceived.addListener((details) => {
-  const state = getPendingRequestState(details)
-  if (!state) {
-    return
-  }
-
-  const evidence = getOrCreateNetworkEvidence(state, details)
-  evidence.statusCode = Number(details.statusCode) || evidence.statusCode
-  evidence.statusLine = details.statusLine || evidence.statusLine
-  evidence.finalUrl = details.url || evidence.finalUrl
-  if (!Number.isFinite(evidence.timing.responseStartMs)) {
-    evidence.timing.responseStartMs = details.timeStamp
-  }
-  evidence.timing.responseLatencyMs = getElapsedMs(evidence.timing.requestStartMs, evidence.timing.responseStartMs)
-}, mainFrameRequestFilter)
-
-chrome.webRequest.onCompleted.addListener((details) => {
-  const state = getPendingRequestState(details)
-  if (!state) {
-    return
-  }
-
-  const evidence = getOrCreateNetworkEvidence(state, details)
-  evidence.statusCode = Number(details.statusCode) || evidence.statusCode
-  evidence.finalUrl = details.url || evidence.finalUrl
-  evidence.fromCache = Boolean(details.fromCache)
-  evidence.timing.completedMs = details.timeStamp
-  evidence.timing.totalMs = getElapsedMs(evidence.timing.requestStartMs, evidence.timing.completedMs)
-}, mainFrameRequestFilter)
-
-chrome.webRequest.onErrorOccurred.addListener((details) => {
-  const state = getPendingRequestState(details)
-  if (!state) {
-    return
-  }
-
-  const evidence = getOrCreateNetworkEvidence(state, details)
-  evidence.errorCode = details.error || evidence.errorCode
-  evidence.finalUrl = details.url || evidence.finalUrl
-  evidence.timing.failedMs = details.timeStamp
-  evidence.timing.totalMs = getElapsedMs(evidence.timing.requestStartMs, evidence.timing.failedMs)
-}, mainFrameRequestFilter)
-
 async function performNavigationCheck({
   url,
   timeoutMs,
@@ -226,6 +159,7 @@ async function performNavigationCheck({
       settled: false,
       timeoutId: 0,
       networkEvidence: null,
+      webRequestListeners: null,
       resolve
     }
 
@@ -243,7 +177,7 @@ async function performNavigationCheck({
       })
     }, effectiveTimeout)
 
-    updateTab(tab.id!, { url }).catch((error) => {
+    startNavigationWithNetworkObserver(state, url).catch((error) => {
       finalizeNavigationCheck(tab.id!, {
         status: 'failed',
         finalUrl: url,
@@ -252,6 +186,146 @@ async function performNavigationCheck({
       })
     })
   })
+}
+
+async function startNavigationWithNetworkObserver(state: PendingCheckState, url: string): Promise<void> {
+  await attachWebRequestListeners(state)
+  if (state.settled) {
+    return
+  }
+
+  await updateTab(state.tabId, { url })
+}
+
+async function attachWebRequestListeners(state: PendingCheckState): Promise<void> {
+  const originPattern = getOriginPermissionPattern(state.requestedUrl)
+  if (!originPattern || !(await containsHostPermission(originPattern)) || state.settled) {
+    return
+  }
+
+  const filter: chrome.webRequest.RequestFilter = {
+    urls: [originPattern],
+    tabId: state.tabId,
+    types: ['main_frame']
+  }
+  const listeners = createWebRequestListeners(state)
+
+  try {
+    chrome.webRequest.onBeforeRequest.addListener(listeners.beforeRequest, filter)
+    chrome.webRequest.onBeforeRedirect.addListener(listeners.beforeRedirect, filter)
+    chrome.webRequest.onHeadersReceived.addListener(listeners.headersReceived, filter)
+    chrome.webRequest.onCompleted.addListener(listeners.completed, filter)
+    chrome.webRequest.onErrorOccurred.addListener(listeners.errorOccurred, filter)
+    state.webRequestListeners = listeners
+  } catch {
+    removeWebRequestListeners(listeners)
+  }
+}
+
+function createWebRequestListeners(state: PendingCheckState): WebRequestListenerSet {
+  return {
+    beforeRequest(details) {
+      if (state.settled) {
+        return
+      }
+
+      getOrCreateNetworkEvidence(state, details)
+    },
+    beforeRedirect(details) {
+      if (state.settled) {
+        return
+      }
+
+      const evidence = getOrCreateNetworkEvidence(state, details)
+      const elapsedMs = getElapsedMs(evidence.timing.requestStartMs, details.timeStamp)
+      evidence.redirects.push({
+        url: details.url,
+        redirectUrl: details.redirectUrl,
+        statusCode: Number(details.statusCode) || 0,
+        ...(Number.isFinite(elapsedMs) ? { elapsedMs } : {})
+      })
+      evidence.statusCode = Number(details.statusCode) || evidence.statusCode
+      evidence.statusLine = details.statusLine || evidence.statusLine
+      evidence.finalUrl = details.redirectUrl || evidence.finalUrl
+      evidence.fromCache = Boolean(details.fromCache)
+    },
+    headersReceived(details) {
+      if (state.settled) {
+        return
+      }
+
+      const evidence = getOrCreateNetworkEvidence(state, details)
+      evidence.statusCode = Number(details.statusCode) || evidence.statusCode
+      evidence.statusLine = details.statusLine || evidence.statusLine
+      evidence.finalUrl = details.url || evidence.finalUrl
+      if (!Number.isFinite(evidence.timing.responseStartMs)) {
+        evidence.timing.responseStartMs = details.timeStamp
+      }
+      evidence.timing.responseLatencyMs = getElapsedMs(evidence.timing.requestStartMs, evidence.timing.responseStartMs)
+    },
+    completed(details) {
+      if (state.settled) {
+        return
+      }
+
+      const evidence = getOrCreateNetworkEvidence(state, details)
+      evidence.statusCode = Number(details.statusCode) || evidence.statusCode
+      evidence.finalUrl = details.url || evidence.finalUrl
+      evidence.fromCache = Boolean(details.fromCache)
+      evidence.timing.completedMs = details.timeStamp
+      evidence.timing.totalMs = getElapsedMs(evidence.timing.requestStartMs, evidence.timing.completedMs)
+    },
+    errorOccurred(details) {
+      if (state.settled) {
+        return
+      }
+
+      const evidence = getOrCreateNetworkEvidence(state, details)
+      evidence.errorCode = details.error || evidence.errorCode
+      evidence.finalUrl = details.url || evidence.finalUrl
+      evidence.timing.failedMs = details.timeStamp
+      evidence.timing.totalMs = getElapsedMs(evidence.timing.requestStartMs, evidence.timing.failedMs)
+    }
+  }
+}
+
+function detachWebRequestListeners(state: PendingCheckState): void {
+  if (!state.webRequestListeners) {
+    return
+  }
+
+  removeWebRequestListeners(state.webRequestListeners)
+  state.webRequestListeners = null
+}
+
+function removeWebRequestListeners(listeners: WebRequestListenerSet): void {
+  chrome.webRequest.onBeforeRequest.removeListener(listeners.beforeRequest)
+  chrome.webRequest.onBeforeRedirect.removeListener(listeners.beforeRedirect)
+  chrome.webRequest.onHeadersReceived.removeListener(listeners.headersReceived)
+  chrome.webRequest.onCompleted.removeListener(listeners.completed)
+  chrome.webRequest.onErrorOccurred.removeListener(listeners.errorOccurred)
+}
+
+function containsHostPermission(originPattern: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    chrome.permissions.contains({ origins: [originPattern] }, (granted) => {
+      const error = chrome.runtime.lastError
+      resolve(!error && Boolean(granted))
+    })
+  })
+}
+
+function getOriginPermissionPattern(url: string): string {
+  try {
+    const parsedUrl = new URL(String(url || '').trim())
+    if (!/^https?:$/i.test(parsedUrl.protocol)) {
+      return ''
+    }
+
+    return `${parsedUrl.origin}/*`
+  } catch {
+    return ''
+  }
 }
 
 function cancelNavigationCheck(checkId: string): void {
@@ -290,6 +364,7 @@ function finalizeNavigationCheck(
   }
 
   state.settled = true
+  detachWebRequestListeners(state)
   pendingChecks.delete(tabId)
   if (state.checkId) {
     pendingCheckIds.delete(state.checkId)
@@ -308,16 +383,6 @@ function finalizeNavigationCheck(
 
 function isAboutBlank(url: string | undefined): boolean {
   return String(url || '').startsWith('about:blank')
-}
-
-function getPendingRequestState(
-  details: { frameId?: number; tabId?: number } | null | undefined
-): PendingCheckState | null {
-  if (!details || details.frameId !== 0 || typeof details.tabId !== 'number' || details.tabId < 0) {
-    return null
-  }
-
-  return pendingChecks.get(details.tabId) || null
 }
 
 function getOrCreateNetworkEvidence(
