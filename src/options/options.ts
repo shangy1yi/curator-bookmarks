@@ -29,6 +29,7 @@ import {
   buildDuplicateKey
 } from '../shared/text.js'
 import { cancelNavigationCheck, requestNavigationCheck } from '../shared/messages.js'
+import { renderDotMatrixLoader } from '../shared/dot-matrix-loader.js'
 import {
   normalizeAiNamingSettings,
   normalizeAiNamingCustomModels,
@@ -1230,7 +1231,11 @@ function renderAvailabilitySection() {
     availabilityState.catalogLoading ||
     availabilityState.requestingPermission ||
     availabilityState.deleting
-  dom.availabilityAction.textContent = getAvailabilityActionText()
+  setLoadingLabel(dom.availabilityAction, getAvailabilityActionText(), {
+    busy: isAvailabilityPrimaryActionBusy(),
+    wrapperClass: 'button-loading-label',
+    loaderClass: 'button-dot-loader'
+  })
   dom.availabilityPauseAction?.classList.toggle('hidden', !availabilityState.running)
   dom.availabilityStopAction?.classList.toggle('hidden', !availabilityState.running)
 
@@ -1247,7 +1252,15 @@ function renderAvailabilitySection() {
       !availabilityState.running ||
       availabilityState.deleting ||
       availabilityState.stopRequested
-    dom.availabilityStopAction.textContent = availabilityState.stopRequested ? '停止中…' : '停止本次检测'
+    setLoadingLabel(
+      dom.availabilityStopAction,
+      availabilityState.stopRequested ? '停止中…' : '停止本次检测',
+      {
+        busy: availabilityState.stopRequested,
+        wrapperClass: 'button-loading-label',
+        loaderClass: 'button-dot-loader'
+      }
+    )
   }
 
   const progressTotal = availabilityState.retestingSelection
@@ -1263,7 +1276,7 @@ function renderAvailabilitySection() {
     ? Math.round((progressCompleted / progressTotal) * 100)
     : 0
 
-  dom.availabilityProgressText.textContent = availabilityState.retestingSelection
+  const availabilityProgressLabel = availabilityState.retestingSelection
     ? `重测中 ${progressLabel}`
     : availabilityState.running
     ? availabilityState.stopRequested
@@ -1276,6 +1289,11 @@ function renderAvailabilitySection() {
         ? `已停止 ${progressLabel}`
         : `已完成 ${progressLabel}`
       : progressLabel
+  setLoadingLabel(dom.availabilityProgressText, availabilityProgressLabel, {
+    busy: isAvailabilityProgressBusy(),
+    wrapperClass: 'status-loading-label',
+    loaderClass: 'status-dot-loader'
+  })
   dom.availabilityProgressBar.style.width = `${Math.max(0, Math.min(progressValue, 100))}%`
   dom.availabilityStatusCopy.textContent = getAvailabilityStatusCopy()
 
@@ -1396,6 +1414,64 @@ function resetAiNamingConnectivityState() {
   aiNamingState.lastConnectivityTestAt = 0
   aiNamingState.lastConnectivityTestStatus = ''
   aiNamingState.lastConnectivityTestMessage = ''
+}
+
+function renderLoadingLabel(
+  label,
+  {
+    variant = 'bar',
+    wrapperClass = 'status-loading-label',
+    loaderClass = 'status-dot-loader'
+  } = {}
+) {
+  const loaderVariant = variant === 'spiral' ? 'spiral' : 'bar'
+  return `
+    <span class="${wrapperClass}">
+      ${renderDotMatrixLoader({ variant: loaderVariant, className: loaderClass })}
+      <span>${escapeHtml(label)}</span>
+    </span>
+  `
+}
+
+function setLoadingLabel(element, label, { busy = false, variant = 'bar', wrapperClass, loaderClass } = {}) {
+  if (!element) {
+    return
+  }
+
+  if (busy) {
+    element.innerHTML = renderLoadingLabel(label, {
+      variant,
+      wrapperClass: wrapperClass || 'status-loading-label',
+      loaderClass: loaderClass || 'status-dot-loader'
+    })
+    return
+  }
+
+  element.textContent = label
+}
+
+function isAvailabilityPrimaryActionBusy() {
+  return (
+    availabilityState.catalogLoading ||
+    availabilityState.requestingPermission ||
+    availabilityState.retestingSelection ||
+    availabilityState.stopRequested ||
+    (availabilityState.running && !availabilityState.paused)
+  )
+}
+
+function isAvailabilityProgressBusy() {
+  return (
+    availabilityState.retestingSelection ||
+    availabilityState.requestingPermission ||
+    availabilityState.catalogLoading ||
+    availabilityState.stopRequested ||
+    (availabilityState.running && !availabilityState.paused)
+  )
+}
+
+function isAiProgressBusy() {
+  return aiNamingState.running && !aiNamingState.paused
 }
 
 async function saveAiNamingSettingsFromDom({ validateRequired = true } = {}) {
@@ -1581,11 +1657,19 @@ function renderAiNamingSection() {
       aiNamingState.testingConnection ||
       aiNamingState.fetchingModels ||
       aiNamingState.requestingPermission
-    dom.aiFetchModels.textContent = aiNamingState.fetchingModels ? '获取中…' : '获取模型'
+    setLoadingLabel(dom.aiFetchModels, aiNamingState.fetchingModels ? '获取中' : '获取模型', {
+      busy: aiNamingState.fetchingModels,
+      wrapperClass: 'button-loading-label',
+      loaderClass: 'button-dot-loader'
+    })
   }
   if (dom.aiConnectivityCopy) {
     dom.aiConnectivityCopy.className = `ai-provider-connectivity ${connectivityMeta.tone}`
-    dom.aiConnectivityCopy.textContent = connectivityMeta.copy
+    setLoadingLabel(dom.aiConnectivityCopy, connectivityMeta.copy, {
+      busy: aiNamingState.testingConnection,
+      wrapperClass: 'status-loading-label',
+      loaderClass: 'status-dot-loader'
+    })
   }
 
   dom.aiRunBadge.className = `options-chip ${getAiNamingBadgeTone()}`
@@ -1600,7 +1684,7 @@ function renderAiNamingSection() {
     ? Math.round((aiNamingState.checkedBookmarks / aiNamingState.eligibleBookmarks) * 100)
     : 0
 
-  dom.aiProgressText.textContent = aiNamingState.running
+  const aiProgressLabel = aiNamingState.running
     ? aiNamingState.stopRequested
       ? `正在停止 ${progressLabel}`
       : aiNamingState.paused
@@ -1609,6 +1693,11 @@ function renderAiNamingSection() {
     : aiNamingState.lastCompletedAt
       ? `已完成 ${progressLabel}`
       : progressLabel
+  setLoadingLabel(dom.aiProgressText, aiProgressLabel, {
+    busy: isAiProgressBusy(),
+    wrapperClass: 'status-loading-label',
+    loaderClass: 'status-dot-loader'
+  })
   dom.aiProgressBar.style.width = `${Math.max(0, Math.min(progressValue, 100))}%`
 
   dom.aiAction.disabled =
@@ -1640,7 +1729,11 @@ function renderAiNamingSection() {
       aiNamingState.running ||
       aiNamingState.applying ||
       aiNamingState.requestingPermission
-    dom.aiTestConnection.textContent = aiNamingState.testingConnection ? '测试中…' : '测试连接'
+    setLoadingLabel(dom.aiTestConnection, aiNamingState.testingConnection ? '测试中' : '测试连接', {
+      busy: aiNamingState.testingConnection,
+      wrapperClass: 'button-loading-label',
+      loaderClass: 'button-dot-loader'
+    })
   }
 
   dom.aiEligible.textContent = String(aiNamingState.eligibleBookmarks)
@@ -1743,7 +1836,11 @@ function renderAiFetchModelsStatus() {
   }
 
   dom.aiFetchModelsStatus.className = `ai-provider-connectivity ${tone}`
-  dom.aiFetchModelsStatus.textContent = copy
+  setLoadingLabel(dom.aiFetchModelsStatus, copy, {
+    busy: aiNamingState.fetchingModels,
+    wrapperClass: 'status-loading-label',
+    loaderClass: 'status-dot-loader'
+  })
 }
 
 function openAiModelPickerModal() {
@@ -1797,7 +1894,11 @@ function renderAiModelPickerModal() {
         ? `已从 API 拉取 ${fetchedCount} 个模型（${lastFetchedLabel}）。支持搜索预设 + 自定义 + 已拉取模型。`
         : `已从 API 拉取 ${fetchedCount} 个模型。支持搜索预设 + 自定义 + 已拉取模型。`
     }
-    dom.aiModelPickerModalCopy.textContent = copy
+    setLoadingLabel(dom.aiModelPickerModalCopy, copy, {
+      busy: aiNamingState.fetchingModels,
+      wrapperClass: 'status-loading-label',
+      loaderClass: 'status-dot-loader'
+    })
   }
 
   if (dom.aiModelPickerSearchInput && dom.aiModelPickerSearchInput !== document.activeElement) {
@@ -1811,7 +1912,11 @@ function renderAiModelPickerModal() {
       aiNamingState.applying ||
       aiNamingState.testingConnection ||
       aiNamingState.requestingPermission
-    dom.aiModelPickerFetchButton.textContent = aiNamingState.fetchingModels ? '拉取中…' : '获取模型'
+    setLoadingLabel(dom.aiModelPickerFetchButton, aiNamingState.fetchingModels ? '拉取中' : '获取模型', {
+      busy: aiNamingState.fetchingModels,
+      wrapperClass: 'button-loading-label',
+      loaderClass: 'button-dot-loader'
+    })
   }
   if (dom.aiModelPickerManageButton) {
     dom.aiModelPickerManageButton.disabled =

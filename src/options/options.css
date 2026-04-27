@@ -32,6 +32,122 @@
   display: none !important;
 }
 
+.dot-matrix-loader {
+  display: block;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
+.dot-matrix-loader-bg {
+  fill: currentColor;
+  opacity: 0.075;
+}
+
+.dot-matrix-loader-lit {
+  fill: currentColor;
+  opacity: 0;
+}
+
+.dot-matrix-loader--spiral .dot-matrix-loader-lit {
+  animation: dot-matrix-spiral 2800ms cubic-bezier(0.25, 1, 0.5, 1) infinite both;
+}
+
+.dot-matrix-loader--bar .dot-matrix-loader-lit {
+  animation: dot-matrix-bar 1800ms cubic-bezier(0.25, 1, 0.5, 1) infinite both;
+}
+
+.dot-matrix-loader--spiral .dot-matrix-loader-d00 { animation-delay: 2221ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d01 { animation-delay: 2317ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d02 { animation-delay: 869ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d03 { animation-delay: 966ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d04 { animation-delay: 1062ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d10 { animation-delay: 2124ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d11 { animation-delay: 772ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d12 { animation-delay: 97ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d13 { animation-delay: 193ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d14 { animation-delay: 1159ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d20 { animation-delay: 2028ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d21 { animation-delay: 676ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d22 { animation-delay: 0ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d23 { animation-delay: 290ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d24 { animation-delay: 1255ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d30 { animation-delay: 1931ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d31 { animation-delay: 579ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d32 { animation-delay: 483ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d33 { animation-delay: 386ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d34 { animation-delay: 1352ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d40 { animation-delay: 1834ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d41 { animation-delay: 1738ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d42 { animation-delay: 1641ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d43 { animation-delay: 1545ms; }
+.dot-matrix-loader--spiral .dot-matrix-loader-d44 { animation-delay: 1448ms; }
+
+.dot-matrix-loader--bar .dot-matrix-loader-d01,
+.dot-matrix-loader--bar .dot-matrix-loader-d02,
+.dot-matrix-loader--bar .dot-matrix-loader-d03 { animation-delay: 0ms; }
+.dot-matrix-loader--bar .dot-matrix-loader-d11,
+.dot-matrix-loader--bar .dot-matrix-loader-d12,
+.dot-matrix-loader--bar .dot-matrix-loader-d13 { animation-delay: 300ms; }
+.dot-matrix-loader--bar .dot-matrix-loader-d21,
+.dot-matrix-loader--bar .dot-matrix-loader-d22,
+.dot-matrix-loader--bar .dot-matrix-loader-d23 { animation-delay: 600ms; }
+.dot-matrix-loader--bar .dot-matrix-loader-d31,
+.dot-matrix-loader--bar .dot-matrix-loader-d32,
+.dot-matrix-loader--bar .dot-matrix-loader-d33 { animation-delay: 900ms; }
+.dot-matrix-loader--bar .dot-matrix-loader-d41,
+.dot-matrix-loader--bar .dot-matrix-loader-d42,
+.dot-matrix-loader--bar .dot-matrix-loader-d43 { animation-delay: 1200ms; }
+
+@keyframes dot-matrix-spiral {
+  0% { opacity: 0; }
+  4% { opacity: 1; }
+  26% { opacity: 0.08; }
+  100% { opacity: 0; }
+}
+
+@keyframes dot-matrix-bar {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  36% { opacity: 0.05; }
+  100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot-matrix-loader-lit {
+    animation: none !important;
+    opacity: 0.45;
+  }
+}
+
+.button-loading-label,
+.status-loading-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.button-loading-label {
+  justify-content: center;
+}
+
+.status-loading-label {
+  vertical-align: middle;
+}
+
+.button-dot-loader {
+  width: 14px;
+  height: 14px;
+}
+
+.status-dot-loader {
+  width: 16px;
+  height: 16px;
+}
+
 html,
 body {
   margin: 0;

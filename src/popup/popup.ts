@@ -32,6 +32,7 @@ import {
 } from '../shared/recycle-bin.js'
 import { getLocalStorage, removeLocalStorage } from '../shared/storage.js'
 import { requestBookmarkSave } from '../shared/messages.js'
+import { renderDotMatrixLoader } from '../shared/dot-matrix-loader.js'
 import { normalizeAiNamingSettings } from '../options/sections/ai-settings.js'
 import {
   buildFallbackPageContentFromUrl,
@@ -550,7 +551,7 @@ function renderSmartClassifier() {
   }
 
   if (state.isLoading && state.smartStatus !== 'results') {
-    dom.smartClassifier.innerHTML = '<div class="state-panel">正在读取当前网页…</div>'
+    dom.smartClassifier.innerHTML = `<div class="state-panel">${renderPopupLoadingStack('正在读取当前网页…')}</div>`
     return
   }
 
@@ -620,6 +621,24 @@ function renderSmartManualButton() {
   `
 }
 
+function renderPopupLoadingStack(label) {
+  return `
+    <span class="popup-loading-stack">
+      ${renderDotMatrixLoader({ variant: 'spiral', className: 'popup-loading-loader' })}
+      <span>${escapeHtml(label)}</span>
+    </span>
+  `
+}
+
+function renderButtonLoadingLabel(label) {
+  return `
+    <span class="button-loading-label">
+      ${renderDotMatrixLoader({ variant: 'bar', className: 'button-dot-loader' })}
+      <span>${escapeHtml(label)}</span>
+    </span>
+  `
+}
+
 function renderSmartLoadingCard(currentProgress = state.smartProgressPercent) {
   const step = Math.max(1, Math.min(state.smartStep || 1, SMART_LOADING_STEP_COUNT))
   const progress = getSmartProgressTarget()
@@ -631,16 +650,21 @@ function renderSmartLoadingCard(currentProgress = state.smartProgressPercent) {
         <p>智能分类</p>
         ${renderSmartExitButton()}
       </div>
-      <p class="smart-loading-copy">
-        <span>${escapeHtml(getSmartLoadingLabel())}</span>
-        <small>${step}/${SMART_LOADING_STEP_COUNT}</small>
-      </p>
-      <div class="smart-progress-track" aria-hidden="true">
-        <span
-          class="smart-progress-bar"
-          data-smart-progress-target="${escapeAttr(String(progress))}"
-          style="width: ${startProgress}%"
-        ></span>
+      <div class="smart-loading-body">
+        ${renderDotMatrixLoader({ variant: 'spiral', className: 'smart-loading-loader' })}
+        <div class="smart-loading-content">
+          <p class="smart-loading-copy">
+            <span>${escapeHtml(getSmartLoadingLabel())}</span>
+            <small>${step}/${SMART_LOADING_STEP_COUNT}</small>
+          </p>
+          <div class="smart-progress-track" aria-hidden="true">
+            <span
+              class="smart-progress-bar"
+              data-smart-progress-target="${escapeAttr(String(progress))}"
+              style="width: ${startProgress}%"
+            ></span>
+          </div>
+        </div>
       </div>
     </article>
   `
@@ -714,7 +738,7 @@ function renderSmartResultCard() {
       <div class="smart-actions">
         <button class="smart-cancel-button" type="button" data-smart-action="reset">取消</button>
         <button class="smart-save-button ${state.smartSaved ? 'saved' : ''}" type="button" data-smart-action="save" ${canSave ? '' : 'disabled'}>
-          ${state.smartSaved ? '已保存' : state.smartSaving ? '保存中…' : '确认保存'}
+          ${state.smartSaved ? '已保存' : state.smartSaving ? renderButtonLoadingLabel('保存中') : '确认保存'}
         </button>
       </div>
     </article>
@@ -773,6 +797,7 @@ function renderMainContent() {
   }
 
   if (state.isLoading) {
+    dom.loadingState.innerHTML = renderPopupLoadingStack('正在加载书签…')
     return
   }
 
