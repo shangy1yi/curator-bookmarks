@@ -68,7 +68,7 @@ test('popup smart page extraction is lazy loaded for classification only', () =>
   assert.match(popupSource, /contentExtractionModulePromise \|\|= import\('\.\.\/options\/sections\/content-extraction\.js'\)/)
   assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/options\/sections\/content-extraction\.js['"]/m)
   assert.match(popupSource, /async function buildCurrentPageContext\(currentUrl, settings\)[\s\S]*?const contentExtraction = await loadContentExtractionModule\(\)/)
-  assert.match(popupSource, /async function requestSmartClassification\(\{ settings, pageContext, currentUrl \}\)[\s\S]*?const contentExtraction = await loadContentExtractionModule\(\)/)
+  assert.match(popupSource, /async function requestSmartClassification\(\{ settings, pageContext, currentUrl \}\)[\s\S]*?const \[contentExtraction, aiResponse\] = await Promise\.all\(/)
   assert.match(popupSource, /contentExtraction\.buildPageContextForAi\([\s\S]*?contentExtraction\.normalizePageContentContext\(pageContext\)/)
 })
 
@@ -82,12 +82,30 @@ test('popup AI settings normalizer is lazy loaded only when AI features need set
   assert.match(popupSource, /const POPUP_JINA_READER_ORIGIN = 'https:\/\/r\.jina\.ai\/\*'/)
 })
 
+test('popup AI response helpers are lazy loaded only when AI requests run', () => {
+  assert.match(popupSource, /let aiResponseModulePromise: Promise<typeof import\('\.\.\/shared\/ai-response\.js'\)> \| null = null/)
+  assert.match(popupSource, /aiResponseModulePromise \|\|= import\('\.\.\/shared\/ai-response\.js'\)/)
+  assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/shared\/ai-response\.js['"]/m)
+  assert.match(popupSource, /const aiResponse = await loadAiResponseModule\(\)[\s\S]*?aiResponse\.getAiEndpoint\(settings\)/)
+  assert.match(popupSource, /Promise\.all\(\[[\s\S]*?loadContentExtractionModule\(\),[\s\S]*?loadAiResponseModule\(\)[\s\S]*?\]\)/)
+  assert.match(popupSource, /aiResponse\.extractAiErrorMessage\(payload, response\.status\)/)
+})
+
 test('built popup html does not preload smart page extraction chunk', { skip: !existsSync(resolve(process.cwd(), 'dist/src/popup/popup.html')) }, () => {
   const builtPopupHtml = readProjectFile('dist/src/popup/popup.html')
   assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+content-extraction/i)
   assert.doesNotMatch(builtPopupHtml, /<link[^>]+content-extraction[^>]+rel="modulepreload"/i)
   assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+ai-settings/i)
   assert.doesNotMatch(builtPopupHtml, /<link[^>]+ai-settings[^>]+rel="modulepreload"/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+ai-response/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+ai-response[^>]+rel="modulepreload"/i)
+})
+
+test('popup inbox filter title does not preload inbox state module', { skip: !existsSync(resolve(process.cwd(), 'dist/src/popup/popup.html')) }, () => {
+  const builtPopupHtml = readProjectFile('dist/src/popup/popup.html')
+  assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/shared\/inbox\.js['"]/m)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+inbox/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+inbox[^>]+rel="modulepreload"/i)
 })
 
 test('popup folder pickers expose option and treeitem semantics', () => {

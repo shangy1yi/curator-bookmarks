@@ -2,6 +2,7 @@ import {
   AUTO_ANALYZE_STATUS_ACTIVE_EXPIRE_MS,
   AUTO_ANALYZE_STATUS_FINAL_EXPIRE_MS,
   BOOKMARKS_BAR_ID,
+  DEFAULT_INBOX_FOLDER_TITLE,
   POPUP_COMMAND_INTENT_TTL_MS,
   ROOT_ID,
   RECYCLE_BIN_LIMIT,
@@ -40,12 +41,6 @@ import { requestBookmarkSave } from '../shared/messages.js'
 import { loadBookmarkTagIndex, normalizeBookmarkTags } from '../shared/bookmark-tags.js'
 import type { BookmarkTagIndex } from '../shared/bookmark-tags.js'
 import { renderDotMatrixLoader } from '../shared/dot-matrix-loader.js'
-import {
-  extractAiErrorMessage,
-  extractChatCompletionsJsonText,
-  extractResponsesJsonText,
-  getAiEndpoint
-} from '../shared/ai-response.js'
 import { cancelExitMotion, closeWithExitMotion } from '../shared/motion.js'
 import {
   MAX_POPUP_SEARCH_RESULTS,
@@ -59,7 +54,6 @@ import {
 import {
   parseSearchQuery
 } from '../shared/search-query.js'
-import { DEFAULT_INBOX_FOLDER_TITLE } from '../shared/inbox.js'
 import type {
   NaturalSearchPlan,
   NaturalSearchResultSet
@@ -97,6 +91,7 @@ let popupDialogReturnFocusElement: HTMLElement | null = null
 let naturalSearchModulePromise: Promise<typeof import('./natural-search.js')> | null = null
 let contentExtractionModulePromise: Promise<typeof import('../options/sections/content-extraction.js')> | null = null
 let aiSettingsModulePromise: Promise<typeof import('../options/sections/ai-settings.js')> | null = null
+let aiResponseModulePromise: Promise<typeof import('../shared/ai-response.js')> | null = null
 
 function loadNaturalSearchModule(): Promise<typeof import('./natural-search.js')> {
   naturalSearchModulePromise ||= import('./natural-search.js')
@@ -111,6 +106,11 @@ function loadContentExtractionModule(): Promise<typeof import('../options/sectio
 function loadAiSettingsModule(): Promise<typeof import('../options/sections/ai-settings.js')> {
   aiSettingsModulePromise ||= import('../options/sections/ai-settings.js')
   return aiSettingsModulePromise
+}
+
+function loadAiResponseModule(): Promise<typeof import('../shared/ai-response.js')> {
+  aiResponseModulePromise ||= import('../shared/ai-response.js')
+  return aiResponseModulePromise
 }
 
 const SMART_CLASSIFY_SCHEMA = {
@@ -3929,7 +3929,8 @@ async function requestNaturalSearchAiPlan(
   validateSmartAiSettings(settings)
   await ensureSmartClassifyPermissions(settings, { interactive: false })
 
-  const endpoint = getAiEndpoint(settings)
+  const aiResponse = await loadAiResponseModule()
+  const endpoint = aiResponse.getAiEndpoint(settings)
   const requestBody = buildNaturalSearchRequestBody({ settings, query, localPlan })
   const response = await fetchWithSmartTimeout(endpoint, {
     method: 'POST',
@@ -3942,12 +3943,12 @@ async function requestNaturalSearchAiPlan(
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new Error(extractAiErrorMessage(payload, response.status))
+    throw new Error(aiResponse.extractAiErrorMessage(payload, response.status))
   }
 
   const rawJsonText = settings.apiStyle === 'responses'
-    ? extractResponsesJsonText(payload)
-    : extractChatCompletionsJsonText(payload)
+    ? aiResponse.extractResponsesJsonText(payload)
+    : aiResponse.extractChatCompletionsJsonText(payload)
 
   try {
     return naturalSearch.normalizeNaturalSearchAiPlan(JSON.parse(rawJsonText), localPlan)
@@ -4182,8 +4183,11 @@ async function fetchRemoteCurrentPageContext(
 }
 
 async function requestSmartClassification({ settings, pageContext, currentUrl }) {
-  const contentExtraction = await loadContentExtractionModule()
-  const endpoint = getAiEndpoint(settings)
+  const [contentExtraction, aiResponse] = await Promise.all([
+    loadContentExtractionModule(),
+    loadAiResponseModule()
+  ])
+  const endpoint = aiResponse.getAiEndpoint(settings)
   const requestBody = buildSmartAiRequestBody({
     settings,
     pageContext,
@@ -4201,12 +4205,12 @@ async function requestSmartClassification({ settings, pageContext, currentUrl })
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new Error(extractAiErrorMessage(payload, response.status))
+    throw new Error(aiResponse.extractAiErrorMessage(payload, response.status))
   }
 
   const rawJsonText = settings.apiStyle === 'responses'
-    ? extractResponsesJsonText(payload)
-    : extractChatCompletionsJsonText(payload)
+    ? aiResponse.extractResponsesJsonText(payload)
+    : aiResponse.extractChatCompletionsJsonText(payload)
 
   try {
     return normalizeSmartAiResult(JSON.parse(rawJsonText))
