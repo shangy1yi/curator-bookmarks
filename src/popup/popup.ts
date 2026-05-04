@@ -47,24 +47,6 @@ import {
   getAiEndpoint
 } from '../shared/ai-response.js'
 import { cancelExitMotion, closeWithExitMotion } from '../shared/motion.js'
-import { normalizeAiNamingSettings } from '../options/sections/ai-settings.js'
-import {
-  buildFallbackPageContentFromUrl,
-  buildJinaReaderUrl,
-  buildPageContextForAi,
-  buildRemotePageContentFromText,
-  combinePageContentContexts,
-  decideDirectPageFetch,
-  extractPageContentFromHtml,
-  appendPageContentWarnings,
-  getDirectPageFetchFailureWarning,
-  getDirectPageFetchOriginPattern,
-  normalizePageContentContext
-} from '../options/sections/content-extraction.js'
-import {
-  AI_NAMING_DEFAULT_TIMEOUT_MS,
-  AI_NAMING_JINA_READER_ORIGIN
-} from '../options/shared-options/constants.js'
 import {
   MAX_POPUP_SEARCH_RESULTS,
   POPUP_SEARCH_ASYNC_THRESHOLD,
@@ -98,6 +80,8 @@ const MAX_VISIBLE_TOASTS = 2
 const SEARCH_SNAPSHOT_WARM_DELAY_MS = 220
 const SMART_RECOMMENDATION_LIMIT = 3
 const SMART_LOADING_STEP_COUNT = 3
+const POPUP_SMART_DEFAULT_TIMEOUT_MS = 30000
+const POPUP_JINA_READER_ORIGIN = 'https://r.jina.ai/*'
 const DEFAULT_POPUP_PREFERENCES = {
   naturalSearchEnabled: false
 }
@@ -111,10 +95,22 @@ const FOCUSABLE_SELECTOR = [
 ].join(',')
 let popupDialogReturnFocusElement: HTMLElement | null = null
 let naturalSearchModulePromise: Promise<typeof import('./natural-search.js')> | null = null
+let contentExtractionModulePromise: Promise<typeof import('../options/sections/content-extraction.js')> | null = null
+let aiSettingsModulePromise: Promise<typeof import('../options/sections/ai-settings.js')> | null = null
 
 function loadNaturalSearchModule(): Promise<typeof import('./natural-search.js')> {
   naturalSearchModulePromise ||= import('./natural-search.js')
   return naturalSearchModulePromise
+}
+
+function loadContentExtractionModule(): Promise<typeof import('../options/sections/content-extraction.js')> {
+  contentExtractionModulePromise ||= import('../options/sections/content-extraction.js')
+  return contentExtractionModulePromise
+}
+
+function loadAiSettingsModule(): Promise<typeof import('../options/sections/ai-settings.js')> {
+  aiSettingsModulePromise ||= import('../options/sections/ai-settings.js')
+  return aiSettingsModulePromise
 }
 
 const SMART_CLASSIFY_SCHEMA = {
@@ -3885,6 +3881,7 @@ function writeClipboardText(text) {
 
 async function loadAiProviderSettings() {
   const stored = await getLocalStorage([STORAGE_KEYS.aiProviderSettings])
+  const { normalizeAiNamingSettings } = await loadAiSettingsModule()
   return normalizeAiNamingSettings(stored[STORAGE_KEYS.aiProviderSettings])
 }
 
@@ -4072,15 +4069,16 @@ function normalizeNaturalSearchError(error) {
 }
 
 async function buildCurrentPageContext(currentUrl, settings) {
+  const contentExtraction = await loadContentExtractionModule()
   const timeoutMs = settings.timeoutMs
   let context = null
-  const originPattern = getDirectPageFetchOriginPattern(currentUrl)
+  const originPattern = contentExtraction.getDirectPageFetchOriginPattern(currentUrl)
   const canFetchDirectly = originPattern ? Boolean(await hasOptionalOriginPermission(originPattern)) : false
-  const directFetchDecision = decideDirectPageFetch(currentUrl, canFetchDirectly)
+  const directFetchDecision = contentExtraction.decideDirectPageFetch(currentUrl, canFetchDirectly)
 
   if (!directFetchDecision.allowed) {
-    context = appendPageContentWarnings(
-      buildFallbackPageContentFromUrl(currentUrl, {
+    context = contentExtraction.appendPageContentWarnings(
+      contentExtraction.buildFallbackPageContentFromUrl(currentUrl, {
         currentTitle: getCurrentPageTitle()
       }),
       [directFetchDecision.warning]
@@ -4099,32 +4097,32 @@ async function buildCurrentPageContext(currentUrl, settings) {
 
       if (contentType.includes('text/html')) {
         const html = await response.text()
-        context = extractPageContentFromHtml(html, {
+        context = contentExtraction.extractPageContentFromHtml(html, {
           url: finalUrl,
           currentTitle: getCurrentPageTitle(),
           contentType
         })
       } else {
-        context = buildFallbackPageContentFromUrl(finalUrl, {
+        context = contentExtraction.buildFallbackPageContentFromUrl(finalUrl, {
           currentTitle: getCurrentPageTitle(),
           contentType
         })
       }
     } catch (error) {
-      context = appendPageContentWarnings(
-        buildFallbackPageContentFromUrl(currentUrl, {
+      context = contentExtraction.appendPageContentWarnings(
+        contentExtraction.buildFallbackPageContentFromUrl(currentUrl, {
           currentTitle: getCurrentPageTitle(),
           error
         }),
-        [getDirectPageFetchFailureWarning(error)]
+        [contentExtraction.getDirectPageFetchFailureWarning(error)]
       )
     }
   }
 
   if (settings.allowRemoteParsing) {
-    const canUseRemoteParser = await hasOptionalOriginPermission(AI_NAMING_JINA_READER_ORIGIN)
+    const canUseRemoteParser = await hasOptionalOriginPermission(POPUP_JINA_READER_ORIGIN)
     if (!canUseRemoteParser) {
-      return normalizePageContentContext({
+      return contentExtraction.normalizePageContentContext({
         ...context,
         warnings: [
           ...(context.warnings || []),
@@ -4134,10 +4132,10 @@ async function buildCurrentPageContext(currentUrl, settings) {
     }
 
     try {
-      const remoteContext = await fetchRemoteCurrentPageContext(context.finalUrl || currentUrl, timeoutMs, context)
-      return combinePageContentContexts(context, remoteContext)
+      const remoteContext = await fetchRemoteCurrentPageContext(context.finalUrl || currentUrl, timeoutMs, context, contentExtraction)
+      return contentExtraction.combinePageContentContexts(context, remoteContext)
     } catch (error) {
-      return normalizePageContentContext({
+      return contentExtraction.normalizePageContentContext({
         ...context,
         warnings: [
           ...(context.warnings || []),
@@ -4150,8 +4148,13 @@ async function buildCurrentPageContext(currentUrl, settings) {
   return context
 }
 
-async function fetchRemoteCurrentPageContext(url, timeoutMs, fallbackContext) {
-  const readerUrl = buildJinaReaderUrl(url)
+async function fetchRemoteCurrentPageContext(
+  url,
+  timeoutMs,
+  fallbackContext,
+  contentExtraction: typeof import('../options/sections/content-extraction.js')
+) {
+  const readerUrl = contentExtraction.buildJinaReaderUrl(url)
   if (!readerUrl) {
     throw new Error('远程解析 URL 无效。')
   }
@@ -4172,18 +4175,20 @@ async function fetchRemoteCurrentPageContext(url, timeoutMs, fallbackContext) {
   }
 
   const text = await response.text()
-  return buildRemotePageContentFromText(text, {
+  return contentExtraction.buildRemotePageContentFromText(text, {
     url: fallbackContext?.finalUrl || url,
     currentTitle: fallbackContext?.title || getCurrentPageTitle()
   })
 }
 
 async function requestSmartClassification({ settings, pageContext, currentUrl }) {
+  const contentExtraction = await loadContentExtractionModule()
   const endpoint = getAiEndpoint(settings)
   const requestBody = buildSmartAiRequestBody({
     settings,
     pageContext,
-    currentUrl
+    currentUrl,
+    contentExtraction
   })
   const response = await fetchWithSmartTimeout(endpoint, {
     method: 'POST',
@@ -4210,7 +4215,7 @@ async function requestSmartClassification({ settings, pageContext, currentUrl })
   }
 }
 
-function buildSmartAiRequestBody({ settings, pageContext, currentUrl }) {
+function buildSmartAiRequestBody({ settings, pageContext, currentUrl, contentExtraction }) {
   const systemPrompt = [
     '你是浏览器书签智能分类助手。',
     '你需要根据当前网页内容和用户已有书签文件夹，为当前网页推荐保存位置。',
@@ -4232,7 +4237,10 @@ function buildSmartAiRequestBody({ settings, pageContext, currentUrl }) {
       title: getCurrentPageTitle(),
       url: currentUrl,
       domain: extractDomain(currentUrl),
-      page_context: buildPageContextForAi(normalizePageContentContext(pageContext), { mainTextLimit: 4200 })
+      page_context: contentExtraction.buildPageContextForAi(
+        contentExtraction.normalizePageContentContext(pageContext),
+        { mainTextLimit: 4200 }
+      )
     },
     existing_folders: buildSmartFolderCandidates()
   }, null, 2)
@@ -4577,11 +4585,11 @@ function formatPermissionOrigin(origin) {
   return String(origin || '').replace(/\/\*$/, '')
 }
 
-function fetchWithSmartTimeout(url, options = {}, timeoutMs = AI_NAMING_DEFAULT_TIMEOUT_MS) {
+function fetchWithSmartTimeout(url, options = {}, timeoutMs = POPUP_SMART_DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => {
     controller.abort()
-  }, Math.max(1000, Number(timeoutMs) || AI_NAMING_DEFAULT_TIMEOUT_MS))
+  }, Math.max(1000, Number(timeoutMs) || POPUP_SMART_DEFAULT_TIMEOUT_MS))
 
   return fetch(url, {
     ...options,

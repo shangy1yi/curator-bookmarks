@@ -7,7 +7,7 @@
 - 集成分支：`integration/goal-final-polish-20260504`
 - 集成 worktree：`/mnt/g/coding/worktrees/goal-final-polish-20260504`
 - 基线：`main@11582da` / `v1.4.23`
-- 当前集成代码状态：在 `d88164f` 基础上继续追加 popup 自然语言搜索预加载瘦身；报告最新提交以 `git log -1 --oneline` 为准。
+- 当前集成代码状态：在 `0e7bd5c` 基础上继续追加 popup 智能分类模块预加载瘦身；报告最新提交以 `git log -1 --oneline` 为准。
 
 本轮采用多 agent 分支审查与修复流程，覆盖性能、UI、功能、人性化体验、构建安全五个可合并改动方向。主工作区 `/mnt/g/coding/chromebookmark` 保持在 `main@11582da`，未合并到 `main`。
 
@@ -42,6 +42,12 @@
   - 影响：popup 默认关闭自然语言搜索，但首屏 HTML 仍会预加载 `natural-search-*`，增加普通打开成本。
   - 建议：保留搜索主路径，只有用户启用语义搜索并发起查询时再加载自然语言解析模块。
   - 处理：已完成，`natural-search` 改为缓存的动态 import；默认打开 popup 的 Playwright 网络请求未出现 `natural-search-*`。
+
+- [低] 性能：popup 默认打开预加载智能分类专用 AI chunk
+  - 位置：`src/popup/popup.ts`
+  - 影响：普通打开 popup 即使只搜索/管理书签，也会预加载 `content-extraction-*`、`ai-settings-*` 等智能分类专用模块。
+  - 建议：AI 设置归一化、网页内容抽取和 AI prompt 上下文构建只在用户触发智能分类时按需加载。
+  - 处理：已完成，`content-extraction` 和 `ai-settings` 改为缓存的动态 import；构建后 popup 默认 `modulepreload` 不再包含这两个 chunk。
 
 - [高] 功能：标签索引并发写入可能覆盖字段
   - 位置：`src/shared/bookmark-tags.ts`
@@ -124,6 +130,15 @@
    - 严重程度：低
    - 推荐优化方向：将自然语言计划构建、日期过滤、结果合并和 AI plan 归一化改为语义搜索触发后的动态 import；保留状态标签所需的轻量本地格式化。
    - 是否需要 benchmark 或 profile 验证：当前通过构建产物和 Playwright 网络请求验证；后续可用 Chrome Performance 对真实书签规模做冷启动对比。
+   - 处理状态：已修复。
+
+6. popup 默认打开预加载智能分类专用 AI chunk
+   - 问题位置：`src/popup/popup.ts`
+   - 问题描述：popup 静态依赖 AI 设置归一化和网页内容抽取模块，导致默认 HTML 预加载 `content-extraction-*`、`ai-settings-*`，但这些能力只在智能分类路径使用。
+   - 影响范围：每次打开 popup，即使用户只做普通书签搜索、筛选、移动、编辑。
+   - 严重程度：低
+   - 推荐优化方向：将 `content-extraction` 和 `ai-settings` 模块改为智能分类触发后动态 import；在 popup 内保留极小的默认超时和 Jina Reader origin 常量，避免仅为常量拉起大模块。
+   - 是否需要 benchmark 或 profile 验证：当前通过构建产物验证；后续可用 Chrome Performance 对 popup 冷启动做实测。
    - 处理状态：已修复。
 
 ## 四、UI 审查结果
@@ -258,8 +273,8 @@
   - 影响范围：newtab/options/popup UI 与可访问性。
   - 测试方式：`npm test`、`npm run typecheck`
 
-- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、popup 自然语言搜索预加载瘦身提交
-  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索模块改为语义搜索触发后再动态加载，移除首屏非必要运行时预加载。
+- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、popup 智能分类预加载瘦身提交
+  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化改为触发对应功能后再动态加载，移除首屏非必要运行时预加载。
   - 影响范围：`src/popup/popup.css`、`src/popup/popup.ts`、`src/newtab/content-state.ts`、`src/newtab/newtab.ts`、相关测试。
   - 测试方式：focused tests、`npm test`、`npm run validate`、Playwright 产物/搜索冒烟。
 
@@ -275,13 +290,13 @@
 - `npm audit --json`：0 vulnerabilities。
 - `npm run typecheck`：通过。
 - `npm run lint`：通过；当前脚本等价于 `npm run typecheck`。
-- `npm test`：309/309 通过。
+- `npm test`：312/312 通过。
 - `npm run check:version`：通过，版本 `1.4.23`。
 - `npm run build`：通过。
 - `npm run validate`：通过，覆盖 typecheck、test、check:version、build。
 - focused popup 自然语言搜索测试：通过。
-  - `npm run test:build && node --test .tmp-test/tests/popup-search-empty-state.test.js .tmp-test/tests/popup-natural-search.test.js .tmp-test/tests/popup-search.test.js`：26/26 通过。
-  - 覆盖自然语言搜索动态 import 缓存、禁止 popup 运行时静态导入 `natural-search`、AI plan 缓存降级、失效 AI plan 对应结果缓存清理、构建产物不预加载 `natural-search`、自然语言本地解析、普通搜索行为。
+  - `npm run test:build && node --test .tmp-test/tests/popup-search-empty-state.test.js .tmp-test/tests/popup-natural-search.test.js .tmp-test/tests/popup-search.test.js`：29/29 通过。
+  - 覆盖自然语言搜索动态 import 缓存、禁止 popup 运行时静态导入 `natural-search`、AI plan 缓存降级、失效 AI plan 对应结果缓存清理、智能分类模块按需加载、构建产物不预加载 `natural-search`/`content-extraction`/`ai-settings`、自然语言本地解析、普通搜索行为。
 - focused newtab 搜索测试：通过。
   - `node --test .tmp-test/tests/newtab-search-index.test.js .tmp-test/tests/newtab-content-state.test.js`：53/53 通过。
   - 覆盖轻量同步建议缓存、自然语言搜索动态 import、pinyin 动态搜索、无匹配网页搜索 fallback。
@@ -307,10 +322,10 @@
 - dist modulepreload 检查：通过。
   - `dist/src/newtab/newtab.html` 只预加载 Vite 运行时 `modulepreload-polyfill-*` 和启动存储读取所需的 `storage-*`。
   - 未发现 newtab 首屏 `modulepreload` 预加载 `bookmarks-api-*`、`dot-matrix-loader-*`、`motion-*`、`recycle-bin-*`、`bookmark-tags-*`、`search-*`、`natural-search-*` 或 `content-snapshots-*`。
-  - `dist/src/popup/popup.html` 未发现 `natural-search-*` modulepreload；`natural-search-*` 仍作为动态 chunk 生成，供用户启用语义搜索后按需加载。
+  - `dist/src/popup/popup.html` 未发现 `natural-search-*`、`content-extraction-*`、`ai-settings-*` modulepreload；这些模块仍作为动态 chunk 生成，供用户启用语义搜索或智能分类后按需加载。
 - Playwright popup 自然语言搜索加载策略检查：通过。
   - fresh profile 打开 popup，`#popup-app-shell` 可见，无 pageerror/console error。
-  - 默认打开仅加载 popup 正常功能所需资源，实际请求列表未出现 `natural-search-*`。
+  - 默认打开仅加载 popup 正常功能所需资源，实际请求列表未出现 `natural-search-*`、`content-extraction-*`、`ai-settings-*`。
 - Playwright 可访问名称检查：通过。
   - newtab、options dashboard、popup 中可见交互控件均有可访问名称。
   - 未发现可见的无名 `button`、`a[href]`、`input`、`select`、`textarea` 或 `role="button"` 控件。
@@ -339,6 +354,7 @@
 - newtab 启动读书签树使用本页轻量 wrapper，书签写操作按需加载 `bookmarks-api`，避免普通打开和普通搜索预加载低频写操作模块。
 - popup 自然语言搜索模块改为按需加载，避免用户只做普通搜索或默认打开 popup 时预加载 `natural-search`。
 - popup AI plan 失效降级到本地解析时会同步清理旧自然语言搜索结果缓存，避免“本地解析”文案复用旧 AI 查询结果。
+- popup 智能分类的网页内容抽取和 AI 设置归一化改为按需加载，避免默认打开 popup 时预加载 `content-extraction` 和 `ai-settings`。
 
 ## 十、创新了什么功能
 

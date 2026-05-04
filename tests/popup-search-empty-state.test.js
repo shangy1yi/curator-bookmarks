@@ -63,6 +63,33 @@ test('built popup html does not preload natural search chunk', { skip: !existsSy
   assert.doesNotMatch(builtPopupHtml, /<link[^>]+natural-search[^>]+rel="modulepreload"/i)
 })
 
+test('popup smart page extraction is lazy loaded for classification only', () => {
+  assert.match(popupSource, /let contentExtractionModulePromise: Promise<typeof import\('\.\.\/options\/sections\/content-extraction\.js'\)> \| null = null/)
+  assert.match(popupSource, /contentExtractionModulePromise \|\|= import\('\.\.\/options\/sections\/content-extraction\.js'\)/)
+  assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/options\/sections\/content-extraction\.js['"]/m)
+  assert.match(popupSource, /async function buildCurrentPageContext\(currentUrl, settings\)[\s\S]*?const contentExtraction = await loadContentExtractionModule\(\)/)
+  assert.match(popupSource, /async function requestSmartClassification\(\{ settings, pageContext, currentUrl \}\)[\s\S]*?const contentExtraction = await loadContentExtractionModule\(\)/)
+  assert.match(popupSource, /contentExtraction\.buildPageContextForAi\([\s\S]*?contentExtraction\.normalizePageContentContext\(pageContext\)/)
+})
+
+test('popup AI settings normalizer is lazy loaded only when AI features need settings', () => {
+  assert.match(popupSource, /let aiSettingsModulePromise: Promise<typeof import\('\.\.\/options\/sections\/ai-settings\.js'\)> \| null = null/)
+  assert.match(popupSource, /aiSettingsModulePromise \|\|= import\('\.\.\/options\/sections\/ai-settings\.js'\)/)
+  assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/options\/sections\/ai-settings\.js['"]/m)
+  assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/options\/shared-options\/constants\.js['"]/m)
+  assert.match(popupSource, /const \{ normalizeAiNamingSettings \} = await loadAiSettingsModule\(\)/)
+  assert.match(popupSource, /const POPUP_SMART_DEFAULT_TIMEOUT_MS = 30000/)
+  assert.match(popupSource, /const POPUP_JINA_READER_ORIGIN = 'https:\/\/r\.jina\.ai\/\*'/)
+})
+
+test('built popup html does not preload smart page extraction chunk', { skip: !existsSync(resolve(process.cwd(), 'dist/src/popup/popup.html')) }, () => {
+  const builtPopupHtml = readProjectFile('dist/src/popup/popup.html')
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+content-extraction/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+content-extraction[^>]+rel="modulepreload"/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+ai-settings/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+ai-settings[^>]+rel="modulepreload"/i)
+})
+
 test('popup folder pickers expose option and treeitem semantics', () => {
   assert.match(popupHtml, /id="folder-breadcrumbs"[^>]+aria-label="当前文件夹路径"/)
   assert.match(popupSource, /data-folder-breadcrumb-id="\$\{escapeAttr\(segment\.id\)\}"/)
