@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Curator",
   "description": "在本地查询、浏览、移动和删除 Chrome 书签。",
-  "version": "1.4.23",
+  "version": "1.4.24",
   "icons": {
     "16": "src/assets/icon16.png",
     "32": "src/assets/icon32.png",
