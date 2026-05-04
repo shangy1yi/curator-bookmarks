@@ -895,3 +895,18 @@ test('newtab search suggestions explain bookmark enter behavior and empty web se
   assert.match(css, /\.newtab-search-hint\s*\{/)
   assert.match(css, /\.newtab-search-web-hint\s*\{/)
 })
+
+test('newtab search engine menu supports menu radio keyboard navigation', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /engineButton\.setAttribute\('aria-haspopup', 'menu'\)/)
+  assert.match(script, /menu\.setAttribute\('role', 'menu'\)/)
+  assert.match(script, /item\.setAttribute\('role', 'menuitemradio'\)/)
+  assert.match(script, /item\.setAttribute\('aria-checked', String\(engineId === state\.searchSettings\.engine\)\)/)
+  assert.match(script, /item\.tabIndex = -1/)
+  assert.match(script, /const focusEngineMenuItem = \(menu: HTMLElement, direction: 1 \| -1 \| 'first' \| 'last'\)/)
+  assert.match(script, /engineButton\.addEventListener\('keydown', \(event\) => \{[\s\S]*?event\.key !== 'ArrowDown'[\s\S]*?event\.key !== 'ArrowUp'[\s\S]*?renderEngineMenu\(event\.key === 'ArrowDown' \? 'first' : 'last'\)/)
+  assert.match(script, /menu\.addEventListener\('keydown', \(event\) => \{[\s\S]*?event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(script, /if \(event\.key === 'Escape'\) \{[\s\S]*?closeEngineMenu\(\{ restoreFocus: true \}\)/)
+  assert.match(script, /focusEngineMenuItem\(menu, event\.key === 'ArrowDown' \? 1 : -1\)/)
+})

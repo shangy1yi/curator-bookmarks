@@ -3393,13 +3393,38 @@ function createSearchWidget(): HTMLElement | null {
     engineButton.setAttribute('aria-label', `选择搜索引擎，当前为 ${engine?.name || label}`)
   }
 
-  const closeEngineMenu = () => {
+  const closeEngineMenu = ({ restoreFocus = false } = {}) => {
     const existingMenu = slot.querySelector<HTMLElement>('.newtab-search-engine-menu')
     existingMenu?.remove()
     engineButton.setAttribute('aria-expanded', 'false')
+    if (restoreFocus) {
+      engineButton.focus()
+    }
   }
 
-  const renderEngineMenu = () => {
+  const focusEngineMenuItem = (menu: HTMLElement, direction: 1 | -1 | 'first' | 'last') => {
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('.newtab-search-engine-item')]
+    if (!items.length) {
+      return
+    }
+
+    const activeElement = document.activeElement
+    const currentIndex = items.findIndex((item) => item === activeElement)
+    let nextIndex = items.findIndex((item) => item.classList.contains('active'))
+    if (direction === 'first') {
+      nextIndex = 0
+    } else if (direction === 'last') {
+      nextIndex = items.length - 1
+    } else if (currentIndex >= 0) {
+      nextIndex = (currentIndex + direction + items.length) % items.length
+    } else if (nextIndex < 0) {
+      nextIndex = direction > 0 ? 0 : items.length - 1
+    }
+
+    items[Math.max(0, nextIndex)]?.focus()
+  }
+
+  const renderEngineMenu = (initialFocus: 'active' | 'first' | 'last' | 'none' = 'none') => {
     closeEngineMenu()
     const menu = document.createElement('div')
     menu.className = 'newtab-search-engine-menu'
@@ -3417,6 +3442,7 @@ function createSearchWidget(): HTMLElement | null {
       item.type = 'button'
       item.setAttribute('role', 'menuitemradio')
       item.setAttribute('aria-checked', String(engineId === state.searchSettings.engine))
+      item.tabIndex = -1
       item.textContent = engine.name
       item.addEventListener('click', () => {
         state.searchSettings = normalizeSearchSettings({
@@ -3432,12 +3458,42 @@ function createSearchWidget(): HTMLElement | null {
       menu.appendChild(item)
     }
 
+    menu.addEventListener('keydown', (event) => {
+      if (
+        event.key !== 'ArrowDown' &&
+        event.key !== 'ArrowUp' &&
+        event.key !== 'Home' &&
+        event.key !== 'End' &&
+        event.key !== 'Escape'
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      if (event.key === 'Escape') {
+        closeEngineMenu({ restoreFocus: true })
+        return
+      }
+
+      if (event.key === 'Home') {
+        focusEngineMenuItem(menu, 'first')
+      } else if (event.key === 'End') {
+        focusEngineMenuItem(menu, 'last')
+      } else {
+        focusEngineMenuItem(menu, event.key === 'ArrowDown' ? 1 : -1)
+      }
+    })
+
     const hint = document.createElement('div')
     hint.className = 'newtab-search-engine-menu-hint'
     hint.textContent = `Cmd/Ctrl+Enter 打开前 ${SEARCH_MULTI_OPEN_LIMIT} 个启用引擎`
     menu.appendChild(hint)
     slot.appendChild(menu)
     engineButton.setAttribute('aria-expanded', 'true')
+
+    if (initialFocus !== 'none') {
+      focusEngineMenuItem(menu, initialFocus === 'last' ? 'last' : initialFocus === 'first' ? 'first' : 1)
+    }
   }
 
   const separator = document.createElement('span')
@@ -3670,7 +3726,15 @@ function createSearchWidget(): HTMLElement | null {
       closeEngineMenu()
       return
     }
-    renderEngineMenu()
+    renderEngineMenu('active')
+  })
+  engineButton.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return
+    }
+
+    event.preventDefault()
+    renderEngineMenu(event.key === 'ArrowDown' ? 'first' : 'last')
   })
   form.addEventListener('submit', (event) => {
     event.preventDefault()
