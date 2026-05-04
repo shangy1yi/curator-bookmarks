@@ -84,6 +84,23 @@ test('recycle entry controls render bookmark-specific labels', () => {
   assert.match(recycleSource, /data-recycle-clear="\$\{escapeAttr\(entry\.recycleId\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(clearLabel\)\}"/)
 })
 
+test('recycle bulk selection buttons expose recycle-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['recycle-clear-selection', '清空回收站已选书签'],
+    ['recycle-restore-selection', '批量恢复回收站已选书签'],
+    ['recycle-clear-selected', '清除回收站已选记录'],
+    ['recycle-select-all', '全选回收站条目'],
+    ['recycle-clear-all', '清空全部回收站记录']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('serializes recycle bin append and remove operations in one context', async () => {
   const store: Record<string, unknown> = {}
   const writes: unknown[] = []
