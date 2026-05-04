@@ -634,6 +634,18 @@ test('newtab exposes source navigation anchors and a folder source setting switc
   assert.match(css, /\.source-navigation/)
 })
 
+test('newtab folder candidate search exposes a stable accessible name', () => {
+  const html = readProjectFile('src/newtab/newtab.html')
+  const searchInput = html.match(/<input[\s\S]*?id="folder-candidate-search"[\s\S]*?>/)?.[0] || ''
+  const candidateList = html.match(/<div[\s\S]*?id="folder-candidate-list"[\s\S]*?>/)?.[0] || ''
+
+  assert.match(searchInput, /type="search"/)
+  assert.match(searchInput, /aria-label="搜索候选文件夹"/)
+  assert.match(searchInput, /aria-controls="folder-candidate-list"/)
+  assert.match(candidateList, /role="listbox"/)
+  assert.match(candidateList, /aria-multiselectable="true"/)
+})
+
 test('newtab settings drawer layout responds to drawer width', () => {
   const html = readProjectFile('src/newtab/newtab.html')
   const css = readProjectFile('src/newtab/newtab.css')
