@@ -41,17 +41,31 @@ test('newtab settings native controls expose stable accessible names', () => {
   const labelledControls = [
     ['background-type', '背景类型'],
     ['background-url', '背景图片链接'],
+    ['background-mask-blur', '背景蒙版模糊程度'],
     ['background-mask-style', '背景蒙版样式'],
+    ['icon-page-width', '书签卡片页面宽度'],
+    ['icon-tile-width', '书签卡片宽度'],
+    ['icon-shell-size', '书签图标区域尺寸'],
+    ['icon-column-gap', '书签卡片横向间距'],
+    ['icon-row-gap', '书签卡片行距'],
+    ['icon-folder-gap', '书签文件夹间距'],
+    ['icon-columns', '书签卡片固定列数'],
     ['time-display-mode', '时间显示内容'],
     ['time-time-zone', '时区'],
     ['time-date-format', '日期格式'],
     ['time-density', '时间布局密度'],
+    ['time-clock-size', '时间字号'],
     ['search-engine', '默认搜索引擎'],
-    ['search-placeholder', '搜索栏占位符文本']
+    ['search-placeholder', '搜索栏占位符文本'],
+    ['search-width', '搜索栏宽度'],
+    ['search-height', '搜索栏高度'],
+    ['search-offset-y', '搜索栏上下位置'],
+    ['search-background', '搜索栏背景透明度']
   ]
 
   for (const [id, label] of labelledControls) {
     const control = newtabHtml.match(new RegExp(`<(?:input|select)[\\s\\S]*?id="${id}"[\\s\\S]*?>`))?.[0] || ''
+    assert.ok(control, `missing control ${id}`)
     assert.match(control, new RegExp(`aria-label="${label}"`))
   }
 })
