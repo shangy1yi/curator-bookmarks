@@ -42,6 +42,25 @@ function getFunctionBody(source, functionName) {
   assert.fail(`${functionName} body should close`)
 }
 
+test('shortcut and AI provider action buttons expose settings-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['open-shortcuts-settings', '打开 Chrome 扩展快捷键设置'],
+    ['copy-shortcuts-url', '复制 Chrome 扩展快捷键设置地址'],
+    ['refresh-shortcuts', '刷新扩展快捷键绑定状态'],
+    ['ai-fetch-models', '从自定义 AI 渠道获取模型列表'],
+    ['ai-manage-models', '打开自定义模型列表设置'],
+    ['ai-test-connection', '测试自定义 AI 渠道连接'],
+    ['ai-save-settings', '保存自定义 AI 渠道设置']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('options folder listbox options expose role and aria-selected state', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const optionsSource = readProjectFile('src/options/options.ts')
