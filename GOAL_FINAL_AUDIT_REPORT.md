@@ -259,6 +259,10 @@
 - Playwright 跨视口检查：通过。
   - 1280x900 和 390x844 下，newtab、options dashboard、popup 根节点均可见。
   - 修复后 popup 在 390px 窄视口下 `scrollWidth === clientWidth`，无横向溢出。
+- 安全静态审查：通过。
+  - 构建后的 newtab/options/popup HTML 未发现 `http(s)` 外部 `src`/`href` 资源引用。
+  - 未发现 `eval`、`new Function`、`document.write`、`srcdoc` 等高风险动态执行模式。
+  - 对动态 `innerHTML` 的插值点进行了抽样审查，未发现未转义用户内容直接注入的新问题。
 
 ## 九、优化了哪些项目
 
