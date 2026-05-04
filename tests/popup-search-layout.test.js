@@ -59,3 +59,20 @@ test('snapshot-only auto analysis completion stays silent in popup and action ba
     /if \(!shouldUploadToAi\) \{[\s\S]*?await clearAutoAnalyzeStatusForBookmark\(bookmarkId\)[\s\S]*?return[\s\S]*?\}/
   )
 })
+
+test('popup search and modal inputs keep visible keyboard focus rings', () => {
+  const popupCss = readProjectFile('src/popup/popup.css')
+
+  assert.match(
+    popupCss,
+    /\.search-shell:focus-within\s*\{[\s\S]*?box-shadow:\s*[\s\S]*?0 0 0 2px rgba\(255,\s*255,\s*255,\s*0\.2\)[\s\S]*?0 0 0 4px rgba\(0,\s*0,\s*0,\s*0\.48\)/
+  )
+  assert.match(
+    popupCss,
+    /\.modal-search:focus-within\s*\{[\s\S]*?0 0 0 2px rgba\(255,\s*255,\s*255,\s*0\.24\)[\s\S]*?0 0 0 4px rgba\(0,\s*0,\s*0,\s*0\.54\)/
+  )
+  assert.match(
+    popupCss,
+    /\.modal-card:focus-visible,\s*\.modal-input:focus-visible\s*\{[\s\S]*?outline:\s*2px solid rgba\(245,\s*245,\s*247,\s*0\.86\)/
+  )
+})

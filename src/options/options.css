@@ -2672,7 +2672,8 @@ a {
 }
 
 .dashboard-tag-editor-field textarea:focus-visible {
-  outline: none;
+  outline: 2px solid rgba(245, 245, 247, 0.76);
+  outline-offset: 2px;
   border-color: rgba(245, 245, 247, 0.22);
 }
 
@@ -2682,6 +2683,10 @@ a {
   font-size: 12px;
   font-weight: 620;
   line-height: 1.5;
+}
+
+.dashboard-tag-editor-status {
+  min-height: 18px;
 }
 
 .dashboard-tag-editor-actions {
@@ -2925,8 +2930,8 @@ body.dashboard-fullscreen-active {
 }
 
 .dashboard-fullscreen-active .dashboard-panel {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-height: 100vh;
   max-height: 100vh;
   overflow: hidden;
@@ -2947,6 +2952,7 @@ body.dashboard-fullscreen-active {
   flex: 0 0 auto;
   gap: 8px;
   margin-top: 0;
+  min-width: 0;
 }
 
 .dashboard-fullscreen-active .options-section-label,
@@ -5842,11 +5848,11 @@ body.dashboard-fullscreen-active {
 
 .dashboard-fullscreen-active .dashboard-panel .dashboard-toolbar {
   grid-template-columns: minmax(0, 640px) auto;
-  justify-content: center;
+  justify-content: start;
   align-items: center;
   gap: 12px;
   width: min(100%, 820px);
-  margin: -52px auto 0;
+  margin: 8px 0 0;
   padding: 0;
 }
 

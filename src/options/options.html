@@ -529,7 +529,7 @@
               <div id="dashboard-drag-preview" class="dashboard-drag-preview" aria-hidden="true"></div>
             </div>
 
-            <div id="dashboard-tag-editor" class="dashboard-tag-editor hidden" role="dialog" aria-modal="false" aria-labelledby="dashboard-tag-editor-title" data-dashboard-no-drag>
+            <div id="dashboard-tag-editor" class="dashboard-tag-editor hidden" role="dialog" aria-modal="false" aria-labelledby="dashboard-tag-editor-title" aria-describedby="dashboard-tag-editor-help dashboard-tag-editor-status" data-dashboard-no-drag>
               <div class="dashboard-tag-editor-panel" tabindex="-1">
                 <div class="dashboard-tag-editor-head">
                   <div>
@@ -542,8 +542,8 @@
                   <span>标签</span>
                   <textarea id="dashboard-tag-editor-input" rows="5" placeholder="用逗号、顿号或换行分隔标签"></textarea>
                 </label>
-                <p class="dashboard-tag-editor-help">每行一个标签，也可以用逗号、顿号分隔；保存后会自动去重。</p>
-                <p id="dashboard-tag-editor-status" class="detect-results-subtitle"></p>
+                <p id="dashboard-tag-editor-help" class="dashboard-tag-editor-help">每行一个标签，也可以用逗号、顿号分隔；保存后会自动去重。</p>
+                <p id="dashboard-tag-editor-status" class="detect-results-subtitle dashboard-tag-editor-status" role="status" aria-live="polite" aria-atomic="true"></p>
                 <div class="dashboard-tag-editor-actions">
                   <button id="dashboard-tag-editor-clear-ai" class="options-button secondary small" type="button" data-dashboard-action="clear-ai-tags">清除 AI 标签</button>
                   <button id="dashboard-tag-editor-regenerate-ai" class="options-button secondary small" type="button" data-dashboard-action="regenerate-ai-tags">重新生成 AI 标签</button>

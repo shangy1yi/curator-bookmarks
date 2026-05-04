@@ -22,6 +22,26 @@ function getVerticalPadding(rule) {
   }
 }
 
+function getFunctionBody(source, functionName) {
+  const start = source.indexOf(`function ${functionName}`)
+  assert.ok(start >= 0, `${functionName} should exist`)
+  const bodyStart = source.indexOf('{', start)
+  assert.ok(bodyStart >= 0, `${functionName} should have a body`)
+  let depth = 0
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index]
+    if (char === '{') {
+      depth += 1
+    } else if (char === '}') {
+      depth -= 1
+      if (depth === 0) {
+        return source.slice(bodyStart + 1, index)
+      }
+    }
+  }
+  assert.fail(`${functionName} body should close`)
+}
+
 test('options folder listbox options expose role and aria-selected state', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const optionsSource = readProjectFile('src/options/options.ts')
@@ -182,8 +202,13 @@ test('dashboard fullscreen uses the compact top spacing for panel and toolbar', 
   assert.ok(panelPadding.top < 26, 'fullscreen dashboard panel top padding should be tighter than the old value')
   assert.match(
     optionsCss,
-    /\.dashboard-fullscreen-active\s+\.dashboard-panel\s+\.dashboard-toolbar\s*\{[\s\S]*?justify-content:\s*center[\s\S]*?width:\s*min\(100%,\s*820px\)[\s\S]*?margin:\s*-52px\s+auto\s+0/
+    /\.dashboard-fullscreen-active\s+\.dashboard-panel\s*\{[\s\S]*?display:\s*grid[\s\S]*?grid-template-rows:\s*auto\s+auto\s+auto\s+minmax\(0,\s*1fr\)/
   )
+  assert.match(
+    optionsCss,
+    /\.dashboard-fullscreen-active\s+\.dashboard-panel\s+\.dashboard-toolbar\s*\{[\s\S]*?justify-content:\s*start[\s\S]*?width:\s*min\(100%,\s*820px\)[\s\S]*?margin:\s*8px\s+0\s+0/
+  )
+  assert.doesNotMatch(optionsCss, /\.dashboard-fullscreen-active\s+\.dashboard-panel\s+\.dashboard-toolbar\s*\{[\s\S]*?margin:\s*-52px/)
   assert.match(
     optionsCss,
     /\.dashboard-fullscreen-active\s+\.dashboard-panel\s+\.detect-selection-group\s*\{[\s\S]*?width:\s*min\(100%,\s*820px\)[\s\S]*?backdrop-filter:\s*blur/
@@ -196,12 +221,15 @@ test('dashboard tag editor and tag popover have dialog semantics and keyboard pa
   const optionsSource = readProjectFile('src/options/options.ts')
 
   assert.match(optionsHtml, /id="dashboard-tag-editor"[^>]+role="dialog"[^>]+aria-modal="false"/)
+  assert.match(optionsHtml, /id="dashboard-tag-editor"[^>]+aria-describedby="dashboard-tag-editor-help dashboard-tag-editor-status"/)
+  assert.match(optionsHtml, /id="dashboard-tag-editor-status"[^>]+role="status"[^>]+aria-live="polite"[^>]+aria-atomic="true"/)
   assert.match(dashboardSource, /dashboard-tag-popover[^`]+role="dialog"[^`]+aria-modal="false"/)
   assert.match(dashboardSource, /export function handleDashboardKeydown/)
   assert.match(dashboardSource, /event\.key === 'Escape'[\s\S]*?closeDashboardTagEditor\(\)/)
   assert.match(dashboardSource, /event\.key === 'Enter'[\s\S]*?saveDashboardTagEditor\(\)/)
   assert.match(dashboardSource, /restoreDashboardTagEditorFocus/)
   assert.match(optionsSource, /addEventListener\('keydown', handleDashboardKeydown\)/)
+  assert.doesNotMatch(getFunctionBody(dashboardSource, 'handleDashboardDocumentFocusIn'), /closeDashboardTagEditor\(\)/)
 })
 
 test('dashboard folder filtering exposes clickable breadcrumbs', () => {

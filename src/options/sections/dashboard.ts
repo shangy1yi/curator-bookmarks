@@ -580,6 +580,9 @@ export async function handleDashboardClick(event: Event, callbacks: DashboardCal
     } else if (action === 'move-one') {
       const bookmarkId = String(actionButton.getAttribute('data-dashboard-bookmark-id') || '').trim()
       moveSingleDashboardItem(bookmarkId, callbacks)
+    } else if (action === 'delete-one') {
+      const bookmarkId = String(actionButton.getAttribute('data-dashboard-bookmark-id') || '').trim()
+      await deleteDashboardBookmarkFromCard(bookmarkId, callbacks)
     } else if (action === 'exit-dashboard') {
       if (callbacks.exitDashboard) {
         callbacks.exitDashboard()
@@ -669,13 +672,6 @@ export function handleDashboardDocumentClick(event: MouseEvent): void {
 }
 
 export function handleDashboardDocumentFocusIn(event: FocusEvent): void {
-  if (dashboardState.tagEditorBookmarkId && !isDashboardTagEditorEvent(event)) {
-    if (!dashboardState.tagEditorSaving) {
-      closeDashboardTagEditor()
-    }
-    return
-  }
-
   if (!dashboardState.expandedTagIds.size) {
     return
   }
@@ -1111,6 +1107,33 @@ async function deleteDashboardBookmarkFromDrop(
   bookmarkId: string,
   callbacks: DashboardCallbacks
 ): Promise<void> {
+  await deleteDashboardBookmark(bookmarkId, callbacks, {
+    reason: '书签仪表盘拖拽删除',
+    cancelledStatus: '已取消删除。'
+  })
+}
+
+async function deleteDashboardBookmarkFromCard(
+  bookmarkId: string,
+  callbacks: DashboardCallbacks
+): Promise<void> {
+  await deleteDashboardBookmark(bookmarkId, callbacks, {
+    reason: '书签仪表盘卡片删除',
+    cancelledStatus: '已取消删除。'
+  })
+}
+
+async function deleteDashboardBookmark(
+  bookmarkId: string,
+  callbacks: DashboardCallbacks,
+  {
+    reason,
+    cancelledStatus
+  }: {
+    reason: string
+    cancelledStatus: string
+  }
+): Promise<void> {
   const bookmark = availabilityState.bookmarkMap.get(String(bookmarkId))
   if (!bookmark?.url) {
     setDashboardStatus('删除失败：书签不存在。')
@@ -1125,12 +1148,12 @@ async function deleteDashboardBookmarkFromDrop(
     tone: 'danger'
   })
   if (!confirmed) {
-    setDashboardStatus('已取消删除。')
+    setDashboardStatus(cancelledStatus)
     return
   }
 
   dashboardState.selectedIds.delete(String(bookmarkId))
-  await deleteBookmarksToRecycle([bookmarkId], '书签仪表盘拖拽删除', callbacks.recycleCallbacks)
+  await deleteBookmarksToRecycle([bookmarkId], reason, callbacks.recycleCallbacks)
   setDashboardStatus(
     availabilityState.bookmarkMap.has(String(bookmarkId))
       ? (availabilityState.lastError || '删除失败，请稍后重试。')
@@ -2349,6 +2372,14 @@ function buildDashboardCard(item: DashboardItem): string {
             data-dashboard-no-drag
             ${availabilityState.deleting ? 'disabled' : ''}
           >移动</button>
+          <button
+            class="detect-result-action danger"
+            type="button"
+            data-dashboard-action="delete-one"
+            data-dashboard-bookmark-id="${escapeAttr(item.id)}"
+            data-dashboard-no-drag
+            ${availabilityState.deleting ? 'disabled' : ''}
+          >删除</button>
         </div>
         <label class="dashboard-card-check" data-dashboard-no-drag>
           <input

@@ -40,3 +40,12 @@ test('dashboard selection checkbox renders the specific accessible name', () => 
   assert.match(dashboardSource, /<span class="sr-only">\$\{escapeHtml\(selectionLabel\)\}<\/span>/)
   assert.doesNotMatch(dashboardSource, /<span class="sr-only">选择<\/span>/)
 })
+
+test('dashboard cards expose keyboard-triggerable move and delete actions', () => {
+  const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
+
+  assert.match(dashboardSource, /data-dashboard-action="move-one"[\s\S]*?>移动<\/button>/)
+  assert.match(dashboardSource, /data-dashboard-action="delete-one"[\s\S]*?>删除<\/button>/)
+  assert.match(dashboardSource, /action === 'delete-one'[\s\S]*?deleteDashboardBookmarkFromCard/)
+  assert.match(dashboardSource, /async function deleteDashboardBookmarkFromCard/)
+})
