@@ -1101,6 +1101,7 @@ function openSettingsDrawer(options?: { focusFirstControl?: boolean }): void {
   settingsDrawer?.classList.add('open')
   settingsBackdrop?.classList.add('open')
   settingsDrawer?.setAttribute('aria-hidden', 'false')
+  settingsDrawer?.removeAttribute('inert')
   settingsTrigger?.setAttribute('aria-expanded', 'true')
   document.body.classList.add('settings-open')
   if (focusFirstControl) {
@@ -1136,6 +1137,7 @@ function closeSettingsDrawer(): void {
   settingsDrawer?.classList.add('is-closing')
   settingsBackdrop?.classList.add('is-closing')
   settingsDrawer?.setAttribute('aria-hidden', 'true')
+  settingsDrawer?.setAttribute('inert', '')
   settingsTrigger?.setAttribute('aria-expanded', 'false')
   document.body.classList.remove('settings-open')
   window.setTimeout(() => {
