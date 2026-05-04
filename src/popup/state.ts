@@ -69,6 +69,7 @@ export interface PopupState {
   viewNoticeTimer: number | null
   isFilterPickerOpen: boolean
   filterSearchQuery: string
+  filterFolderActiveId: string
   searchResults: PopupSearchResult[]
   activeResultIndex: number
   searchTimer: number | null
@@ -149,6 +150,7 @@ export const state: PopupState = {
   viewNoticeTimer: null,
   isFilterPickerOpen: false,
   filterSearchQuery: '',
+  filterFolderActiveId: '',
   searchResults: [],
   activeResultIndex: 0,
   searchTimer: null,

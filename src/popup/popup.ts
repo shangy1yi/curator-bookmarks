@@ -242,10 +242,14 @@ function bindEvents() {
   dom.content.addEventListener('pointerover', handleContentPointerOver)
   dom.folderBreadcrumbs.addEventListener('click', handlePopupBreadcrumbClick)
   dom.filterFolderList.addEventListener('click', handleFilterListClick)
+  dom.filterFolderList.addEventListener('keydown', handleFilterListKeydown)
+  dom.filterFolderList.addEventListener('focusin', handleFilterListFocus)
   dom.filterSearchInput.addEventListener('input', () => {
     state.filterSearchQuery = dom.filterSearchInput.value
+    state.filterFolderActiveId = ''
     renderFilterModal()
   })
+  dom.filterSearchInput.addEventListener('keydown', handleFilterSearchKeydown)
   dom.closeFilterModal.addEventListener('click', closeDialogs)
   dom.moveFolderList.addEventListener('click', handleMoveListClick)
   dom.moveSearchInput.addEventListener('input', () => {
@@ -2307,9 +2311,11 @@ function renderFilterFolderList() {
       })
     : state.allFolders
 
+  const activeId = resolveFilterFolderActiveId(folders)
   const folderItems = folders
     .map((folder) => {
       const isSelected = state.selectedFolderFilterId === folder.id
+      const isActive = folder.id === activeId
       const folderPath = formatFolderPath(folder, state.folderMap) || folder.title || '未命名文件夹'
       return `
         <button
@@ -2318,6 +2324,7 @@ function renderFilterFolderList() {
           role="option"
           aria-selected="${isSelected ? 'true' : 'false'}"
           data-select-filter-folder="${escapeAttr(folder.id)}"
+          tabindex="${isActive ? '0' : '-1'}"
           title="${escapeAttr(folder.path)}"
         >
           <span class="folder-kind" aria-hidden="true"></span>
@@ -2695,7 +2702,130 @@ function handleFilterListClick(event) {
   }
 
   const folderId = filterButton.getAttribute('data-select-filter-folder')
+  state.filterFolderActiveId = String(folderId || '')
   applyFolderFilter(folderId === 'all' ? null : folderId)
+}
+
+function handleFilterSearchKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  if (!getFilterFolderOptionButtons().length) {
+    return
+  }
+
+  event.preventDefault()
+  focusFilterFolderOption(event.key === 'ArrowDown' ? 'first' : 'last')
+}
+
+function handleFilterListKeydown(event) {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    dom.filterSearchInput.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusFilterFolderOption('first')
+  } else if (event.key === 'End') {
+    focusFilterFolderOption('last')
+  } else {
+    focusFilterFolderOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function handleFilterListFocus(event) {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.dataset.selectFilterFolder) {
+    return
+  }
+
+  state.filterFolderActiveId = target.dataset.selectFilterFolder
+  syncFilterFolderTabStops(state.filterFolderActiveId)
+}
+
+function getFilterFolderOptionButtons() {
+  return [...dom.filterFolderList.querySelectorAll<HTMLButtonElement>('[data-select-filter-folder]')]
+}
+
+function resolveFilterFolderActiveId(folders) {
+  if (!folders.length) {
+    state.filterFolderActiveId = ''
+    return ''
+  }
+
+  const selectedId = state.selectedFolderFilterId || ''
+  const activeId = folders.some((folder) => folder.id === state.filterFolderActiveId)
+    ? state.filterFolderActiveId
+    : folders.some((folder) => folder.id === selectedId)
+      ? selectedId
+      : folders[0]?.id || ''
+  state.filterFolderActiveId = activeId
+  return activeId
+}
+
+function syncFilterFolderTabStops(activeId) {
+  for (const button of getFilterFolderOptionButtons()) {
+    button.tabIndex = button.dataset.selectFilterFolder === activeId ? 0 : -1
+  }
+}
+
+function focusFilterFolderOptionById(folderId) {
+  let targetButton = null
+  for (const button of getFilterFolderOptionButtons()) {
+    const isTarget = button.dataset.selectFilterFolder === folderId
+    button.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = button
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  state.filterFolderActiveId = folderId
+  targetButton.focus()
+  return true
+}
+
+function focusFilterFolderOption(direction) {
+  const buttons = getFilterFolderOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  let nextIndex = state.filterFolderActiveId
+    ? buttons.findIndex((button) => button.dataset.selectFilterFolder === state.filterFolderActiveId)
+    : -1
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  const folderId = String(button?.dataset.selectFilterFolder || '')
+  if (folderId) {
+    focusFilterFolderOptionById(folderId)
+  }
 }
 
 function handleMoveListClick(event) {
