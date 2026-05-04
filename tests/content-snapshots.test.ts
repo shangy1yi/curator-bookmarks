@@ -5,6 +5,8 @@ import {
   buildContentSnapshotRecord,
   buildContentSnapshotSearchText,
   normalizeContentSnapshotSettings,
+  normalizeContentSnapshotIndex,
+  removeContentSnapshotForBookmark,
   saveContentSnapshotFromContext,
   setContentFullTextOperationsForTest
 } from '../src/shared/content-snapshots.js'
@@ -145,3 +147,95 @@ test('content snapshot cleans up IndexedDB full text when local index write fail
     delete (globalThis as any).chrome
   }
 })
+
+test('content snapshot removal deletes index record and IndexedDB full text ref', async () => {
+  const deletedSnapshotIds: string[] = []
+  const restoreFullTextOperations = setContentFullTextOperationsForTest({
+    delete: async (snapshotId: string) => {
+      deletedSnapshotIds.push(snapshotId)
+    }
+  })
+  const store: Record<string, unknown> = {
+    [STORAGE_KEYS.contentSnapshotIndex]: {
+      version: 1,
+      updatedAt: 100,
+      records: {
+        '42': {
+          snapshotId: 'snapshot-42-100',
+          bookmarkId: '42',
+          url: 'https://react.dev/learn',
+          title: 'React 文档',
+          summary: 'React snapshot',
+          headings: [],
+          canonicalUrl: '',
+          finalUrl: 'https://react.dev/learn',
+          contentType: 'article',
+          source: 'html',
+          extractionStatus: 'ok',
+          extractedAt: 100,
+          hasFullText: true,
+          fullTextBytes: CONTENT_SNAPSHOT_LOCAL_TEXT_LIMIT + 1,
+          fullTextStorage: 'idb',
+          fullTextRef: 'snapshot-42-100',
+          warnings: []
+        },
+        '43': {
+          snapshotId: 'snapshot-43-100',
+          bookmarkId: '43',
+          url: 'https://example.com',
+          title: 'Example',
+          summary: 'Example snapshot',
+          headings: [],
+          canonicalUrl: '',
+          finalUrl: 'https://example.com',
+          contentType: 'article',
+          source: 'html',
+          extractionStatus: 'ok',
+          extractedAt: 100,
+          hasFullText: false,
+          fullTextBytes: 0,
+          fullTextStorage: 'none',
+          warnings: []
+        }
+      }
+    }
+  }
+  ;(globalThis as any).chrome = createStorageMock(store)
+
+  try {
+    const removed = await removeContentSnapshotForBookmark('42', 200)
+    const index = normalizeContentSnapshotIndex(store[STORAGE_KEYS.contentSnapshotIndex])
+
+    assert.equal(removed, true)
+    assert.equal(index.updatedAt, 200)
+    assert.equal(index.records['42'], undefined)
+    assert.equal(index.records['43']?.snapshotId, 'snapshot-43-100')
+    assert.deepEqual(deletedSnapshotIds, ['snapshot-42-100'])
+  } finally {
+    restoreFullTextOperations()
+    delete (globalThis as any).chrome
+  }
+})
+
+function createStorageMock(store: Record<string, unknown>) {
+  return {
+    storage: {
+      local: {
+        get(keys: string[], callback: (items: Record<string, unknown>) => void) {
+          const snapshot: Record<string, unknown> = {}
+          for (const key of keys) {
+            snapshot[key] = store[key]
+          }
+          setTimeout(() => callback(snapshot), 0)
+        },
+        set(payload: Record<string, unknown>, callback: () => void) {
+          setTimeout(() => {
+            Object.assign(store, payload)
+            callback()
+          }, 0)
+        }
+      }
+    },
+    runtime: {}
+  }
+}

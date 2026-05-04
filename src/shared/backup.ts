@@ -336,13 +336,17 @@ export async function restoreCuratorBackup(
   }
 
   if (mode === 'safeFull') {
+    const currentAiSettings = (await getLocalStorage([STORAGE_KEYS.aiProviderSettings]))[STORAGE_KEYS.aiProviderSettings]
     const localPayload: Record<string, unknown> = {
       [STORAGE_KEYS.recycleBin]: backup.storage.recycleBin,
       [STORAGE_KEYS.ignoreRules]: backup.storage.ignoreRules,
       [STORAGE_KEYS.redirectCache]: backup.storage.redirectCache,
       [STORAGE_KEYS.popupPreferences]: backup.storage.popupPreferences
     }
-    localPayload[STORAGE_KEYS.aiProviderSettings] = redactAiProviderSettings(backup.storage.aiProviderSettings)
+    localPayload[STORAGE_KEYS.aiProviderSettings] = mergeRestoredAiProviderSettings(
+      currentAiSettings,
+      backup.storage.aiProviderSettings
+    )
     await setLocalStorage(localPayload)
     result.restored.storageSections = Object.keys(localPayload).length
 
@@ -476,12 +480,14 @@ function buildNewTabStoragePayload(newTab: Record<string, unknown>): Record<stri
 
 async function copyMissingBookmarksToRestoreFolder(
   backup: CuratorBackupFileV1,
-  currentBookmarks: Array<{ url: string }>
+  currentBookmarks: Array<{ url: string; path?: string }>
 ): Promise<{ copied: number; skipped: number }> {
-  const currentUrls = new Set(currentBookmarks.map((bookmark) => normalizeBookmarkTagUrl(bookmark.url)))
+  const knownInstances = new Set(
+    currentBookmarks.map((bookmark) => buildBookmarkInstanceKey(bookmark.url, bookmark.path || ''))
+  )
   const rootChildren = backup.chromeBookmarks.tree.flatMap((node) => node.children || [])
-  const missingCount = extractBackupBookmarkNodes(backup.chromeBookmarks.tree)
-    .filter((node) => node.url && !currentUrls.has(normalizeBookmarkTagUrl(node.url)))
+  const missingCount = extractBackupBookmarkInstances(backup.chromeBookmarks.tree)
+    .filter((instance) => !knownInstances.has(buildBookmarkInstanceKey(instance.url, instance.path)))
     .length
 
   if (!missingCount) {
@@ -496,7 +502,7 @@ async function copyMissingBookmarksToRestoreFolder(
   let skipped = 0
 
   for (const child of rootChildren) {
-    const result = await copyMissingNode(child, String(restoreFolder.id), currentUrls)
+    const result = await copyMissingNode(child, String(restoreFolder.id), knownInstances, '')
     copied += result.copied
     skipped += result.skipped
   }
@@ -507,11 +513,12 @@ async function copyMissingBookmarksToRestoreFolder(
 async function copyMissingNode(
   node: chrome.bookmarks.BookmarkTreeNode,
   parentId: string,
-  currentUrls: Set<string>
+  knownInstances: Set<string>,
+  folderPath: string
 ): Promise<{ copied: number; skipped: number }> {
   if (node.url) {
-    const normalizedUrl = normalizeBookmarkTagUrl(node.url)
-    if (currentUrls.has(normalizedUrl)) {
+    const instanceKey = buildBookmarkInstanceKey(node.url, folderPath)
+    if (knownInstances.has(instanceKey)) {
       return { copied: 0, skipped: 1 }
     }
     await createBookmark({
@@ -519,12 +526,13 @@ async function copyMissingNode(
       title: node.title || node.url,
       url: node.url
     })
-    currentUrls.add(normalizedUrl)
+    knownInstances.add(instanceKey)
     return { copied: 1, skipped: 0 }
   }
 
   const children = node.children || []
-  if (!children.some((child) => nodeHasMissingBookmark(child, currentUrls))) {
+  const nextFolderPath = buildChildFolderPath(folderPath, node.title)
+  if (!children.some((child) => nodeHasMissingBookmark(child, knownInstances, nextFolderPath))) {
     return { copied: 0, skipped: children.length }
   }
 
@@ -538,7 +546,7 @@ async function copyMissingNode(
         title: node.title || '未命名文件夹'
       })
     }
-    const result = await copyMissingNode(child, String(folder.id), currentUrls)
+    const result = await copyMissingNode(child, String(folder.id), knownInstances, nextFolderPath)
     copied += result.copied
     skipped += result.skipped
   }
@@ -547,12 +555,14 @@ async function copyMissingNode(
 
 function nodeHasMissingBookmark(
   node: chrome.bookmarks.BookmarkTreeNode,
-  currentUrls: Set<string>
+  knownInstances: Set<string>,
+  folderPath: string
 ): boolean {
   if (node.url) {
-    return !currentUrls.has(normalizeBookmarkTagUrl(node.url))
+    return !knownInstances.has(buildBookmarkInstanceKey(node.url, folderPath))
   }
-  return (node.children || []).some((child) => nodeHasMissingBookmark(child, currentUrls))
+  const nextFolderPath = buildChildFolderPath(folderPath, node.title)
+  return (node.children || []).some((child) => nodeHasMissingBookmark(child, knownInstances, nextFolderPath))
 }
 
 function extractBackupBookmarkNodes(tree: chrome.bookmarks.BookmarkTreeNode[]): chrome.bookmarks.BookmarkTreeNode[] {
@@ -564,6 +574,29 @@ function extractBackupBookmarkNodes(tree: chrome.bookmarks.BookmarkTreeNode[]): 
     }
   }
   tree.forEach(visit)
+  return output
+}
+
+function extractBackupBookmarkInstances(tree: chrome.bookmarks.BookmarkTreeNode[]): Array<{ url: string; path: string }> {
+  const output: Array<{ url: string; path: string }> = []
+  const visit = (node: chrome.bookmarks.BookmarkTreeNode, folderPath = '') => {
+    if (node.url) {
+      output.push({
+        url: node.url,
+        path: folderPath
+      })
+      return
+    }
+    const nextFolderPath = buildChildFolderPath(folderPath, node.title)
+    for (const child of node.children || []) {
+      visit(child, nextFolderPath)
+    }
+  }
+  for (const root of tree) {
+    for (const child of root.children || []) {
+      visit(child, '')
+    }
+  }
   return output
 }
 
@@ -619,6 +652,32 @@ function estimateJsonSizeBytes(value: unknown): number {
     return new TextEncoder().encode(json).length
   }
   return json.length
+}
+
+function mergeRestoredAiProviderSettings(currentSettings: unknown, backupSettings: unknown): Record<string, unknown> {
+  const current = normalizeObject(currentSettings)
+  const safeBackupSettings = redactAiProviderSettings(backupSettings)
+  const { apiKeyRedacted: _apiKeyRedacted, ...backupSafeFields } = safeBackupSettings
+  return {
+    ...current,
+    ...backupSafeFields
+  }
+}
+
+function buildChildFolderPath(parentPath: string, title: unknown): string {
+  const segment = String(title || '').trim()
+  if (!segment) {
+    return parentPath
+  }
+  return parentPath ? `${parentPath} / ${segment}` : segment
+}
+
+function buildBookmarkInstanceKey(url: string, path: string): string {
+  return `${normalizeBookmarkTagUrl(url)}\n${normalizePathKey(path)}`
+}
+
+function normalizePathKey(path: string): string {
+  return String(path || '').replace(/\s*\/\s*/g, ' / ').replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
 function openAutoBackupDb(): Promise<IDBDatabase> {

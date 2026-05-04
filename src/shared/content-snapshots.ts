@@ -187,6 +187,39 @@ export async function saveContentSnapshotFromContext({
   }
 }
 
+export async function removeContentSnapshotForBookmark(bookmarkId: string, now = Date.now()): Promise<boolean> {
+  const normalizedBookmarkId = String(bookmarkId || '').trim()
+  if (!normalizedBookmarkId) {
+    return false
+  }
+
+  let deletedFullTextRef = ''
+  let removed = false
+  await updateContentSnapshotIndex((index) => {
+    const existing = index.records[normalizedBookmarkId] || null
+    if (!existing) {
+      return index
+    }
+
+    if (existing.fullTextStorage === 'idb' && existing.fullTextRef) {
+      deletedFullTextRef = existing.fullTextRef
+    }
+    const records = { ...index.records }
+    delete records[normalizedBookmarkId]
+    removed = true
+    return {
+      version: 1,
+      updatedAt: now,
+      records
+    }
+  })
+
+  if (deletedFullTextRef) {
+    await contentFullTextOperations.delete(deletedFullTextRef).catch(() => {})
+  }
+  return removed
+}
+
 function updateContentSnapshotIndex(
   updater: (index: ContentSnapshotIndex) => ContentSnapshotIndex
 ): Promise<ContentSnapshotIndex> {

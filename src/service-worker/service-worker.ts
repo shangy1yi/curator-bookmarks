@@ -67,6 +67,7 @@ import {
 } from '../options/sections/content-extraction.js'
 import {
   loadContentSnapshotSettings,
+  removeContentSnapshotForBookmark,
   saveContentSnapshotFromContext
 } from '../shared/content-snapshots.js'
 import { shouldReuseBookmarkForSave } from './save-guards.js'
@@ -662,6 +663,9 @@ chrome.bookmarks.onCreated.addListener((bookmarkId, node) => {
 chrome.bookmarks.onRemoved.addListener((bookmarkId) => {
   removeBookmarkTagRecord(bookmarkId).catch((error) => {
     console.warn('[Curator] 标签记录清理失败', error)
+  })
+  removeContentSnapshotForBookmark(bookmarkId).catch((error) => {
+    console.warn('[Curator] 网页快照清理失败', error)
   })
 })
 
