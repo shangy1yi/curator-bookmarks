@@ -19,9 +19,13 @@ import { createAutoBackupBeforeDangerousOperation } from '../../shared/backup.js
 import { renderDotMatrixLoader } from '../../shared/dot-matrix-loader.js'
 import { cancelExitMotion, closeWithExitMotion } from '../../shared/motion.js'
 import { parseSearchQuery } from '../../shared/search-query.js'
-import type { ContentSnapshotIndex } from '../../shared/content-snapshots.js'
+import {
+  buildContentSnapshotSearchMapWithFullText,
+  type ContentSnapshotIndex
+} from '../../shared/content-snapshots.js'
 import { BOOKMARKS_BAR_ID } from '../../shared/constants.js'
 import {
+  buildDashboardFolderBookmarkCounts,
   buildDashboardModel,
   filterDashboardItems,
   sortDashboardItems,
@@ -104,6 +108,12 @@ interface DashboardRenderCache {
   visibleMonth: string
   visibleSortKey: DashboardSortKey
   visibleItems: DashboardItem[] | null
+  folderCountsModel: DashboardModel | null
+  folderBookmarkCounts: Map<string, number> | null
+  sidebarModel: DashboardModel | null
+  sidebarSelectedFolderId: string
+  sidebarMarkup: string
+  sidebarTotalFolders: number
 }
 
 interface DashboardCallbacks {
@@ -148,7 +158,13 @@ const dashboardRenderCache: DashboardRenderCache = {
   visibleDomain: '',
   visibleMonth: '',
   visibleSortKey: 'date-desc',
-  visibleItems: null
+  visibleItems: null,
+  folderCountsModel: null,
+  folderBookmarkCounts: null,
+  sidebarModel: null,
+  sidebarSelectedFolderId: '',
+  sidebarMarkup: '',
+  sidebarTotalFolders: -1
 }
 
 const virtualState: DashboardVirtualState = {
@@ -494,6 +510,7 @@ export function handleDashboardInput(event: Event): void {
   }
 
   dashboardState.query = target.value
+  ensureDashboardFullTextSearchMapForQuery()
   markDashboardVirtualFilterChange('query')
   scheduleDashboardSectionRender()
 }
@@ -1339,7 +1356,41 @@ function getCachedDashboardModel({
   dashboardRenderCache.model = model
   dashboardRenderCache.visibleItems = null
   dashboardRenderCache.visibleModel = null
+  dashboardRenderCache.folderCountsModel = null
+  dashboardRenderCache.folderBookmarkCounts = null
+  dashboardRenderCache.sidebarModel = null
+  dashboardRenderCache.sidebarMarkup = ''
   return model
+}
+
+function ensureDashboardFullTextSearchMapForQuery(): void {
+  if (
+    !contentSnapshotState.settings.fullTextSearchEnabled ||
+    contentSnapshotState.searchTextMapIncludesFullText ||
+    contentSnapshotState.searchTextMapLoadingFullText ||
+    !parseSearchQuery(dashboardState.query).textTerms.length
+  ) {
+    return
+  }
+
+  contentSnapshotState.searchTextMapLoadingFullText = true
+  void buildContentSnapshotSearchMapWithFullText(contentSnapshotState.index, {
+    includeFullText: true,
+    maxRecords: 1000
+  })
+    .then((searchMap) => {
+      contentSnapshotState.searchTextMap = searchMap
+      contentSnapshotState.searchTextMapIncludesFullText = true
+      dashboardRenderCache.modelKey = null
+      dashboardRenderCache.model = null
+      renderDashboardSection()
+    })
+    .catch(() => {
+      contentSnapshotState.searchTextMapIncludesFullText = false
+    })
+    .finally(() => {
+      contentSnapshotState.searchTextMapLoadingFullText = false
+    })
 }
 
 function isDashboardModelCacheKeyEqual(left: DashboardModelCacheKey, right: DashboardModelCacheKey): boolean {
@@ -1474,10 +1525,32 @@ function renderDashboardFolderSidebar(model: DashboardModel): void {
   }
 
   const selectedFolderId = getDashboardEffectiveFolderId()
-  const folderBookmarkCounts = getDashboardFolderBookmarkCounts(model)
-  dom.dashboardFolderSidebarCount.textContent = `${model.totalFolders} 个文件夹`
+  const folderBookmarkCounts = getCachedDashboardFolderBookmarkCounts(model)
+  const folderMarkup = getCachedDashboardFolderSidebarMarkup(model, selectedFolderId, folderBookmarkCounts)
+  const folderCountText = `${model.totalFolders} 个文件夹`
 
-  const folderMarkup = model.folderTargets
+  if (dom.dashboardFolderSidebarCount.textContent !== folderCountText) {
+    dom.dashboardFolderSidebarCount.textContent = folderCountText
+  }
+  if (dom.dashboardFolderTree.innerHTML !== folderMarkup) {
+    dom.dashboardFolderTree.innerHTML = folderMarkup
+  }
+}
+
+function getCachedDashboardFolderSidebarMarkup(
+  model: DashboardModel,
+  selectedFolderId: string,
+  folderBookmarkCounts: Map<string, number>
+): string {
+  if (
+    dashboardRenderCache.sidebarModel === model &&
+    dashboardRenderCache.sidebarSelectedFolderId === selectedFolderId &&
+    dashboardRenderCache.sidebarTotalFolders === model.totalFolders
+  ) {
+    return dashboardRenderCache.sidebarMarkup
+  }
+
+  const markup = model.folderTargets
     .map((folder) => {
       const folderRecord = availabilityState.folderMap.get(String(folder.id))
       const depth = Number(folderRecord?.depth) || getDashboardFolderPathDepth(folder.path)
@@ -1492,20 +1565,20 @@ function renderDashboardFolderSidebar(model: DashboardModel): void {
     })
     .join('')
 
-  dom.dashboardFolderTree.innerHTML = folderMarkup
+  dashboardRenderCache.sidebarModel = model
+  dashboardRenderCache.sidebarSelectedFolderId = selectedFolderId
+  dashboardRenderCache.sidebarMarkup = markup
+  dashboardRenderCache.sidebarTotalFolders = model.totalFolders
+  return markup
 }
 
-function getDashboardFolderBookmarkCounts(model: DashboardModel): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const item of model.items) {
-    const folderIds = new Set<string>([
-      ...(Array.isArray(item.ancestorIds) ? item.ancestorIds.map(String) : []),
-      String(item.parentId || '')
-    ].filter(Boolean))
-    for (const folderId of folderIds) {
-      counts.set(folderId, (counts.get(folderId) || 0) + 1)
-    }
+function getCachedDashboardFolderBookmarkCounts(model: DashboardModel): Map<string, number> {
+  if (dashboardRenderCache.folderCountsModel === model && dashboardRenderCache.folderBookmarkCounts) {
+    return dashboardRenderCache.folderBookmarkCounts
   }
+  const counts = buildDashboardFolderBookmarkCounts(model.items)
+  dashboardRenderCache.folderCountsModel = model
+  dashboardRenderCache.folderBookmarkCounts = counts
   return counts
 }
 

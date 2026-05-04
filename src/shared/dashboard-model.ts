@@ -220,6 +220,20 @@ export function getDashboardFolderTargets(folders: FolderRecord[]): DashboardFol
     }))
 }
 
+export function buildDashboardFolderBookmarkCounts(items: Pick<DashboardItem, 'ancestorIds' | 'parentId'>[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const item of items) {
+    const folderIds = new Set<string>([
+      ...(Array.isArray(item.ancestorIds) ? item.ancestorIds.map(String) : []),
+      String(item.parentId || '')
+    ].filter(Boolean))
+    for (const folderId of folderIds) {
+      counts.set(folderId, (counts.get(folderId) || 0) + 1)
+    }
+  }
+  return counts
+}
+
 export function getDashboardTopFolder(
   bookmark: BookmarkRecord,
   folderMap: Map<string, FolderRecord>
