@@ -503,6 +503,27 @@ test('availability results expose decision filters and single-item ignore action
   assert.match(optionsSource, /连续异常/)
 })
 
+test('availability bulk selection buttons expose availability-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['availability-clear-selection', '清空可用性检测已选书签'],
+    ['availability-selection-retest', '重新测试可用性检测已选书签'],
+    ['availability-selection-promote', '将可用性检测已选书签移入高置信异常'],
+    ['availability-selection-demote', '将可用性检测已选书签移入低置信异常'],
+    ['availability-selection-move', '批量移动可用性检测已选书签到文件夹'],
+    ['availability-selection-ignore-bookmark', '忽略可用性检测所选书签'],
+    ['availability-selection-ignore-domain', '忽略可用性检测所选域名'],
+    ['availability-selection-ignore-folder', '忽略可用性检测所选文件夹'],
+    ['availability-selection-delete', '批量删除可用性检测已选书签']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('availability result controls expose bookmark-specific labels', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
 
