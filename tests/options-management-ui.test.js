@@ -538,6 +538,22 @@ test('availability bulk selection buttons expose availability-specific labels', 
   }
 })
 
+test('availability section action buttons expose availability-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['availability-select-all-review', '全选低置信异常书签'],
+    ['availability-select-all-failed', '全选高置信异常书签'],
+    ['delete-failed-bookmarks', '批量删除高置信异常书签'],
+    ['availability-clear-history', '清空可用性检测历史日志']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('availability result controls expose bookmark-specific labels', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
 
