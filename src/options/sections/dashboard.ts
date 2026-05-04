@@ -1660,10 +1660,10 @@ function buildDashboardFolderSidebarItem({
     <button
       class="dashboard-folder-tree-item ${active ? 'active' : ''}"
       type="button"
-      role="treeitem"
+      role="option"
       data-dashboard-folder-filter="${escapeAttr(id)}"
       data-dashboard-no-drag
-      aria-pressed="${active ? 'true' : 'false'}"
+      aria-selected="${active ? 'true' : 'false'}"
      ${currentAttribute}
       aria-label="${escapeAttr(`${pathText}，${countLabel}`)}"
       title="${escapeAttr(pathText)}"

@@ -49,3 +49,14 @@ test('dashboard cards expose keyboard-triggerable move and delete actions', () =
   assert.match(dashboardSource, /action === 'delete-one'[\s\S]*?deleteDashboardBookmarkFromCard/)
   assert.match(dashboardSource, /async function deleteDashboardBookmarkFromCard/)
 })
+
+test('dashboard folder filter uses listbox option semantics instead of tree semantics', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
+  const folderFilterElement = optionsHtml.match(/<nav[\s\S]*?id="dashboard-folder-tree"[\s\S]*?>/)?.[0] || ''
+
+  assert.match(folderFilterElement, /role="listbox"/)
+  assert.match(dashboardSource, /role="option"[\s\S]*?aria-selected="\$\{active \? 'true' : 'false'\}"/)
+  assert.doesNotMatch(folderFilterElement, /role="tree"/)
+  assert.doesNotMatch(dashboardSource, /role="treeitem"/)
+})

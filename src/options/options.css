@@ -4983,18 +4983,25 @@ body.dashboard-fullscreen-active {
 
 @media (max-width: 920px) {
   html {
-    overflow-y: scroll;
+    height: 100%;
+    overflow: hidden;
   }
 
   body {
-    overflow: visible;
+    min-height: 100dvh;
+    overflow: hidden;
   }
 
   .options-shell {
     display: block;
-    height: auto;
-    overflow: visible;
+    min-height: 100dvh;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 28px 24px 36px;
+    scrollbar-gutter: stable;
   }
 
   .options-header {

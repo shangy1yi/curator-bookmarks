@@ -96,11 +96,11 @@ test('options shell keeps brand and sidebar fixed while the main settings area s
   assert.match(optionsCss, /--options-content-max-width:\s*1120px/)
 })
 
-test('options shell falls back to document scrolling on narrow screens', () => {
+test('options shell uses an explicit outer scroll container on narrow screens', () => {
   const optionsCss = readProjectFile('src/options/options.css')
 
-  assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?html\s*\{[\s\S]*?overflow-y:\s*scroll[\s\S]*?body\s*\{[\s\S]*?overflow:\s*visible/)
-  assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?\.options-shell\s*\{[\s\S]*?display:\s*block[\s\S]*?height:\s*auto[\s\S]*?overflow:\s*visible/)
+  assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?html\s*\{[\s\S]*?height:\s*100%[\s\S]*?overflow:\s*hidden[\s\S]*?body\s*\{[\s\S]*?min-height:\s*100dvh[\s\S]*?overflow:\s*hidden/)
+  assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?\.options-shell\s*\{[\s\S]*?display:\s*block[\s\S]*?height:\s*100dvh[\s\S]*?max-height:\s*100dvh[\s\S]*?overflow-x:\s*hidden[\s\S]*?overflow-y:\s*auto[\s\S]*?overscroll-behavior:\s*contain/)
   assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?\.options-sidebar\s*\{[\s\S]*?margin-top:\s*0/)
   assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?\.options-sidebar\s*\{[\s\S]*?grid-column:\s*1[\s\S]*?grid-row:\s*1/)
   assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?\.options-nav\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(148px,\s*1fr\)\)/)
@@ -109,6 +109,8 @@ test('options shell falls back to document scrolling on narrow screens', () => {
   assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?\.options-main\s*\{[\s\S]*?height:\s*auto[\s\S]*?overflow:\s*visible/)
   assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?\.options-main\s*\{[\s\S]*?grid-column:\s*1[\s\S]*?grid-row:\s*2/)
   assert.match(optionsCss, /@media \(max-width:\s*920px\)\s*\{[\s\S]*?\.options-main\s*>\s*\.options-panel\s*\{[\s\S]*?width:\s*100%[\s\S]*?margin-inline:\s*0/)
+  assert.doesNotMatch(optionsCss, /@media \(max-width:\s*920px\)[\s\S]*?\.options-shell\s*\{[^}]*overflow:\s*visible/)
+  assert.match(optionsCss, /\.dashboard-fullscreen-active\s+\.options-shell\s*\{[\s\S]*?height:\s*100vh[\s\S]*?overflow:\s*hidden/)
 })
 
 test('dashboard fullscreen and embedded mode reset the options shell scroll layout', () => {

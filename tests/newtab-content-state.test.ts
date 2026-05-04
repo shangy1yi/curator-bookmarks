@@ -648,6 +648,23 @@ test('newtab settings section titles are visually prominent', () => {
   assert.match(sectionTitleRule, /color:\s*rgba\(245,\s*245,\s*247,\s*0\.78\)/)
 })
 
+test('newtab settings drawer labels avoid truncating explanatory copy', () => {
+  const css = readProjectFile('src/newtab/newtab.css')
+  const sectionTitleRule = getCssRuleBody(css, '.settings-section h2')
+  const labelRule = getCssRuleBody(css, '.setting-label-stack > span')
+  const descriptionRules = getCssRuleBodies(css, '.setting-label-stack small')
+  const descriptionRule = descriptionRules.find((rule) => /white-space:\s*normal/.test(rule)) || ''
+
+  assert.match(sectionTitleRule, /-webkit-line-clamp:\s*2/)
+  assert.match(sectionTitleRule, /overflow-wrap:\s*anywhere/)
+  assert.match(labelRule, /-webkit-line-clamp:\s*2/)
+  assert.doesNotMatch(labelRule, /white-space:\s*nowrap/)
+  assert.match(descriptionRule, /white-space:\s*normal/)
+  assert.match(descriptionRule, /display:\s*block/)
+  assert.doesNotMatch(descriptionRule, /text-overflow:\s*ellipsis/)
+  assert.doesNotMatch(descriptionRule, /white-space:\s*nowrap/)
+})
+
 test('newtab dashboard glass layer only styles the iframe shell', () => {
   const newtabCss = readProjectFile('src/newtab/newtab.css')
   const optionsCss = readProjectFile('src/options/options.css')

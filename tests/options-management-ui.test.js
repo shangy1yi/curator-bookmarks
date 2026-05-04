@@ -56,11 +56,14 @@ test('dashboard exposes a persistent folder sidebar with cached DOM refs', () =>
   const domSource = readProjectFile('src/options/shared-options/dom.ts')
   const dashboardPanel = optionsHtml.match(/<section[\s\S]*?id="dashboard"[\s\S]*?>/)?.[0] || ''
   const sidebarElement = optionsHtml.match(/<[^>]+id="dashboard-folder-sidebar"[^>]*>/)?.[0] || ''
+  const folderFilterElement = optionsHtml.match(/<nav[\s\S]*?id="dashboard-folder-tree"[\s\S]*?>/)?.[0] || ''
 
   assert.match(dashboardPanel, /data-dashboard-ready="false"/)
   assert.match(optionsHtml, /class="dashboard-loading-screen"/)
   assert.match(sidebarElement, /aria-label="书签文件夹"/)
-  assert.match(optionsHtml, /id="dashboard-folder-tree"/)
+  assert.match(folderFilterElement, /role="listbox"/)
+  assert.match(folderFilterElement, /aria-label="按文件夹筛选书签"/)
+  assert.doesNotMatch(folderFilterElement, /role="tree"/)
   assert.match(domSource, /dashboardFolderSidebar\s*=\s*byId\('dashboard-folder-sidebar'\)/)
   assert.match(domSource, /dashboardFolderTree\s*=\s*byId\('dashboard-folder-tree'\)/)
 })
@@ -80,6 +83,9 @@ test('dashboard renders a clickable folder sidebar filter with bookmark counts',
   assert.match(dashboardSource, /getCachedDashboardFolderBookmarkCounts/)
   assert.match(dashboardSource, /getCachedDashboardFolderSidebarMarkup/)
   assert.match(dashboardSource, /(?:active|current)/)
+  assert.match(dashboardSource, /role="option"[\s\S]*?aria-selected="\$\{active \? 'true' : 'false'\}"/)
+  assert.doesNotMatch(dashboardSource, /role="treeitem"/)
+  assert.doesNotMatch(dashboardSource, /aria-pressed="\$\{active \? 'true' : 'false'\}"/)
   assert.doesNotMatch(dashboardSource, /title:\s*'全部书签'/)
 })
 
