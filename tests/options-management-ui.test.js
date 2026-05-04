@@ -173,6 +173,29 @@ test('dashboard tag editor action buttons expose bookmark tag context', () => {
   assert.match(closeButton, /aria-label="取消编辑当前 Dashboard 书签标签"/)
 })
 
+test('options modal footer buttons expose dialog-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['cancel-delete-modal', '取消批量删除高置信异常书签'],
+    ['confirm-delete-modal', '确认批量删除高置信异常书签'],
+    ['cancel-confirm-modal', '取消当前确认操作'],
+    ['confirm-modal-confirm', '确认当前操作'],
+    ['cancel-move-modal', '取消批量移动书签'],
+    ['cancel-scope-modal', '关闭筛选文件夹弹窗'],
+    ['cancel-ai-model-modal', '取消编辑自定义模型列表'],
+    ['save-ai-model-modal', '保存自定义模型列表'],
+    ['ai-model-picker-fetch', '从 API 获取 AI 模型列表'],
+    ['ai-model-picker-manage', '打开自定义模型列表设置'],
+    ['cancel-ai-model-picker-modal', '关闭 AI 模型选择弹窗']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('content snapshot full text search map is not awaited during initial options hydration', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
   const hydrateBody = optionsSource.match(/async function hydratePersistentState\(\) \{([\s\S]*?)async function saveAiNamingSettings/)?.[1] || ''
