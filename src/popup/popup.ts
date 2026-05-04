@@ -78,14 +78,9 @@ import {
   parseSearchQuery
 } from '../shared/search-query.js'
 import { DEFAULT_INBOX_FOLDER_TITLE } from '../shared/inbox.js'
-import {
-  buildLocalNaturalSearchPlan,
-  filterBookmarksByNaturalDateRange,
-  getNaturalSearchStatusLabel,
-  mergeNaturalSearchResultSets,
-  normalizeNaturalSearchAiPlan,
-  type NaturalSearchPlan,
-  type NaturalSearchResultSet
+import type {
+  NaturalSearchPlan,
+  NaturalSearchResultSet
 } from './natural-search.js'
 import {
   buildLightPopupSearchIndex,
@@ -115,6 +110,12 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(',')
 let popupDialogReturnFocusElement: HTMLElement | null = null
+let naturalSearchModulePromise: Promise<typeof import('./natural-search.js')> | null = null
+
+function loadNaturalSearchModule(): Promise<typeof import('./natural-search.js')> {
+  naturalSearchModulePromise ||= import('./natural-search.js')
+  return naturalSearchModulePromise
+}
 
 const SMART_CLASSIFY_SCHEMA = {
   type: 'object',
@@ -1014,27 +1015,47 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
   const planCacheKey = getNaturalSearchPlanCacheKey(normalizedQuery)
   const cachedResults = state.searchCache.get(cacheKey)
 
-  if (cachedResults) {
-    const cachedPlan = await resolveCachedNaturalSearchPlan(query, planCacheKey)
-    state.naturalSearchPlan = cachedPlan
-    state.searchHighlightQuery = cachedPlan.highlightQuery || normalizedQuery
-    state.searchPending = false
-    state.naturalSearchPending = false
-    state.searchResults = cachedResults.slice(0, MAX_POPUP_SEARCH_RESULTS)
-    state.activeResultIndex = Math.min(
-      state.activeResultIndex,
-      Math.max(state.searchResults.length - 1, 0)
-    )
-    return
+  if (!cachedResults) {
+    state.searchPending = true
+    state.naturalSearchPending = true
+    state.searchResults = []
+    state.activeResultIndex = 0
   }
 
-  state.searchPending = true
-  state.naturalSearchPending = true
-  state.searchResults = []
-  state.activeResultIndex = 0
-
   try {
-    const plan = await resolveNaturalSearchPlan(query, normalizedQuery)
+    const naturalSearch = await loadNaturalSearchModule()
+    if (state.searchRunId !== runId) {
+      return
+    }
+
+    if (cachedResults) {
+      const cachedPlanResult = await resolveCachedNaturalSearchPlan(query, planCacheKey, naturalSearch)
+      if (state.searchRunId !== runId) {
+        return
+      }
+
+      if (cachedPlanResult.canReuseResults) {
+        state.naturalSearchPlan = cachedPlanResult.plan
+        state.searchHighlightQuery = cachedPlanResult.plan.highlightQuery || normalizedQuery
+        state.searchPending = false
+        state.naturalSearchPending = false
+        state.searchResults = cachedResults.slice(0, MAX_POPUP_SEARCH_RESULTS)
+        state.activeResultIndex = Math.min(
+          state.activeResultIndex,
+          Math.max(state.searchResults.length - 1, 0)
+        )
+        render()
+        return
+      }
+
+      state.searchCache.delete(cacheKey)
+      state.searchPending = true
+      state.naturalSearchPending = true
+      state.searchResults = []
+      state.activeResultIndex = 0
+    }
+
+    const plan = await resolveNaturalSearchPlan(query, normalizedQuery, naturalSearch)
     if (state.searchRunId !== runId) {
       return
     }
@@ -1042,7 +1063,7 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
     state.naturalSearchPlan = plan
     state.searchHighlightQuery = plan.highlightQuery || normalizedQuery
 
-    const bookmarks = filterBookmarksByNaturalDateRange(getFilteredBookmarks(), plan)
+    const bookmarks = naturalSearch.filterBookmarksByNaturalDateRange(getFilteredBookmarks(), plan)
     const resultSets: NaturalSearchResultSet[] = []
     for (const naturalQuery of plan.queries) {
       if (state.searchRunId !== runId) {
@@ -1057,7 +1078,7 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
       return
     }
 
-    const results = mergeNaturalSearchResultSets(plan, resultSets)
+    const results = naturalSearch.mergeNaturalSearchResultSets(plan, resultSets)
     cacheSearchResults(cacheKey, results)
     state.searchPending = false
     state.naturalSearchPending = false
@@ -1080,17 +1101,21 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
   }
 }
 
-async function resolveCachedNaturalSearchPlan(query, planCacheKey): Promise<NaturalSearchPlan> {
-  const localPlan = buildLocalNaturalSearchPlan(query)
+async function resolveCachedNaturalSearchPlan(
+  query,
+  planCacheKey,
+  naturalSearch: typeof import('./natural-search.js')
+): Promise<{ plan: NaturalSearchPlan; canReuseResults: boolean }> {
+  const localPlan = naturalSearch.buildLocalNaturalSearchPlan(query)
   const cachedPlan = state.naturalSearchPlanCache.get(planCacheKey)
   if (!cachedPlan || cachedPlan.source !== 'ai') {
-    return localPlan
+    return { plan: localPlan, canReuseResults: true }
   }
 
   try {
     const settings = await loadAiProviderSettings()
     if (hasConfiguredAiProviderSettings(settings)) {
-      return cachedPlan
+      return { plan: cachedPlan, canReuseResults: true }
     }
   } catch {
     // Fall through to local parsing when provider settings cannot be read.
@@ -1098,12 +1123,16 @@ async function resolveCachedNaturalSearchPlan(query, planCacheKey): Promise<Natu
 
   state.naturalSearchPlanCache.delete(planCacheKey)
   state.naturalSearchError = '未配置 AI 渠道，已使用本地解析。'
-  return localPlan
+  return { plan: localPlan, canReuseResults: false }
 }
 
-async function resolveNaturalSearchPlan(query, normalizedQuery): Promise<NaturalSearchPlan> {
+async function resolveNaturalSearchPlan(
+  query,
+  normalizedQuery,
+  naturalSearch: typeof import('./natural-search.js')
+): Promise<NaturalSearchPlan> {
   const cacheKey = getNaturalSearchPlanCacheKey(normalizedQuery)
-  const localPlan = buildLocalNaturalSearchPlan(query)
+  const localPlan = naturalSearch.buildLocalNaturalSearchPlan(query)
   let plan = localPlan
   let settings
 
@@ -1125,7 +1154,7 @@ async function resolveNaturalSearchPlan(query, normalizedQuery): Promise<Natural
   }
 
   try {
-    plan = await requestNaturalSearchAiPlan(query, localPlan, settings)
+    plan = await requestNaturalSearchAiPlan(query, localPlan, settings, naturalSearch)
     state.naturalSearchError = ''
   } catch (error) {
     state.naturalSearchError = normalizeNaturalSearchError(error)
@@ -1304,9 +1333,50 @@ function getNaturalSearchResultCaption() {
   const modeLabel = plan?.source === 'ai' && !state.naturalSearchError
     ? 'AI 改写后匹配'
     : '本地自然语言筛选'
-  const statusLabel = getNaturalSearchStatusLabel(plan)
+  const statusLabel = getNaturalSearchStatusLabelFallback(plan)
   const detail = statusLabel.replace(/^(AI 解析|本地解析)( · )?/, '').trim()
   return detail ? `${modeLabel} · ${detail}` : modeLabel
+}
+
+function getNaturalSearchStatusLabelFallback(plan: NaturalSearchPlan | null): string {
+  if (!plan) {
+    return '自然语言搜索'
+  }
+
+  const parts = [plan.source === 'ai' ? 'AI 解析' : '本地解析']
+  if (plan.dateRange?.label) {
+    parts.push(plan.dateRange.label)
+  }
+  const keywordSummary = getNaturalKeywordSummaryFallback(plan)
+  if (keywordSummary) {
+    parts.push(`关键词 ${keywordSummary}`)
+  }
+  const exclusionSummary = formatNaturalTermsFallback(plan.excludedTerms, 2)
+  if (exclusionSummary) {
+    parts.push(`排除 ${exclusionSummary}`)
+  }
+  return parts.join(' · ')
+}
+
+function getNaturalKeywordSummaryFallback(plan: NaturalSearchPlan): string {
+  const terms = getQueryTerms(plan.highlightQuery)
+    .filter((term) => !plan.excludedTerms.includes(term))
+  return formatNaturalTermsFallback(terms, 3)
+}
+
+function formatNaturalTermsFallback(terms: string[], limit: number): string {
+  const uniqueTerms = [...new Set(terms)]
+  const visibleTerms = uniqueTerms
+    .slice(0, Math.max(1, limit))
+    .map((term) => cleanSmartText(term, 20))
+    .filter(Boolean)
+
+  if (!visibleTerms.length) {
+    return ''
+  }
+
+  const suffix = uniqueTerms.length > visibleTerms.length ? ` 等 ${uniqueTerms.length} 个` : ''
+  return `${visibleTerms.join(' / ')}${suffix}`
 }
 
 function showViewNotice(message, { durationMs = VIEW_NOTICE_MS } = {}) {
@@ -3853,7 +3923,12 @@ async function ensureSmartClassifyPermissions(settings, { interactive = false } 
   return true
 }
 
-async function requestNaturalSearchAiPlan(query, localPlan: NaturalSearchPlan, settings): Promise<NaturalSearchPlan> {
+async function requestNaturalSearchAiPlan(
+  query,
+  localPlan: NaturalSearchPlan,
+  settings,
+  naturalSearch: typeof import('./natural-search.js')
+): Promise<NaturalSearchPlan> {
   validateSmartAiSettings(settings)
   await ensureSmartClassifyPermissions(settings, { interactive: false })
 
@@ -3878,7 +3953,7 @@ async function requestNaturalSearchAiPlan(query, localPlan: NaturalSearchPlan, s
     : extractChatCompletionsJsonText(payload)
 
   try {
-    return normalizeNaturalSearchAiPlan(JSON.parse(rawJsonText), localPlan)
+    return naturalSearch.normalizeNaturalSearchAiPlan(JSON.parse(rawJsonText), localPlan)
   } catch {
     throw new Error('AI 返回了无法解析的自然语言搜索结果。')
   }
@@ -3886,7 +3961,7 @@ async function requestNaturalSearchAiPlan(query, localPlan: NaturalSearchPlan, s
 
 function buildNaturalSearchRequestBody({ settings, query, localPlan }) {
   const today = formatLocalDate(Date.now())
-  const examplePlan = buildLocalNaturalSearchPlan('帮我找上周收藏的那个 React 表格教程')
+  const exampleDateRange = getPreviousWeekDateRange()
   const systemPrompt = [
     '你是浏览器书签搜索查询理解器。',
     '你的任务是把用户自然语言改写为本地书签搜索关键词，不要回答用户问题。',
@@ -3917,11 +3992,11 @@ function buildNaturalSearchRequestBody({ settings, query, localPlan }) {
           queries: ['react 表格 教程 table grid tutorial guide', 'react table tutorial'],
           keywords: ['react', '表格', '教程', 'table', 'grid', 'tutorial'],
           excluded_terms: [],
-          date_range: examplePlan.dateRange
+          date_range: exampleDateRange
             ? {
-                from: formatLocalDate(examplePlan.dateRange.from),
-                to: formatLocalDate(examplePlan.dateRange.to),
-                label: examplePlan.dateRange.label
+                from: formatLocalDate(exampleDateRange.from),
+                to: formatLocalDate(exampleDateRange.to),
+                label: exampleDateRange.label
               }
             : { from: '', to: '', label: '' },
           explanation: '按上周收藏和 React 表格教程关键词匹配'
@@ -3962,6 +4037,20 @@ function buildNaturalSearchRequestBody({ settings, query, localPlan }) {
         schema: NATURAL_SEARCH_SCHEMA
       }
     }
+  }
+}
+
+function getPreviousWeekDateRange(): NaturalSearchPlan['dateRange'] {
+  const now = new Date()
+  const day = now.getDay()
+  const daysFromMonday = (day + 6) % 7
+  const thisWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysFromMonday)
+  thisWeekStart.setHours(0, 0, 0, 0)
+  const previousWeekStart = thisWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000
+  return {
+    from: previousWeekStart,
+    to: thisWeekStart.getTime(),
+    label: '上周收藏'
   }
 }
 

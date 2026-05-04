@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
 
@@ -41,12 +41,26 @@ test('popup natural search allows local parsing without AI setup', () => {
 })
 
 test('popup natural search does not reuse stale AI plans without provider setup', () => {
-  assert.match(popupSource, /function resolveCachedNaturalSearchPlan\(query, planCacheKey\): Promise<NaturalSearchPlan>/)
-  assert.match(popupSource, /const cachedPlan = await resolveCachedNaturalSearchPlan\(query, planCacheKey\)/)
-  assert.match(popupSource, /if \(!cachedPlan \|\| cachedPlan\.source !== 'ai'\)[\s\S]*?return localPlan/)
-  assert.match(popupSource, /if \(hasConfiguredAiProviderSettings\(settings\)\)[\s\S]*?return cachedPlan/)
+  assert.match(popupSource, /let naturalSearchModulePromise: Promise<typeof import\('\.\/natural-search\.js'\)> \| null = null/)
+  assert.match(popupSource, /naturalSearchModulePromise \|\|= import\('\.\/natural-search\.js'\)/)
+  assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\/natural-search\.js['"]/m)
+  assert.match(popupSource, /naturalSearch: typeof import\('\.\/natural-search\.js'\)[\s\S]*?\): Promise<NaturalSearchPlan>/)
+  assert.match(popupSource, /const naturalSearch = await loadNaturalSearchModule\(\)/)
+  assert.match(popupSource, /const cachedPlanResult = await resolveCachedNaturalSearchPlan\(query, planCacheKey, naturalSearch\)/)
+  assert.match(popupSource, /if \(cachedPlanResult\.canReuseResults\)[\s\S]*?state\.searchResults = cachedResults\.slice/)
+  assert.match(popupSource, /Promise<\{ plan: NaturalSearchPlan; canReuseResults: boolean \}>/)
+  assert.match(popupSource, /if \(!cachedPlan \|\| cachedPlan\.source !== 'ai'\)[\s\S]*?return \{ plan: localPlan, canReuseResults: true \}/)
+  assert.match(popupSource, /if \(hasConfiguredAiProviderSettings\(settings\)\)[\s\S]*?return \{ plan: cachedPlan, canReuseResults: true \}/)
   assert.match(popupSource, /state\.naturalSearchPlanCache\.delete\(planCacheKey\)/)
+  assert.match(popupSource, /return \{ plan: localPlan, canReuseResults: false \}/)
+  assert.match(popupSource, /state\.searchCache\.delete\(cacheKey\)/)
   assert.match(popupSource, /未配置 AI 渠道，已使用本地解析。/)
+})
+
+test('built popup html does not preload natural search chunk', { skip: !existsSync(resolve(process.cwd(), 'dist/src/popup/popup.html')) }, () => {
+  const builtPopupHtml = readProjectFile('dist/src/popup/popup.html')
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+natural-search/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+natural-search[^>]+rel="modulepreload"/i)
 })
 
 test('popup folder pickers expose option and treeitem semantics', () => {
