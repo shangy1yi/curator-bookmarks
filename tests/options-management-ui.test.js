@@ -474,14 +474,21 @@ test('availability, redirect and AI result lists render paginated controls', () 
 test('duplicate decisions expose explicit keep strategies and recycle wording', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const duplicateSource = readProjectFile('src/options/sections/duplicates.ts')
+  const labelledStrategies = [
+    ['recommended', '按推荐选择重复书签当前结果'],
+    ['newest', '保留重复书签中的最新项'],
+    ['oldest', '保留重复书签中的最早项'],
+    ['shorter-path', '保留重复书签中路径最短的项'],
+    ['tagged', '保留重复书签中已有标签的项'],
+    ['newtab-source', '保留重复书签中的新标签页来源项'],
+    ['recent', '保留重复书签中的最近访问项']
+  ]
 
-  assert.match(optionsHtml, /data-duplicate-strategy="recommended"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="newest"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="oldest"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="shorter-path"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="tagged"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="newtab-source"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="recent"/)
+  for (const [strategy, label] of labelledStrategies) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+data-duplicate-strategy="${strategy}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing strategy button ${strategy}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
   assert.match(duplicateSource, /duplicate-recommendation-signals/)
   assert.match(duplicateSource, /有手动标签/)
   assert.match(duplicateSource, /新标签页来源/)
