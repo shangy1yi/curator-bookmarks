@@ -240,7 +240,7 @@ export function shouldAcceptNavigationSuccess(result: NavigationAttempt | null |
     return false
   }
 
-  return !statusCode || statusCode < 400
+  return Boolean(evidence?.requestSent && statusCode > 0 && statusCode < 400)
 }
 
 export function summarizeNavigationEvidence(attempts: NavigationAttempt[]): NavigationEvidence {

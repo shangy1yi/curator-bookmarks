@@ -16,6 +16,8 @@ import {
   normalizeBookmarkTagIndex,
   normalizeBookmarkTagUrl,
   normalizeBookmarkTags,
+  removeBookmarkTagRecord,
+  saveManualBookmarkTags,
   upsertBookmarkTagRecord
 } from '../src/shared/bookmark-tags.js'
 import { STORAGE_KEYS } from '../src/shared/constants.js'
@@ -286,6 +288,62 @@ test('serializes bookmark tag upserts without dropping concurrent records', asyn
   const index = normalizeBookmarkTagIndex(store[STORAGE_KEYS.bookmarkTagIndex])
   assert.equal(index.records.b1.summary, 'first summary')
   assert.equal(index.records.b2.summary, 'second summary')
+})
+
+test('serializes manual tag saves with AI tag upserts without dropping fields', async () => {
+  const store: Record<string, unknown> = {}
+
+  ;(globalThis as any).chrome = createStorageMock(store)
+
+  const aiRecord = buildBookmarkTagRecord({
+    bookmark: bookmark({ id: 'b1', title: 'First', url: 'https://example.com/first' }),
+    analysis: { summary: 'AI summary', tags: ['ai'], aliases: ['Docs'] },
+    source: 'auto_analyze',
+    now: 1000
+  })
+
+  await Promise.all([
+    upsertBookmarkTagRecord(aiRecord),
+    saveManualBookmarkTags(
+      bookmark({ id: 'b1', title: 'First Manual', url: 'https://example.com/first' }),
+      ['manual'],
+      2000
+    )
+  ])
+
+  const index = normalizeBookmarkTagIndex(store[STORAGE_KEYS.bookmarkTagIndex])
+  assert.equal(index.records.b1.summary, 'AI summary')
+  assert.deepEqual(index.records.b1.tags, ['ai'])
+  assert.deepEqual(index.records.b1.manualTags, ['manual'])
+})
+
+test('serializes bookmark tag removals without dropping concurrent upserts', async () => {
+  const store: Record<string, unknown> = {}
+
+  ;(globalThis as any).chrome = createStorageMock(store)
+
+  const firstRecord = buildBookmarkTagRecord({
+    bookmark: bookmark({ id: 'remove-me', title: 'Remove', url: 'https://example.com/remove' }),
+    analysis: { summary: 'remove summary', tags: ['old'] },
+    source: 'ai_naming',
+    now: 1000
+  })
+  const secondRecord = buildBookmarkTagRecord({
+    bookmark: bookmark({ id: 'keep-me', title: 'Keep', url: 'https://example.com/keep' }),
+    analysis: { summary: 'keep summary', tags: ['new'] },
+    source: 'popup_smart',
+    now: 1000
+  })
+
+  await upsertBookmarkTagRecord(firstRecord)
+  await Promise.all([
+    removeBookmarkTagRecord('remove-me'),
+    upsertBookmarkTagRecord(secondRecord)
+  ])
+
+  const index = normalizeBookmarkTagIndex(store[STORAGE_KEYS.bookmarkTagIndex])
+  assert.equal(index.records['remove-me'], undefined)
+  assert.equal(index.records['keep-me'].summary, 'keep summary')
 })
 
 function createStorageMock(store: Record<string, unknown>) {
