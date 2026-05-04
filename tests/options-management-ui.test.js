@@ -138,6 +138,22 @@ test('dashboard renders a clickable folder sidebar filter with bookmark counts',
   assert.doesNotMatch(dashboardSource, /title:\s*'全部书签'/)
 })
 
+test('dashboard bulk selection buttons expose dashboard-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['dashboard-select-visible-top', '选择当前可见的 Dashboard 书签'],
+    ['dashboard-clear-selection', '清空 Dashboard 已选书签'],
+    ['dashboard-move-selection', '批量移动 Dashboard 已选书签'],
+    ['dashboard-delete-selection', '批量删除 Dashboard 已选书签']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('content snapshot full text search map is not awaited during initial options hydration', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
   const hydrateBody = optionsSource.match(/async function hydratePersistentState\(\) \{([\s\S]*?)async function saveAiNamingSettings/)?.[1] || ''
