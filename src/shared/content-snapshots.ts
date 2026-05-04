@@ -1,7 +1,36 @@
 import { CONTENT_SNAPSHOT_LOCAL_TEXT_LIMIT, STORAGE_KEYS } from './constants.js'
-import { getLocalStorage, setLocalStorage } from './storage.js'
+import { setLocalStorage } from './storage.js'
+import {
+  buildContentSnapshotSearchMap,
+  cleanContentSnapshotText as cleanText,
+  loadContentSnapshotIndex,
+  loadContentSnapshotSettings,
+  normalizeContentSnapshotIndex,
+  normalizeContentSnapshotObject as normalizeObject,
+  normalizeContentSnapshotSettings,
+  normalizeContentSnapshotTextList as normalizeTextList,
+  truncateContentSnapshotText as truncateCleanText,
+  type ContentSnapshotIndex,
+  type ContentSnapshotRecord,
+  type ContentSnapshotSettings
+} from './content-snapshot-search.js'
 import { normalizeText } from './text.js'
 import type { BookmarkRecord } from './types.js'
+
+export {
+  DEFAULT_CONTENT_SNAPSHOT_SETTINGS,
+  buildContentSnapshotSearchMap,
+  buildContentSnapshotSearchText,
+  loadContentSnapshotIndex,
+  loadContentSnapshotSettings,
+  normalizeContentSnapshotIndex,
+  normalizeContentSnapshotSettings
+} from './content-snapshot-search.js'
+export type {
+  ContentSnapshotIndex,
+  ContentSnapshotRecord,
+  ContentSnapshotSettings
+} from './content-snapshot-search.js'
 
 export const HEAVY_USER_DB_NAME = 'curatorBookmarkHeavyUserData'
 export const HEAVY_USER_DB_VERSION = 2
@@ -23,15 +52,6 @@ let contentFullTextOperations: ContentFullTextOperations = {
   delete: deleteContentFullText
 }
 
-export interface ContentSnapshotSettings {
-  version: 1
-  enabled: boolean
-  autoCaptureOnBookmarkCreate: boolean
-  saveFullText: boolean
-  fullTextSearchEnabled: boolean
-  localOnlyNoAiUpload: boolean
-}
-
 export interface ContentSnapshotSourceContext {
   finalUrl?: string
   title?: string
@@ -47,33 +67,6 @@ export interface ContentSnapshotSourceContext {
   warnings?: string[]
 }
 
-export interface ContentSnapshotRecord {
-  snapshotId: string
-  bookmarkId: string
-  url: string
-  title: string
-  summary: string
-  headings: string[]
-  canonicalUrl: string
-  finalUrl: string
-  contentType: string
-  source: string
-  extractionStatus: string
-  extractedAt: number
-  hasFullText: boolean
-  fullTextBytes: number
-  fullTextStorage: 'none' | 'local' | 'idb'
-  fullText?: string
-  fullTextRef?: string
-  warnings: string[]
-}
-
-export interface ContentSnapshotIndex {
-  version: 1
-  updatedAt: number
-  records: Record<string, ContentSnapshotRecord>
-}
-
 export interface ContentFullTextRecord {
   snapshotId: string
   bookmarkId: string
@@ -82,62 +75,12 @@ export interface ContentFullTextRecord {
   savedAt: number
 }
 
-export const DEFAULT_CONTENT_SNAPSHOT_SETTINGS: ContentSnapshotSettings = {
-  version: 1,
-  enabled: true,
-  autoCaptureOnBookmarkCreate: true,
-  saveFullText: true,
-  fullTextSearchEnabled: true,
-  localOnlyNoAiUpload: false
-}
-
-export function normalizeContentSnapshotSettings(raw: unknown): ContentSnapshotSettings {
-  const source = normalizeObject(raw)
-  return {
-    version: 1,
-    enabled: source.enabled !== false,
-    autoCaptureOnBookmarkCreate: source.autoCaptureOnBookmarkCreate !== false,
-    saveFullText: source.saveFullText !== false,
-    fullTextSearchEnabled: source.fullTextSearchEnabled !== false,
-    localOnlyNoAiUpload: source.localOnlyNoAiUpload === true
-  }
-}
-
-export function normalizeContentSnapshotIndex(raw: unknown): ContentSnapshotIndex {
-  const source = normalizeObject(raw)
-  const rawRecords = normalizeObject(source.records)
-  const records: Record<string, ContentSnapshotRecord> = {}
-
-  for (const [bookmarkId, value] of Object.entries(rawRecords)) {
-    const record = normalizeContentSnapshotRecord(value)
-    if (record.bookmarkId && record.snapshotId) {
-      records[String(bookmarkId)] = record
-    }
-  }
-
-  return {
-    version: 1,
-    updatedAt: Number(source.updatedAt) || 0,
-    records
-  }
-}
-
-export async function loadContentSnapshotSettings(): Promise<ContentSnapshotSettings> {
-  const stored = await getLocalStorage([STORAGE_KEYS.contentSnapshotSettings])
-  return normalizeContentSnapshotSettings(stored[STORAGE_KEYS.contentSnapshotSettings])
-}
-
 export async function saveContentSnapshotSettings(settings: unknown): Promise<ContentSnapshotSettings> {
   const normalized = normalizeContentSnapshotSettings(settings)
   await setLocalStorage({
     [STORAGE_KEYS.contentSnapshotSettings]: normalized
   })
   return normalized
-}
-
-export async function loadContentSnapshotIndex(): Promise<ContentSnapshotIndex> {
-  const stored = await getLocalStorage([STORAGE_KEYS.contentSnapshotIndex])
-  return normalizeContentSnapshotIndex(stored[STORAGE_KEYS.contentSnapshotIndex])
 }
 
 export async function saveContentSnapshotFromContext({
@@ -299,37 +242,6 @@ export function buildContentSnapshotRecord({
   }
 }
 
-export function buildContentSnapshotSearchText(record: ContentSnapshotRecord | null | undefined, options: { includeFullText?: boolean } = {}): string {
-  if (!record) {
-    return ''
-  }
-
-  return normalizeText([
-    record.summary,
-    record.contentType,
-    record.source,
-    record.extractionStatus,
-    record.finalUrl,
-    record.canonicalUrl,
-    ...(record.headings || []),
-    options.includeFullText && record.fullTextStorage === 'local' ? record.fullText : ''
-  ].join(' '))
-}
-
-export function buildContentSnapshotSearchMap(
-  index: ContentSnapshotIndex,
-  options: { includeFullText?: boolean } = {}
-): Map<string, string> {
-  const searchMap = new Map<string, string>()
-  for (const record of Object.values(index.records)) {
-    const text = buildContentSnapshotSearchText(record, options)
-    if (text) {
-      searchMap.set(record.bookmarkId, text)
-    }
-  }
-  return searchMap
-}
-
 export async function buildContentSnapshotSearchMapWithFullText(
   index: ContentSnapshotIndex,
   options: { includeFullText?: boolean; maxRecords?: number } = {}
@@ -466,33 +378,6 @@ async function getContentFullTextsWithSingleReads(
   return fullTexts
 }
 
-function normalizeContentSnapshotRecord(raw: unknown): ContentSnapshotRecord {
-  const source = normalizeObject(raw)
-  const fullTextStorage = ['local', 'idb'].includes(String(source.fullTextStorage))
-    ? String(source.fullTextStorage) as ContentSnapshotRecord['fullTextStorage']
-    : 'none'
-  return {
-    snapshotId: String(source.snapshotId || '').trim(),
-    bookmarkId: String(source.bookmarkId || '').trim(),
-    url: String(source.url || '').trim(),
-    title: cleanText(source.title || ''),
-    summary: cleanText(source.summary || ''),
-    headings: normalizeTextList(source.headings, 28, 120),
-    canonicalUrl: String(source.canonicalUrl || '').trim(),
-    finalUrl: String(source.finalUrl || '').trim(),
-    contentType: cleanText(source.contentType || ''),
-    source: cleanText(source.source || ''),
-    extractionStatus: cleanText(source.extractionStatus || ''),
-    extractedAt: Number(source.extractedAt) || 0,
-    hasFullText: source.hasFullText === true,
-    fullTextBytes: Number(source.fullTextBytes) || 0,
-    fullTextStorage,
-    fullText: fullTextStorage === 'local' ? cleanText(source.fullText || '') : undefined,
-    fullTextRef: fullTextStorage === 'idb' ? String(source.fullTextRef || source.snapshotId || '').trim() : undefined,
-    warnings: normalizeTextList(source.warnings, 8, 160)
-  }
-}
-
 function buildSnapshotSummary(context: ContentSnapshotSourceContext, mainText: string): string {
   return truncateCleanText(
     context.description ||
@@ -519,40 +404,6 @@ function inferContentTypeLabel(context: ContentSnapshotSourceContext): string {
     return '文档页'
   }
   return ''
-}
-
-function cleanText(value: unknown): string {
-  return String(value || '').replace(/\s+/g, ' ').trim()
-}
-
-function truncateCleanText(value: unknown, limit: number): string {
-  const text = cleanText(value)
-  return text.length > limit ? text.slice(0, limit).trim() : text
-}
-
-function normalizeTextList(values: unknown, limit: number, itemLimit: number): string[] {
-  const items = Array.isArray(values) ? values : []
-  const seen = new Set<string>()
-  const output: string[] = []
-  for (const item of items) {
-    const text = truncateCleanText(item, itemLimit)
-    const key = normalizeText(text)
-    if (!text || seen.has(key)) {
-      continue
-    }
-    seen.add(key)
-    output.push(text)
-    if (output.length >= limit) {
-      break
-    }
-  }
-  return output
-}
-
-function normalizeObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
 }
 
 function openHeavyUserDb(): Promise<IDBDatabase> {

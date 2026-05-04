@@ -7,7 +7,7 @@
 - 集成分支：`integration/goal-final-polish-20260504`
 - 集成 worktree：`/mnt/g/coding/worktrees/goal-final-polish-20260504`
 - 基线：`main@11582da` / `v1.4.23`
-- 当前集成代码状态：在 `87f4f3c` 基础上继续追加 popup 回收站 helper 预加载瘦身；报告最新提交以 `git log -1 --oneline` 为准。
+- 当前集成代码状态：在 `d4cb535` 基础上继续追加 popup 内容快照存储模块预加载瘦身；报告最新提交以 `git log -1 --oneline` 为准。
 
 本轮采用多 agent 分支审查与修复流程，覆盖性能、UI、功能、人性化体验、构建安全五个可合并改动方向。主工作区 `/mnt/g/coding/chromebookmark` 保持在 `main@11582da`，未合并到 `main`。
 
@@ -60,6 +60,12 @@
   - 影响：普通打开 popup 和普通搜索不会删除书签，但首屏仍会预加载 `recycle-bin-*`。
   - 建议：删除确认和撤销删除路径触发后再加载回收站事务 helper。
   - 处理：已完成，popup 默认 `modulepreload` 不再包含 `recycle-bin-*`。
+
+- [低] 性能：popup 默认打开预加载完整内容快照存储模块
+  - 位置：`src/popup/search.ts`、`src/popup/search-index.ts`、`src/shared/content-snapshots.ts`
+  - 影响：popup 首屏只需要内容快照设置、索引 normalizer 和轻量搜索文本，但静态依赖完整 `content-snapshots` 会把 IndexedDB 全文读取、保存、删除等低频能力带入首屏预加载。
+  - 建议：拆出轻量内容快照搜索入口；只有全文 warmup 或保存/删除快照时再加载完整存储模块。
+  - 处理：已完成，popup 默认 `modulepreload` 不再包含完整 `content-snapshots-*`，只保留首屏搜索需要的轻量 `content-snapshot-search-*`。
 
 - [高] 功能：标签索引并发写入可能覆盖字段
   - 位置：`src/shared/bookmark-tags.ts`
@@ -169,6 +175,15 @@
    - 严重程度：低
    - 推荐优化方向：保留原有删除事务语义，将 `deleteBookmarkToRecycle` 和 `removeRecycleEntry` 改为删除动作触发后通过缓存动态 import 加载。
    - 是否需要 benchmark 或 profile 验证：当前通过构建产物和 focused tests 验证；后续可用 Chrome Performance 对 popup 冷启动做实测。
+   - 处理状态：已修复。
+
+9. popup 默认打开预加载完整内容快照存储模块
+   - 问题位置：`src/popup/search.ts`、`src/popup/search-index.ts`、`src/shared/content-snapshots.ts`
+   - 问题描述：popup 首屏需要内容快照的轻量搜索文本和索引元数据，但完整 `content-snapshots` 模块还包含 IndexedDB 全文读写、快照保存、删除和测试 hook，普通打开不需要这些能力。
+   - 影响范围：每次打开 popup 和普通本地搜索。
+   - 严重程度：低
+   - 推荐优化方向：新增轻量 `content-snapshot-search` 模块承载类型、normalizer 和 search text formatter；完整 `content-snapshots` 仅在全文 warmup、options 或 service worker 保存/删除路径使用。
+   - 是否需要 benchmark 或 profile 验证：当前通过构建产物、focused tests 和 `npm run validate` 验证；后续可用 Chrome Performance 对 popup 冷启动做实测。
    - 处理状态：已修复。
 
 ## 四、UI 审查结果
@@ -303,8 +318,8 @@
   - 影响范围：newtab/options/popup UI 与可访问性。
   - 测试方式：`npm test`、`npm run typecheck`
 
-- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、`b185052`、`87f4f3c`、popup 回收站 helper 预加载瘦身提交
-  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化、AI 响应解析、Inbox 状态模块和回收站事务 helper 改为触发对应功能后再加载或通过轻量常量入口解耦，移除首屏非必要运行时预加载。
+- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、`b185052`、`87f4f3c`、`d4cb535`、popup 内容快照存储模块预加载瘦身提交
+  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化、AI 响应解析、Inbox 状态模块、回收站事务 helper 和完整内容快照存储模块改为触发对应功能后再加载或通过轻量常量/搜索入口解耦，移除首屏非必要运行时预加载。
   - 影响范围：`src/popup/popup.css`、`src/popup/popup.ts`、`src/newtab/content-state.ts`、`src/newtab/newtab.ts`、相关测试。
   - 测试方式：focused tests、`npm test`、`npm run validate`、Playwright 产物/搜索冒烟。
 
@@ -320,13 +335,13 @@
 - `npm audit --json`：0 vulnerabilities。
 - `npm run typecheck`：通过。
 - `npm run lint`：通过；当前脚本等价于 `npm run typecheck`。
-- `npm test`：315/315 通过。
+- `npm test`：316/316 通过。
 - `npm run check:version`：通过，版本 `1.4.23`。
 - `npm run build`：通过。
 - `npm run validate`：通过，覆盖 typecheck、test、check:version、build。
 - focused popup 自然语言搜索测试：通过。
-  - `npm run test:build && node --test .tmp-test/tests/popup-search-empty-state.test.js .tmp-test/tests/recycle.test.js .tmp-test/tests/popup-search.test.js`：31/31 通过。
-  - 覆盖自然语言搜索动态 import 缓存、禁止 popup 运行时静态导入 `natural-search`/`shared/inbox`/`ai-response`/`recycle-bin`、AI plan 缓存降级、失效 AI plan 对应结果缓存清理、智能分类模块按需加载、删除事务 helper 按需加载、构建产物不预加载 `natural-search`/`content-extraction`/`ai-settings`/`inbox`/`ai-response`/`recycle-bin`、普通搜索行为。
+  - `npm run test:build && node --test .tmp-test/tests/popup-search-empty-state.test.js .tmp-test/tests/popup-search-index.test.js .tmp-test/tests/content-snapshots.test.js .tmp-test/tests/popup-search.test.js`：39/39 通过。
+  - 覆盖自然语言搜索动态 import 缓存、禁止 popup 运行时静态导入 `natural-search`/`shared/inbox`/`ai-response`/`recycle-bin`/完整 `content-snapshots`、AI plan 缓存降级、失效 AI plan 对应结果缓存清理、智能分类模块按需加载、删除事务 helper 按需加载、内容快照全文 warmup 按需加载、构建产物不预加载 `natural-search`/`content-extraction`/`ai-settings`/`inbox`/`ai-response`/`recycle-bin`/完整 `content-snapshots`、普通搜索行为。
 - focused newtab 搜索测试：通过。
   - `node --test .tmp-test/tests/newtab-search-index.test.js .tmp-test/tests/newtab-content-state.test.js`：53/53 通过。
   - 覆盖轻量同步建议缓存、自然语言搜索动态 import、pinyin 动态搜索、无匹配网页搜索 fallback。
@@ -352,10 +367,10 @@
 - dist modulepreload 检查：通过。
   - `dist/src/newtab/newtab.html` 只预加载 Vite 运行时 `modulepreload-polyfill-*` 和启动存储读取所需的 `storage-*`。
   - 未发现 newtab 首屏 `modulepreload` 预加载 `bookmarks-api-*`、`dot-matrix-loader-*`、`motion-*`、`recycle-bin-*`、`bookmark-tags-*`、`search-*`、`natural-search-*` 或 `content-snapshots-*`。
-  - `dist/src/popup/popup.html` 未发现 `natural-search-*`、`content-extraction-*`、`ai-settings-*`、`inbox-*`、`ai-response-*`、`recycle-bin-*` modulepreload；这些模块仍作为动态 chunk 生成，或由非 popup 首屏路径按需加载。
+  - `dist/src/popup/popup.html` 未发现 `natural-search-*`、`content-extraction-*`、`ai-settings-*`、`inbox-*`、`ai-response-*`、`recycle-bin-*`、完整 `content-snapshots-*` modulepreload；普通搜索需要的轻量 `content-snapshot-search-*` 保留在首屏。
 - Playwright popup 自然语言搜索加载策略检查：通过。
   - fresh profile 打开 popup，`#popup-app-shell` 可见，无 pageerror/console error。
-  - 默认打开仅加载 popup 正常功能所需资源，实际请求列表未出现 `natural-search-*`、`content-extraction-*`、`ai-settings-*`、`inbox-*`、`ai-response-*`、`recycle-bin-*`。
+  - 默认打开仅加载 popup 正常功能所需资源，实际请求列表未出现 `natural-search-*`、`content-extraction-*`、`ai-settings-*`、`inbox-*`、`ai-response-*`、`recycle-bin-*`、完整 `content-snapshots-*`。
 - Playwright 可访问名称检查：通过。
   - newtab、options dashboard、popup 中可见交互控件均有可访问名称。
   - 未发现可见的无名 `button`、`a[href]`、`input`、`select`、`textarea` 或 `role="button"` 控件。
@@ -387,6 +402,7 @@
 - popup 智能分类的网页内容抽取和 AI 设置归一化改为按需加载，避免默认打开 popup 时预加载 `content-extraction` 和 `ai-settings`。
 - popup Inbox 筛选标题改走轻量常量入口，AI 响应 helper 改为请求触发后按需加载，避免默认打开 popup 时预加载 `inbox` 和 `ai-response`。
 - popup 回收站事务 helper 改为删除/撤销删除触发后按需加载，避免默认打开 popup 时预加载 `recycle-bin`。
+- popup 内容快照搜索拆出轻量入口，完整快照存储和 IndexedDB 全文读取模块改为全文 warmup 或保存/删除路径按需加载，避免默认打开 popup 时预加载完整 `content-snapshots`。
 
 ## 十、创新了什么功能
 

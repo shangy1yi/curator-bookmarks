@@ -119,6 +119,19 @@ test('popup recycle bin helpers load only after delete actions', { skip: !exists
   assert.doesNotMatch(builtPopupHtml, /<link[^>]+recycle-bin[^>]+rel="modulepreload"/i)
 })
 
+test('popup startup uses light snapshot search metadata instead of full snapshot storage module', { skip: !existsSync(resolve(process.cwd(), 'dist/src/popup/popup.html')) }, () => {
+  const searchSource = readProjectFile('src/popup/search.ts')
+  const searchIndexSource = readProjectFile('src/popup/search-index.ts')
+  const builtPopupHtml = readProjectFile('dist/src/popup/popup.html')
+
+  assert.match(searchSource, /from '\.\.\/shared\/content-snapshot-search\.js'/)
+  assert.match(searchIndexSource, /from '\.\.\/shared\/content-snapshot-search\.js'/)
+  assert.match(searchIndexSource, /await import\('\.\.\/shared\/content-snapshots\.js'\)/)
+  assert.doesNotMatch(searchSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/shared\/content-snapshots\.js['"]/m)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+content-snapshots/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+content-snapshots[^>]+rel="modulepreload"/i)
+})
+
 test('popup folder pickers expose option and treeitem semantics', () => {
   assert.match(popupHtml, /id="folder-breadcrumbs"[^>]+aria-label="当前文件夹路径"/)
   assert.match(popupSource, /data-folder-breadcrumb-id="\$\{escapeAttr\(segment\.id\)\}"/)

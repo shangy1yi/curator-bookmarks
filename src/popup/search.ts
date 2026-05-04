@@ -8,8 +8,10 @@ import {
   parseSearchQuery,
   type ParsedSearchQuery
 } from '../shared/search-query.js'
-import type { ContentSnapshotRecord } from '../shared/content-snapshots.js'
-import { buildContentSnapshotSearchText } from '../shared/content-snapshots.js'
+import {
+  buildContentSnapshotSearchText,
+  type ContentSnapshotRecord
+} from '../shared/content-snapshot-search.js'
 
 export const MAX_POPUP_SEARCH_RESULTS = 20
 export const POPUP_SEARCH_ASYNC_THRESHOLD = 1200
