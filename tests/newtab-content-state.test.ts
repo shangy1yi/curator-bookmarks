@@ -815,15 +815,25 @@ test('newtab large bookmark lists render tiles incrementally', () => {
 
 test('newtab bookmark suggestions are debounced and cached', () => {
   const script = readProjectFile('src/newtab/newtab.ts')
+  const contentState = readProjectFile('src/newtab/content-state.ts')
 
   assert.match(script, /const SEARCH_SUGGESTION_DEBOUNCE_MS = 80/)
   assert.match(script, /const SEARCH_SUGGESTION_CACHE_LIMIT = 24/)
   assert.match(script, /const scheduleSuggestionsRender = \(\{ preserveActive = false, immediate = false \} = \{\}\) =>/)
-  assert.match(script, /window\.setTimeout\(\(\) => \{[\s\S]*?renderSuggestions\(\{ preserveActive, queryOverride: query \}\)/)
+  assert.match(script, /window\.setTimeout\(\(\) => \{[\s\S]*?renderCurrentSuggestions\(\)/)
   assert.match(script, /const searchSuggestionCache = new Map<string, SearchBookmarkSuggestion\[\]>\(\)/)
+  assert.match(script, /const naturalSearchSuggestionCache = new Map<string, Promise<SearchBookmarkSuggestion\[\]>>\(\)/)
   assert.match(script, /function getSearchSuggestionCacheKey/)
   assert.match(script, /normalizeNewTabSearchText\(query\)/)
   assert.match(script, /searchSuggestionCache\.clear\(\)/)
+  assert.match(script, /naturalSearchSuggestionCache\.clear\(\)/)
+  assert.match(script, /getNaturalSearchBookmarkSuggestions\(query\)\.then/)
+  assert.match(script, /function shouldLoadNaturalSearchSuggestions/)
+  assert.match(script, /if \(!shouldLoadNaturalSearchSuggestions\(query, directSuggestions\)\) \{[\s\S]*?return[\s\S]*?\}/)
+  assert.match(contentState, /await import\('\.\.\/popup\/natural-search\.js'\)/)
+  assert.match(contentState, /await import\('\.\.\/popup\/search\.js'\)/)
+  assert.doesNotMatch(contentState, /^import\s+(?!type)[^\n]*['"]\.\.\/popup\/natural-search\.js['"]/m)
+  assert.doesNotMatch(contentState, /^import\s+(?!type)[^\n]*['"]\.\.\/popup\/search(?:-index)?\.js['"]/m)
   assert.doesNotMatch(script, /input\.addEventListener\('input', \(\) => \{[\s\S]*?renderSuggestions\(\)/)
 })
 
@@ -857,7 +867,7 @@ test('newtab search suggestions explain bookmark enter behavior and empty web se
   const css = readProjectFile('src/newtab/newtab.css')
 
   assert.match(script, /suggestionsHint\.className = 'newtab-search-hint'/)
-  assert.match(script, /createSearchWebFallbackButton\(query\)/)
+  assert.match(script, /createSearchWebFallbackButton\(trimmedQuery\)/)
   assert.match(script, /未找到书签，按 Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索/)
   assert.match(script, /suggestionsHint\.textContent = `按 Enter 打开选中的书签；Cmd\/Ctrl\+Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页`/)
   assert.match(script, /button\.addEventListener\('click', \(\) => \{[\s\S]*?submitSearch\(query\)/)

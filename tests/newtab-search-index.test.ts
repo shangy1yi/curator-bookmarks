@@ -4,6 +4,7 @@ import type { BookmarkTagIndex } from '../src/shared/bookmark-tags.js'
 import type { BookmarkRecord } from '../src/shared/types.js'
 import {
   buildNewTabSearchIndex,
+  getNaturalSearchBookmarkSuggestionsFromIndex,
   getSearchBookmarkSuggestionsFromIndex,
   normalizeNewTabSearchText,
   prepareNewTabSearchIndex
@@ -128,20 +129,20 @@ test('builds full-tree newtab search index from extracted bookmark records', () 
       id: entry.id,
       folderTitle: entry.folderTitle,
       folderPath: entry.folderPath,
-      hasPopupSearchBookmark: Boolean(entry.searchBookmark)
+      hasPopupSearchSource: Boolean(entry.sourceBookmark)
     })),
     [
       {
         id: 'selected',
         folderTitle: 'New Tab',
         folderPath: 'Bookmarks Bar / New Tab',
-        hasPopupSearchBookmark: true
+        hasPopupSearchSource: true
       },
       {
         id: 'outside',
         folderTitle: 'Rust',
         folderPath: 'Other Bookmarks / Engineering / Rust',
-        hasPopupSearchBookmark: true
+        hasPopupSearchSource: true
       }
     ]
   )
@@ -171,7 +172,7 @@ test('finds full-tree bookmarks outside selected source folders', () => {
   assert.equal(suggestions[0]?.folderPath, 'Other Bookmarks / Frontend')
 })
 
-test('reuses popup search for Chinese pinyin and bookmark tags', () => {
+test('reuses lazy popup search for Chinese pinyin while keeping tags in the light index', async () => {
   const tagIndex: BookmarkTagIndex = {
     version: 1,
     updatedAt: 1,
@@ -212,11 +213,12 @@ test('reuses popup search for Chinese pinyin and bookmark tags', () => {
     tagIndex
   })
 
-  assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('qianduan', index, 6).map((item) => item.id), ['zh'])
   assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('pinia', index, 6).map((item) => item.id), ['zh'])
+  assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('qianduan', index, 6).map((item) => item.id), [])
+  assert.deepEqual((await getNaturalSearchBookmarkSuggestionsFromIndex('qianduan', index, 6)).map((item) => item.id), ['zh'])
 })
 
-test('uses popup local natural-language expansion without remote AI', () => {
+test('uses popup local natural-language expansion without remote AI', async () => {
   const now = new Date(2026, 4, 4).getTime()
   const index = buildNewTabSearchIndex({
     bookmarks: [
@@ -244,7 +246,16 @@ test('uses popup local natural-language expansion without remote AI', () => {
     ]
   })
 
-  const suggestions = getSearchBookmarkSuggestionsFromIndex(
+  const directSuggestions = getSearchBookmarkSuggestionsFromIndex(
+    '帮我找最近 2 周收藏的 React 表格教程 不要视频',
+    index,
+    6,
+    { now }
+  )
+
+  assert.deepEqual(directSuggestions.map((suggestion) => suggestion.id), [])
+
+  const suggestions = await getNaturalSearchBookmarkSuggestionsFromIndex(
     '帮我找最近 2 周收藏的 React 表格教程 不要视频',
     index,
     6,
@@ -298,7 +309,7 @@ test('prepares reusable search lookup structures without changing popup matching
 
   assert.equal(prepared.entries, index)
   assert.equal(prepared.supportsPopupSearch, true)
-  assert.equal(prepared.popupBookmarks.length, 1)
+  assert.equal(prepared.popupSearchEntries.length, 1)
   assert.equal(prepared.entriesById.get('tagged'), index[0])
   assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('pinia', prepared, 6).map((item) => item.id), ['tagged'])
 })

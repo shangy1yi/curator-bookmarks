@@ -19,6 +19,7 @@ import {
   loadBookmarkTagIndex,
   type BookmarkTagIndex
 } from '../shared/bookmark-tags.js'
+import type { ContentSnapshotIndex } from '../shared/content-snapshots.js'
 import { cancelExitMotion, closeWithExitMotion } from '../shared/motion.js'
 import {
   DEFAULT_ICON_SETTINGS,
@@ -45,6 +46,7 @@ import {
   collectPortalBookmarkSourceItems,
   createLoadingStateView,
   getPortalQuickAccessItems,
+  getNaturalSearchBookmarkSuggestionsFromIndex,
   getNewTabSourceAnchorId,
   getSearchBookmarkSuggestionsFromIndex,
   prepareNewTabSearchIndex,
@@ -120,10 +122,6 @@ import {
   normalizeTimeSettings,
   type NewTabTimeSettings
 } from './time-settings.js'
-import {
-  loadPopupSearchIndexSnapshotState,
-  type PopupSearchIndexSnapshotState
-} from '../popup/search-index.js'
 const FAVICON_SIZE = 64
 const FAVICON_COLOR_SAMPLE_SIZE = 32
 const CUSTOM_ICON_MAX_BYTES = 2 * 1024 * 1024
@@ -255,7 +253,7 @@ const state = {
   rootNode: null as chrome.bookmarks.BookmarkTreeNode | null,
   folderData: null as ExtractedBookmarkData | null,
   bookmarkTagIndex: null as BookmarkTagIndex | null,
-  searchSnapshotState: null as PopupSearchIndexSnapshotState | null,
+  searchSnapshotIndex: null as ContentSnapshotIndex | null,
   folderNodeMap: new Map<string, chrome.bookmarks.BookmarkTreeNode>(),
   folderNode: null as chrome.bookmarks.BookmarkTreeNode | null,
   folderSections: [] as NewTabFolderSection[],
@@ -2656,7 +2654,7 @@ async function refreshNewTab(): Promise<void> {
   render()
 
   try {
-    const [tree, stored, tagIndex, snapshotState] = await Promise.all([
+    const [tree, stored, tagIndex] = await Promise.all([
       getBookmarkTree(),
       getLocalStorage([
         STORAGE_KEYS.newTabCustomIcons,
@@ -2667,10 +2665,10 @@ async function refreshNewTab(): Promise<void> {
         STORAGE_KEYS.newTabGeneralSettings,
         STORAGE_KEYS.newTabFolderSettings,
         STORAGE_KEYS.newTabTimeSettings,
-        STORAGE_KEYS.newTabActivity
+        STORAGE_KEYS.newTabActivity,
+        STORAGE_KEYS.contentSnapshotIndex
       ]),
-      loadBookmarkTagIndex().catch(() => null),
-      loadPopupSearchIndexSnapshotState().catch(() => null)
+      loadBookmarkTagIndex().catch(() => null)
     ])
     const rootNode = tree[0] || null
     const folderData = extractBookmarkData(rootNode)
@@ -2684,7 +2682,7 @@ async function refreshNewTab(): Promise<void> {
     state.rootNode = rootNode
     state.folderData = folderData
     state.bookmarkTagIndex = tagIndex
-    state.searchSnapshotState = snapshotState
+    state.searchSnapshotIndex = normalizeNewTabContentSnapshotIndex(stored[STORAGE_KEYS.contentSnapshotIndex])
     state.folderNodeMap = folderNodeMap
     state.folderSettings = folderSettings
     state.folderSections = folderSections
@@ -3303,7 +3301,7 @@ function createSearchWidget(): HTMLElement | null {
         updateEngineButton()
         closeEngineMenu()
         input.focus()
-        renderSuggestions({ preserveActive: true })
+        scheduleSuggestionsRender({ preserveActive: true, immediate: true })
       })
       menu.appendChild(item)
     }
@@ -3373,23 +3371,29 @@ function createSearchWidget(): HTMLElement | null {
     input.removeAttribute('aria-activedescendant')
   }
 
-  const renderSuggestions = ({ preserveActive = false, queryOverride = input.value } = {}) => {
-    const query = String(queryOverride || '').trim()
+  const renderSuggestions = (suggestionList: SearchBookmarkSuggestion[], {
+    preserveActive = false,
+    query = input.value
+  }: {
+    preserveActive?: boolean
+    query?: string
+  } = {}) => {
+    const trimmedQuery = String(query || '').trim()
     const previousActiveIndex = activeSuggestionIndex
-    searchSuggestions = getSearchBookmarkSuggestions(queryOverride)
+    searchSuggestions = suggestionList
     if (!searchSuggestions.length) {
       activeSuggestionIndex = -1
       suggestions.replaceChildren()
       suggestions.hidden = true
       input.removeAttribute('aria-activedescendant')
-      if (!query) {
+      if (!trimmedQuery) {
         hideSuggestions()
         return
       }
 
       suggestionsHeading.textContent = '网页搜索'
       suggestionsHeading.hidden = false
-      suggestionsHint.replaceChildren(createSearchWebFallbackButton(query))
+      suggestionsHint.replaceChildren(createSearchWebFallbackButton(trimmedQuery))
       suggestionsHint.hidden = false
       suggestionsPanel.classList.remove('hidden')
       input.setAttribute('aria-expanded', 'true')
@@ -3434,9 +3438,31 @@ function createSearchWidget(): HTMLElement | null {
     suggestionRequestId = requestId
     window.clearTimeout(suggestionDebounceTimer)
 
+    const renderCurrentSuggestions = () => {
+      const directSuggestions = getSearchBookmarkSuggestions(query)
+      if (requestId !== suggestionRequestId) {
+        return
+      }
+
+      renderSuggestions(directSuggestions, { preserveActive, query })
+      if (!shouldLoadNaturalSearchSuggestions(query, directSuggestions)) {
+        return
+      }
+
+      void getNaturalSearchBookmarkSuggestions(query).then((naturalSuggestions) => {
+        if (requestId !== suggestionRequestId) {
+          return
+        }
+
+        renderSuggestions(naturalSuggestions, { preserveActive: true, query })
+      }).catch(() => {
+        // Keep the direct suggestions visible if the optional natural-search chunk fails to load.
+      })
+    }
+
     if (!query.trim() || immediate) {
       suggestionDebounceTimer = 0
-      renderSuggestions({ preserveActive, queryOverride: query })
+      renderCurrentSuggestions()
       return
     }
 
@@ -3445,7 +3471,7 @@ function createSearchWidget(): HTMLElement | null {
       if (requestId !== suggestionRequestId) {
         return
       }
-      renderSuggestions({ preserveActive, queryOverride: query })
+      renderCurrentSuggestions()
     }, SEARCH_SUGGESTION_DEBOUNCE_MS)
   }
 
@@ -3460,7 +3486,7 @@ function createSearchWidget(): HTMLElement | null {
     activeSuggestionIndex = activeSuggestionIndex < 0
       ? (direction > 0 ? 0 : searchSuggestions.length - 1)
       : (activeSuggestionIndex + direction + searchSuggestions.length) % searchSuggestions.length
-    renderSuggestions({ preserveActive: true })
+    renderSuggestions(searchSuggestions, { preserveActive: true, query: input.value })
   }
 
   input.addEventListener('input', () => {
@@ -3586,6 +3612,7 @@ function syncSearchInputActions(
 }
 
 const searchSuggestionCache = new Map<string, SearchBookmarkSuggestion[]>()
+const naturalSearchSuggestionCache = new Map<string, Promise<SearchBookmarkSuggestion[]>>()
 
 function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[] {
   const cacheKey = getSearchSuggestionCacheKey(query)
@@ -3612,11 +3639,118 @@ function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[]
   return suggestions
 }
 
+function getNaturalSearchBookmarkSuggestions(query: string): Promise<SearchBookmarkSuggestion[]> {
+  const cacheKey = getSearchSuggestionCacheKey(query)
+  const cached = naturalSearchSuggestionCache.get(cacheKey)
+  if (cached) {
+    naturalSearchSuggestionCache.delete(cacheKey)
+    naturalSearchSuggestionCache.set(cacheKey, cached)
+    return cached
+  }
+
+  const suggestionsPromise = getNaturalSearchBookmarkSuggestionsFromIndex(
+    query,
+    state.preparedSearchIndex,
+    SEARCH_SUGGESTION_LIMIT
+  )
+  naturalSearchSuggestionCache.set(cacheKey, suggestionsPromise)
+  while (naturalSearchSuggestionCache.size > SEARCH_SUGGESTION_CACHE_LIMIT) {
+    const oldestKey = naturalSearchSuggestionCache.keys().next().value
+    if (!oldestKey) {
+      break
+    }
+    naturalSearchSuggestionCache.delete(oldestKey)
+  }
+  return suggestionsPromise
+}
+
+function shouldLoadNaturalSearchSuggestions(
+  query: string,
+  directSuggestions: SearchBookmarkSuggestion[]
+): boolean {
+  const normalizedQuery = normalizeNewTabSearchText(query)
+  if (!normalizedQuery) {
+    return false
+  }
+  if (!directSuggestions.length) {
+    return true
+  }
+  return /帮我|帮忙|麻烦|请|找|搜索|查找|收藏|书签|不要|不看|排除|过滤|剔除|去掉|最近|近期|过去|上周|本周|今天|昨天/
+    .test(normalizedQuery) ||
+    /\b(?:last|this|recent|recently|saved|bookmark|bookmarks|without|exclude|excluding|not|no|find|show)\b/i
+      .test(normalizedQuery)
+}
+
+function normalizeNewTabContentSnapshotIndex(raw: unknown): ContentSnapshotIndex {
+  const source = raw && typeof raw === 'object'
+    ? raw as { updatedAt?: unknown; records?: unknown }
+    : {}
+  const rawRecords = source.records && typeof source.records === 'object'
+    ? source.records as Record<string, unknown>
+    : {}
+  const records: ContentSnapshotIndex['records'] = {}
+
+  for (const [fallbackBookmarkId, rawRecord] of Object.entries(rawRecords)) {
+    const record = normalizeNewTabContentSnapshotRecord(rawRecord, fallbackBookmarkId)
+    if (record.bookmarkId && record.snapshotId) {
+      records[record.bookmarkId] = record
+    }
+  }
+
+  return {
+    version: 1,
+    updatedAt: Number(source.updatedAt) || 0,
+    records
+  }
+}
+
+function normalizeNewTabContentSnapshotRecord(raw: unknown, fallbackBookmarkId: string): ContentSnapshotIndex['records'][string] {
+  const source = raw && typeof raw === 'object'
+    ? raw as Record<string, unknown>
+    : {}
+  const bookmarkId = String(source.bookmarkId || fallbackBookmarkId || '').trim()
+  const snapshotId = String(source.snapshotId || bookmarkId || '').trim()
+  const fullTextStorage = ['local', 'idb'].includes(String(source.fullTextStorage))
+    ? String(source.fullTextStorage) as ContentSnapshotIndex['records'][string]['fullTextStorage']
+    : 'none'
+
+  return {
+    snapshotId,
+    bookmarkId,
+    url: String(source.url || '').trim(),
+    title: normalizeNewTabSnapshotText(source.title),
+    summary: normalizeNewTabSnapshotText(source.summary),
+    headings: normalizeNewTabSnapshotTextList(source.headings, 28),
+    canonicalUrl: String(source.canonicalUrl || '').trim(),
+    finalUrl: String(source.finalUrl || '').trim(),
+    contentType: normalizeNewTabSnapshotText(source.contentType),
+    source: normalizeNewTabSnapshotText(source.source),
+    extractionStatus: normalizeNewTabSnapshotText(source.extractionStatus),
+    extractedAt: Number(source.extractedAt) || 0,
+    hasFullText: source.hasFullText === true,
+    fullTextBytes: Number(source.fullTextBytes) || 0,
+    fullTextStorage,
+    fullText: fullTextStorage === 'local' ? normalizeNewTabSnapshotText(source.fullText) : undefined,
+    fullTextRef: fullTextStorage === 'idb' ? String(source.fullTextRef || snapshotId || '').trim() : undefined,
+    warnings: normalizeNewTabSnapshotTextList(source.warnings, 8)
+  }
+}
+
+function normalizeNewTabSnapshotText(value: unknown, limit = 500): string {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function normalizeNewTabSnapshotTextList(value: unknown, limit: number): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => normalizeNewTabSnapshotText(item, 120)).filter(Boolean).slice(0, limit)
+    : []
+}
+
 function getSearchSuggestionCacheKey(query: string): string {
   return [
     state.preparedSearchIndex.entries.length,
     state.bookmarkTagIndex?.updatedAt || 0,
-    state.searchSnapshotState?.index?.updatedAt || 0,
+    state.searchSnapshotIndex?.updatedAt || 0,
     normalizeNewTabSearchText(query)
   ].join(':')
 }
@@ -4542,10 +4676,11 @@ function refreshDerivedBookmarkState(): void {
   state.searchIndex = buildNewTabSearchIndex({
     bookmarks: state.folderData?.bookmarks || extractBookmarkData(state.rootNode).bookmarks,
     tagIndex: state.bookmarkTagIndex,
-    snapshotIndex: state.searchSnapshotState?.index || null
+    snapshotIndex: state.searchSnapshotIndex
   })
   state.preparedSearchIndex = prepareNewTabSearchIndex(state.searchIndex)
   searchSuggestionCache.clear()
+  naturalSearchSuggestionCache.clear()
 }
 
 function getBookmarkById(bookmarkId: string): chrome.bookmarks.BookmarkTreeNode | null {

@@ -7,7 +7,7 @@
 - 集成分支：`integration/goal-final-polish-20260504`
 - 集成 worktree：`/mnt/g/coding/worktrees/goal-final-polish-20260504`
 - 基线：`main@11582da` / `v1.4.23`
-- 当前集成提交：`51396de`。
+- 当前集成提交：待本次最终提交后更新。
 
 本轮采用多 agent 分支审查与修复流程，覆盖性能、UI、功能、人性化体验、构建安全五个可合并改动方向。主工作区 `/mnt/g/coding/chromebookmark` 保持在 `main@11582da`，未合并到 `main`。
 
@@ -30,6 +30,12 @@
   - 影响：大量快照保存时放大 IndexedDB/local storage 读取和 map 重建成本。
   - 建议：只更新被保存书签对应的 search text entry。
   - 处理：已完成，新增单条 search text entry 更新路径和回归测试。
+
+- [中] 性能：newtab 首屏预加载 popup 搜索重 chunk
+  - 位置：`src/newtab/content-state.ts`、`src/newtab/newtab.ts`
+  - 影响：newtab 初始 HTML 曾预加载 `natural-search`、`search`/`search-index`、`content-snapshots` 等搜索相关 chunk，其中搜索 chunk 约 312KB，普通打开新标签页也要承担成本。
+  - 建议：保留轻量同步书签建议，pinyin、自然语言、复杂 popup 搜索能力改为用户输入后按需动态加载。
+  - 处理：已完成，普通关键词命中不加载搜索重 chunk；无轻量命中或明显自然语言查询时再按需加载。
 
 - [高] 功能：标签索引并发写入可能覆盖字段
   - 位置：`src/shared/bookmark-tags.ts`
@@ -94,6 +100,15 @@
    - 严重程度：中
    - 推荐优化方向：按 bookmark id 增量更新 search text entry。
    - 是否需要 benchmark 或 profile 验证：建议用 1000+ 快照 profile；当前已有回归测试覆盖。
+   - 处理状态：已修复。
+
+4. newtab 首屏预加载搜索重 chunk
+   - 问题位置：`src/newtab/content-state.ts`、`src/newtab/newtab.ts`
+   - 问题描述：newtab 为搜索建议静态依赖 popup 搜索索引和自然语言搜索，导致 Vite 在 `dist/src/newtab/newtab.html` 中注入 `search-*`、`natural-search-*`、`content-snapshots-*` 等 `modulepreload`。
+   - 影响范围：每次打开 newtab 的首屏加载，即使用户没有使用搜索。
+   - 严重程度：中
+   - 推荐优化方向：拆分轻量本地索引和重搜索能力；标题、URL、文件夹、标签、摘要等轻量匹配保持同步，pinyin/自然语言/复杂 popup 搜索通过动态 import 按需加载。
+   - 是否需要 benchmark 或 profile 验证：建议后续用 Chrome Performance/Network 对真实书签规模做冷启动对比；当前已用构建产物和 Playwright 网络请求确认首屏不再加载搜索重 chunk。
    - 处理状态：已修复。
 
 ## 四、UI 审查结果
@@ -228,6 +243,11 @@
   - 影响范围：newtab/options/popup UI 与可访问性。
   - 测试方式：`npm test`、`npm run typecheck`
 
+- 集成分支补充优化 / 待本次最终提交后更新
+  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议。
+  - 影响范围：`src/popup/popup.css`、`src/newtab/content-state.ts`、`src/newtab/newtab.ts`、相关测试。
+  - 测试方式：focused tests、`npm test`、`npm run validate`、Playwright 产物/搜索冒烟。
+
 - 集成分支合并提交：
   - `a4f74ba` merge build-security
   - `ca10295` merge functional-core
@@ -240,10 +260,13 @@
 - `npm audit --json`：0 vulnerabilities。
 - `npm run typecheck`：通过。
 - `npm run lint`：通过；当前脚本等价于 `npm run typecheck`。
-- `npm test`：307/307 通过。
+- `npm test`：308/308 通过。
 - `npm run check:version`：通过，版本 `1.4.23`。
 - `npm run build`：通过。
 - `npm run validate`：通过，覆盖 typecheck、test、check:version、build。
+- focused newtab 搜索测试：通过。
+  - `node --test .tmp-test/tests/newtab-search-index.test.js .tmp-test/tests/newtab-content-state.test.js`：53/53 通过。
+  - 覆盖轻量同步建议缓存、自然语言搜索动态 import、pinyin 动态搜索、无匹配网页搜索 fallback。
 - Playwright 扩展冒烟：通过。
   - 实际加载 `dist` 扩展。
   - newtab：`#newtab-root` 可见，无 pageerror/console error。
@@ -259,6 +282,13 @@
 - Playwright 跨视口检查：通过。
   - 1280x900 和 390x844 下，newtab、options dashboard、popup 根节点均可见。
   - 修复后 popup 在 390px 窄视口下 `scrollWidth === clientWidth`，无横向溢出。
+- Playwright newtab 搜索加载策略检查：通过。
+  - fresh profile 打开 newtab 无 pageerror/console error。
+  - 普通关键词命中本地书签时，搜索建议可见，且仅加载 `newtab` 主 chunk、`bookmark-tags`、`dot-matrix-loader` 和 CSS，未加载 `search-*`、`natural-search-*`、`content-snapshots-*`。
+  - 无本地匹配时网页搜索 fallback 可见，无 pageerror/console error。
+- dist modulepreload 检查：通过。
+  - `dist/src/newtab/newtab.html` 只预加载 `bookmark-tags-*` 和 `dot-matrix-loader-*`。
+  - 未发现 newtab 首屏 `modulepreload` 预加载 `search-*`、`natural-search-*` 或 `content-snapshots-*`。
 - Playwright 可访问名称检查：通过。
   - newtab、options dashboard、popup 中可见交互控件均有可访问名称。
   - 未发现可见的无名 `button`、`a[href]`、`input`、`select`、`textarea` 或 `role="button"` 控件。
@@ -281,11 +311,13 @@
 - dashboard 标签隐藏展开支持鼠标和键盘。
 - popup 模态背景 inert，改善可访问性。
 - popup 根布局支持窄视口收缩，避免独立页面或窄屏容器横向溢出。
+- newtab 搜索保留轻量同步建议，将 pinyin、自然语言、复杂 popup 搜索 chunk 改为按需加载，降低普通打开新标签页和普通关键词搜索的初始资源成本。
 
 ## 十、创新了什么功能
 
 - newtab 来源候选展示“直属 N / 合计 M”，让用户理解父文件夹和子文件夹展示范围。
 - newtab 搜索同时支持本地书签优先和无匹配网页搜索 fallback。
+- newtab 搜索采用分层加载：轻量建议即时响应，复杂语义/pinyin 能力在必要时再加载。
 - newtab dashboard iframe 增加可恢复失败状态，用户可返回或重试。
 - 首次使用时自动聚合书签栏子文件夹，减少用户手动配置成本。
 
