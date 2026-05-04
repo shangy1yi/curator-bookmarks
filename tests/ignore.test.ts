@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { test } from 'node:test'
 
 import {
+  getIgnoreRuleActionLabel,
   matchesIgnoreRules,
   normalizeIgnoreRules,
   serializeIgnoreRules
 } from '../src/options/sections/ignore.js'
 import { managerState } from '../src/options/shared-options/state.js'
+
+function readProjectFile(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), 'utf8')
+}
 
 test('normalizes and serializes ignore rules', () => {
   const rules = normalizeIgnoreRules({
@@ -33,4 +40,39 @@ test('matches ignore rules by bookmark, domain or ancestor folder', () => {
   assert.equal(matchesIgnoreRules({ id: 'bookmark-2', domain: 'example.com' }), true)
   assert.equal(matchesIgnoreRules({ id: 'bookmark-3', ancestorIds: ['folder-1'] }), true)
   assert.equal(matchesIgnoreRules({ id: 'bookmark-4', domain: 'other.example', ancestorIds: [] }), false)
+})
+
+test('ignore rule action labels include rule context', () => {
+  const bookmarkLabel = getIgnoreRuleActionLabel(
+    '删除忽略规则',
+    { title: 'OpenAI Docs', url: 'https://example.com/docs' },
+    'bookmark'
+  )
+  const folderLabel = getIgnoreRuleActionLabel(
+    '删除忽略规则',
+    { title: 'Docs', path: '书签栏 / AI / Docs' },
+    'folder'
+  )
+  const domainLabel = getIgnoreRuleActionLabel(
+    '删除忽略规则',
+    { domain: 'example.com' },
+    'domain'
+  )
+  const longLabel = getIgnoreRuleActionLabel(
+    '删除忽略规则',
+    { title: '很长的忽略规则名称'.repeat(8) },
+    'bookmark'
+  )
+
+  assert.equal(bookmarkLabel, '删除忽略规则：OpenAI Docs')
+  assert.equal(folderLabel, '删除忽略规则：书签栏 / AI / Docs')
+  assert.equal(domainLabel, '删除忽略规则：example.com')
+  assert.match(longLabel, /…$/)
+})
+
+test('ignore rule remove buttons render rule-specific labels', () => {
+  const source = readProjectFile('src/options/sections/ignore.ts')
+
+  assert.match(source, /const deleteLabel = getIgnoreRuleActionLabel\('删除忽略规则', rule, kind\)/)
+  assert.match(source, /data-ignore-remove="\$\{escapeAttr\(kind\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(deleteLabel\)\}"/)
 })
