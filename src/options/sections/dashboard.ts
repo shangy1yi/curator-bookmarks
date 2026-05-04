@@ -544,6 +544,10 @@ export function handleDashboardKeydown(event: KeyboardEvent): void {
     return
   }
 
+  if (handleDashboardFolderListboxKeydown(event, target)) {
+    return
+  }
+
   if (dashboardState.tagEditorBookmarkId && isDashboardTagEditorEvent(event)) {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -1655,6 +1659,7 @@ function buildDashboardFolderSidebarItem({
   const titleText = String(title || '未命名文件夹').trim() || '未命名文件夹'
   const pathText = String(path || titleText).trim() || titleText
   const currentAttribute = active ? ' aria-current="page"' : ''
+  const tabIndex = active ? 0 : -1
 
   return `
     <button
@@ -1664,6 +1669,7 @@ function buildDashboardFolderSidebarItem({
       data-dashboard-folder-filter="${escapeAttr(id)}"
       data-dashboard-no-drag
       aria-selected="${active ? 'true' : 'false'}"
+      tabindex="${tabIndex}"
      ${currentAttribute}
       aria-label="${escapeAttr(`${pathText}，${countLabel}`)}"
       title="${escapeAttr(pathText)}"
@@ -1674,6 +1680,60 @@ function buildDashboardFolderSidebarItem({
       <span class="dashboard-folder-tree-count" title="${escapeAttr(countLabel)}">${escapeHtml(countBadge)}</span>
     </button>
   `
+}
+
+function handleDashboardFolderListboxKeydown(event: KeyboardEvent, target: HTMLElement): boolean {
+  const option = target.closest<HTMLElement>('[data-dashboard-folder-filter]')
+  if (!option || !dom.dashboardFolderTree?.contains(option)) {
+    return false
+  }
+
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowRight' &&
+    event.key !== 'ArrowUp' && event.key !== 'ArrowLeft' &&
+    event.key !== 'Home' && event.key !== 'End') {
+    return false
+  }
+
+  const options = getDashboardFolderFilterOptions()
+  if (!options.length) {
+    return false
+  }
+
+  const currentIndex = Math.max(0, options.indexOf(option))
+  let nextIndex = currentIndex
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+    nextIndex = Math.min(options.length - 1, currentIndex + 1)
+  } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+    nextIndex = Math.max(0, currentIndex - 1)
+  } else if (event.key === 'Home') {
+    nextIndex = 0
+  } else if (event.key === 'End') {
+    nextIndex = options.length - 1
+  }
+
+  event.preventDefault()
+  event.stopPropagation()
+  focusAndApplyDashboardFolderOption(options[nextIndex])
+  return true
+}
+
+function getDashboardFolderFilterOptions(): HTMLElement[] {
+  return Array.from(
+    dom.dashboardFolderTree?.querySelectorAll<HTMLElement>('[data-dashboard-folder-filter]') || []
+  )
+}
+
+function focusAndApplyDashboardFolderOption(option: HTMLElement | undefined): void {
+  if (!option) {
+    return
+  }
+
+  for (const item of getDashboardFolderFilterOptions()) {
+    item.tabIndex = item === option ? 0 : -1
+  }
+
+  option.focus()
+  applyDashboardFolderFilter(option.getAttribute('data-dashboard-folder-filter'))
 }
 
 function getDashboardFolderPathDepth(path: string): number {

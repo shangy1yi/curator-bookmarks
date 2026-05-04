@@ -57,6 +57,11 @@ test('dashboard folder filter uses listbox option semantics instead of tree sema
 
   assert.match(folderFilterElement, /role="listbox"/)
   assert.match(dashboardSource, /role="option"[\s\S]*?aria-selected="\$\{active \? 'true' : 'false'\}"/)
+  assert.match(dashboardSource, /tabindex="\$\{tabIndex\}"/)
+  assert.match(dashboardSource, /function handleDashboardFolderListboxKeydown/)
+  assert.match(dashboardSource, /event\.key !== 'ArrowDown'[\s\S]*?event\.key !== 'End'/)
+  assert.match(dashboardSource, /function focusAndApplyDashboardFolderOption/)
+  assert.match(dashboardSource, /applyDashboardFolderFilter\(option\.getAttribute\('data-dashboard-folder-filter'\)\)/)
   assert.doesNotMatch(folderFilterElement, /role="tree"/)
   assert.doesNotMatch(dashboardSource, /role="treeitem"/)
 })
