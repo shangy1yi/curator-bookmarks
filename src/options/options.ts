@@ -104,6 +104,7 @@ import {
   normalizePageContentContext
 } from './sections/content-extraction.js'
 import {
+  buildContentSnapshotSearchMap,
   buildContentSnapshotSearchMapWithFullText,
   normalizeContentSnapshotIndex,
   normalizeContentSnapshotSettings,
@@ -434,10 +435,12 @@ async function hydratePersistentState() {
     aiNamingState.tagIndex = normalizeBookmarkTagIndex(stored[STORAGE_KEYS.bookmarkTagIndex])
     contentSnapshotState.settings = normalizeContentSnapshotSettings(stored[STORAGE_KEYS.contentSnapshotSettings])
     contentSnapshotState.index = normalizeContentSnapshotIndex(stored[STORAGE_KEYS.contentSnapshotIndex])
-    contentSnapshotState.searchTextMap = await buildContentSnapshotSearchMapWithFullText(contentSnapshotState.index, {
-      includeFullText: contentSnapshotState.settings.fullTextSearchEnabled,
-      maxRecords: 1000
-    }).catch(() => new Map<string, string>())
+    contentSnapshotState.searchTextMap = buildContentSnapshotSearchMap(contentSnapshotState.index, {
+      includeFullText: false
+    })
+    contentSnapshotState.searchTextMapIncludesFullText = false
+    contentSnapshotState.searchTextMapLoadingFullText = false
+    scheduleContentSnapshotFullTextSearchMapHydration()
     hydrateFolderCleanupState(stored[STORAGE_KEYS.folderCleanupState])
     managerState.inboxSettings = normalizeInboxSettings(stored[STORAGE_KEYS.inboxSettings])
     void removeLocalStorage(LEGACY_AI_NAMING_CACHE_STORAGE_KEYS).catch(() => {})
@@ -447,6 +450,55 @@ async function hydratePersistentState() {
   } finally {
     availabilityState.storageLoading = false
     renderAvailabilitySection()
+  }
+}
+
+function scheduleContentSnapshotFullTextSearchMapHydration(): void {
+  if (
+    !contentSnapshotState.settings.fullTextSearchEnabled ||
+    contentSnapshotState.searchTextMapIncludesFullText ||
+    contentSnapshotState.searchTextMapLoadingFullText
+  ) {
+    return
+  }
+
+  const hydrate = () => {
+    void hydrateContentSnapshotFullTextSearchMap()
+  }
+
+  const requestIdleCallback = (window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number
+  }).requestIdleCallback?.bind(window)
+
+  if (requestIdleCallback) {
+    requestIdleCallback(hydrate, { timeout: 3000 })
+    return
+  }
+
+  window.setTimeout(hydrate, 0)
+}
+
+async function hydrateContentSnapshotFullTextSearchMap(): Promise<void> {
+  if (
+    !contentSnapshotState.settings.fullTextSearchEnabled ||
+    contentSnapshotState.searchTextMapIncludesFullText ||
+    contentSnapshotState.searchTextMapLoadingFullText
+  ) {
+    return
+  }
+
+  contentSnapshotState.searchTextMapLoadingFullText = true
+  try {
+    contentSnapshotState.searchTextMap = await buildContentSnapshotSearchMapWithFullText(contentSnapshotState.index, {
+      includeFullText: true,
+      maxRecords: 1000
+    })
+    contentSnapshotState.searchTextMapIncludesFullText = true
+    renderDashboardSection()
+  } catch {
+    contentSnapshotState.searchTextMapIncludesFullText = false
+  } finally {
+    contentSnapshotState.searchTextMapLoadingFullText = false
   }
 }
 
@@ -2936,6 +2988,8 @@ async function saveContentSnapshotSettingsFromDom({
       includeFullText: contentSnapshotState.settings.fullTextSearchEnabled,
       maxRecords: 1000
     }).catch(() => new Map<string, string>())
+    contentSnapshotState.searchTextMapIncludesFullText = contentSnapshotState.settings.fullTextSearchEnabled
+    contentSnapshotState.searchTextMapLoadingFullText = false
     contentSnapshotState.statusMessage = '网页内容索引设置已保存。'
   } catch (error) {
     contentSnapshotState.statusMessage =
@@ -6246,6 +6300,8 @@ async function saveContentSnapshotForAiPreparedItem(preparedItem): Promise<void>
       includeFullText: contentSnapshotState.settings.fullTextSearchEnabled,
       maxRecords: 1000
     }).catch(() => contentSnapshotState.searchTextMap)
+    contentSnapshotState.searchTextMapIncludesFullText = contentSnapshotState.settings.fullTextSearchEnabled
+    contentSnapshotState.searchTextMapLoadingFullText = false
     contentSnapshotState.aiRunSavedCount += 1
     contentSnapshotState.statusMessage = ''
     renderContentSnapshotSettings()

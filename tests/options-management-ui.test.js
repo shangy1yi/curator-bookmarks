@@ -57,8 +57,23 @@ test('dashboard renders a clickable folder sidebar filter with bookmark counts',
   assert.match(dashboardSource, /BOOKMARKS_BAR_ID/)
   assert.match(dashboardSource, /bookmarkCount/)
   assert.match(dashboardSource, /个书签/)
+  assert.match(dashboardSource, /getCachedDashboardFolderBookmarkCounts/)
+  assert.match(dashboardSource, /getCachedDashboardFolderSidebarMarkup/)
   assert.match(dashboardSource, /(?:active|current)/)
   assert.doesNotMatch(dashboardSource, /title:\s*'全部书签'/)
+})
+
+test('content snapshot full text search map is not awaited during initial options hydration', () => {
+  const optionsSource = readProjectFile('src/options/options.ts')
+  const hydrateBody = optionsSource.match(/async function hydratePersistentState\(\) \{([\s\S]*?)async function saveAiNamingSettings/)?.[1] || ''
+  const initialMapAssignment = hydrateBody.match(/contentSnapshotState\.searchTextMap = ([\s\S]*?)\n    contentSnapshotState\.searchTextMapIncludesFullText/)?.[1] || ''
+
+  assert.match(optionsSource, /scheduleContentSnapshotFullTextSearchMapHydration/)
+  assert.match(initialMapAssignment, /buildContentSnapshotSearchMap\(/)
+  assert.doesNotMatch(initialMapAssignment, /await buildContentSnapshotSearchMapWithFullText/)
+  assert.match(optionsSource, /requestIdleCallback/)
+  assert.match(optionsSource, /hydrateContentSnapshotFullTextSearchMap/)
+  assert.match(readProjectFile('src/options/sections/dashboard.ts'), /ensureDashboardFullTextSearchMapForQuery/)
 })
 
 test('dashboard virtual grid computes bounded windows for large card lists', async () => {

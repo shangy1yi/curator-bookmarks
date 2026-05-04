@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  buildDashboardFolderBookmarkCounts,
   buildDashboardModel,
   filterDashboardItems,
   getDashboardDateMeta,
@@ -289,4 +290,22 @@ test('builds folder targets and exposes top-folder/date helpers', () => {
   assert.equal(getDashboardTopFolder(bookmark({ ancestorIds: [], parentId: '10' }), folderMap)?.id, '10')
   assert.deepEqual(getDashboardDateMeta(0), { key: 'unknown', label: '未知时间', known: false })
   assert.equal(getDashboardDateMeta(Date.UTC(2026, 11, 31)).key, '2026-12')
+})
+
+test('builds dashboard folder bookmark counts without depending on query filters', () => {
+  const model = buildDashboardModel({
+    bookmarks: [
+      bookmark({ id: 'b1', ancestorIds: ['1', '10'], parentId: '10' }),
+      bookmark({ id: 'b2', ancestorIds: ['1', '20'], parentId: '20' }),
+      bookmark({ id: 'b3', ancestorIds: ['2'], parentId: '21' })
+    ]
+  })
+
+  const counts = buildDashboardFolderBookmarkCounts(model.items)
+
+  assert.equal(counts.get('1'), 2)
+  assert.equal(counts.get('10'), 1)
+  assert.equal(counts.get('20'), 1)
+  assert.equal(counts.get('2'), 1)
+  assert.equal(counts.get('21'), 1)
 })
