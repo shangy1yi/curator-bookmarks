@@ -3367,6 +3367,7 @@ function createSearchWidget(): HTMLElement | null {
   input.enterKeyHint = 'search'
   input.placeholder = searchPlaceholder
   input.spellcheck = false
+  input.setAttribute('role', 'combobox')
   input.setAttribute('aria-label', '输入关键词搜索书签，或按 Enter 搜索网页')
   input.setAttribute('aria-autocomplete', 'list')
   input.setAttribute('aria-controls', 'newtab-search-suggestions')

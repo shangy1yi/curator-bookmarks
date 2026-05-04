@@ -883,6 +883,10 @@ test('newtab search suggestions explain bookmark enter behavior and empty web se
   const script = readProjectFile('src/newtab/newtab.ts')
   const css = readProjectFile('src/newtab/newtab.css')
 
+  assert.match(script, /input\.setAttribute\('role', 'combobox'\)/)
+  assert.match(script, /input\.setAttribute\('aria-autocomplete', 'list'\)/)
+  assert.match(script, /input\.setAttribute\('aria-controls', 'newtab-search-suggestions'\)/)
+  assert.match(script, /suggestions\.setAttribute\('role', 'listbox'\)/)
   assert.match(script, /suggestionsHint\.className = 'newtab-search-hint'/)
   assert.match(script, /createSearchWebFallbackButton\(trimmedQuery\)/)
   assert.match(script, /未找到书签，按 Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索/)
