@@ -4762,12 +4762,28 @@ function levenshteinDistance(left, right) {
   return previous[right.length]
 }
 
+function getAiNamingResultActionLabel(action, result) {
+  const title = String(result?.currentTitle || result?.suggestedTitle || displayUrl(result?.url) || '未命名书签')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const safeTitle = title.length > 48 ? `${title.slice(0, 47).trim()}…` : title
+
+  return `${action}：${safeTitle || '未命名书签'}`
+}
+
 function buildAiNamingResultCard(result) {
   const selectable = result.status === 'suggested'
   const interactionLocked = aiNamingState.running || aiNamingState.applying
   const isSelected = aiNamingState.selectedResultIds.has(String(result.id))
   const canMoveToSuggestedFolder = canMoveAiNamingResultToSuggestedFolder(result)
   const pendingMove = aiNamingState.pendingMoveResultIds.has(String(result.id))
+  const selectionLabel = getAiNamingResultActionLabel(
+    selectable ? '选择书签智能分析建议' : '书签智能分析建议不可直接应用',
+    result
+  )
+  const openLabel = getAiNamingResultActionLabel('打开书签页面', result)
+  const applyLabel = getAiNamingResultActionLabel('应用书签智能分析建议', result)
+  const moveLabel = getAiNamingResultActionLabel('移动至推荐文件夹', result)
   const badgeTone = result.status === 'failed'
     ? 'danger'
     : result.confidence === 'high'
@@ -4797,6 +4813,7 @@ function buildAiNamingResultCard(result) {
           type="button"
           data-ai-move-recommended="${escapeAttr(result.id)}"
           title="${escapeAttr(pendingMove ? `再次点击，移动到 ${result.suggestedFolder}` : `移动到 ${result.suggestedFolder}`)}"
+          aria-label="${escapeAttr(moveLabel)}"
           ${interactionLocked ? 'disabled' : ''}
         >
           ${pendingMove ? '<span class="double-confirm-icon" aria-hidden="true">✓✓</span> 确认移动' : '移动至推荐文件夹'}
@@ -4847,6 +4864,7 @@ function buildAiNamingResultCard(result) {
             <input
               type="checkbox"
               data-ai-select="${escapeAttr(result.id)}"
+              aria-label="${escapeAttr(selectionLabel)}"
               ${selectable && isSelected ? 'checked' : ''}
               ${selectable && !interactionLocked ? '' : 'disabled'}
             >
@@ -4857,8 +4875,8 @@ function buildAiNamingResultCard(result) {
           ${Number.isFinite(Number(result.confidenceScore)) ? `<span class="options-chip muted">${escapeHtml(Math.round(Number(result.confidenceScore) * 100))}%</span>` : ''}
         </div>
         <div class="detect-result-actions">
-          <a class="detect-result-open" href="${escapeAttr(result.url)}" target="_blank" rel="noreferrer noopener">打开页面</a>
-          ${selectable ? `<button class="detect-result-action" type="button" data-ai-apply="${escapeAttr(result.id)}" ${interactionLocked ? 'disabled' : ''}>应用建议</button>` : ''}
+          <a class="detect-result-open" href="${escapeAttr(result.url)}" target="_blank" rel="noreferrer noopener" aria-label="${escapeAttr(openLabel)}">打开页面</a>
+          ${selectable ? `<button class="detect-result-action" type="button" data-ai-apply="${escapeAttr(result.id)}" aria-label="${escapeAttr(applyLabel)}" ${interactionLocked ? 'disabled' : ''}>应用建议</button>` : ''}
         </div>
       </div>
       <div class="detect-result-copy ai-result-copy">

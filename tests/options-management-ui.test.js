@@ -508,6 +508,20 @@ test('smart bookmark analysis uses the decision panel summary layout', () => {
   assert.match(optionsCss, /\.ai-decision-grid/)
 })
 
+test('smart bookmark analysis result actions expose bookmark-specific labels', () => {
+  const optionsSource = readProjectFile('src/options/options.ts')
+
+  assert.match(optionsSource, /function getAiNamingResultActionLabel\(action, result\)/)
+  assert.match(optionsSource, /const selectionLabel = getAiNamingResultActionLabel\([\s\S]*?选择书签智能分析建议/)
+  assert.match(optionsSource, /const openLabel = getAiNamingResultActionLabel\('打开书签页面', result\)/)
+  assert.match(optionsSource, /const applyLabel = getAiNamingResultActionLabel\('应用书签智能分析建议', result\)/)
+  assert.match(optionsSource, /const moveLabel = getAiNamingResultActionLabel\('移动至推荐文件夹', result\)/)
+  assert.match(optionsSource, /data-ai-select="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(selectionLabel\)\}"/)
+  assert.match(optionsSource, /data-ai-move-recommended="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(moveLabel\)\}"/)
+  assert.match(optionsSource, /<a class="detect-result-open"[\s\S]*?aria-label="\$\{escapeAttr\(openLabel\)\}"/)
+  assert.match(optionsSource, /data-ai-apply="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(applyLabel\)\}"/)
+})
+
 test('availability checks use adaptive runner with user settings', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const optionsSource = readProjectFile('src/options/options.ts')
