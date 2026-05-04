@@ -62,8 +62,11 @@ test('dashboard folder switch update state masks partially rendered cards', () =
   assert.match(css, /\.dashboard-card-grid\s*\{[\s\S]*?scrollbar-gutter:\s*stable/)
   assert.match(css, /\.dashboard-card-grid\.is-updating\s*>\s*\*\s*\{[\s\S]*?opacity:\s*0/)
   assert.match(css, /\.dashboard-card-grid\.is-updating::before/)
-  assert.match(css, /\.dashboard-card-grid\.is-updating::after/)
-  assert.match(css, /\.dashboard-card-grid\.is-updating::after\s*\{[\s\S]*?正在更新视图/)
+  assert.doesNotMatch(css, /\.dashboard-card-grid\.is-updating::after/)
+  assert.doesNotMatch(css, /正在更新视图/)
+  assert.match(css, /\.dashboard-update-overlay\s*\{[\s\S]*?position:\s*absolute[\s\S]*?pointer-events:\s*none/)
+  assert.match(css, /\.dashboard-update-indicator\s*\{[\s\S]*?width:\s*54px[\s\S]*?border-radius:\s*16px/)
+  assert.match(css, /\.dashboard-update-dot-loader\s*\{[\s\S]*?width:\s*30px[\s\S]*?height:\s*30px/)
 })
 
 test('dashboard folder switch chrome keeps text layout stable', () => {
@@ -196,4 +199,19 @@ test('dashboard resize observer masks stale virtual cards before rerender', () =
       observerBody.indexOf('scheduleDashboardVirtualRender()'),
     'resize should hide the old virtual window before scheduling the new render'
   )
+})
+
+test('dashboard stable update overlay uses the shared dot matrix loader', () => {
+  const testDir = dirname(fileURLToPath(import.meta.url))
+  const sourcePath = resolve(testDir, '../../src/options/sections/dashboard.ts')
+  const domPath = resolve(testDir, '../../src/options/shared-options/dom.ts')
+  const source = readFileSync(sourcePath, 'utf8')
+  const domSource = readFileSync(domPath, 'utf8')
+
+  assert.match(domSource, /dashboardCardRegion\s*=\s*byId\('dashboard-card-region'\)/)
+  assert.match(source, /function showDashboardResultsUpdateOverlay\(\)/)
+  assert.match(source, /dom\.dashboardCardRegion/)
+  assert.match(source, /renderDotMatrixLoader\(\{\s*variant:\s*'spiral',\s*className:\s*'dashboard-update-dot-loader'\s*\}\)/)
+  assert.match(source, /overlay\.setAttribute\('aria-hidden',\s*'true'\)/)
+  assert.match(source, /function hideDashboardResultsUpdateOverlay\(\)[\s\S]*?dashboardResultsUpdateOverlay\?\.remove\(\)/)
 })

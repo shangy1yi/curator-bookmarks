@@ -242,6 +242,32 @@ test('dashboard fullscreen uses the compact top spacing for panel and toolbar', 
   )
 })
 
+test('dashboard selection bar expands without display jump', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const optionsCss = readProjectFile('src/options/options.css')
+  const selectionElement = optionsHtml.match(/<div[^>]+id="dashboard-selection-group"[^>]*>/)?.[0] || ''
+  const collapsedRule = getCssRuleBody(optionsCss, '.dashboard-panel #dashboard-selection-group')
+  const hiddenRule = getCssRuleBody(optionsCss, '.dashboard-panel #dashboard-selection-group.hidden')
+  const expandedRule = getCssRuleBody(optionsCss, '.dashboard-panel #dashboard-selection-group:not(.hidden)')
+  const notReadyRule = getCssRuleBody(optionsCss, '.dashboard-panel[data-dashboard-ready="false"] #dashboard-selection-group')
+
+  assert.match(selectionElement, /class="options-group detect-selection-group hidden"/)
+  assert.match(collapsedRule, /max-height:\s*0/)
+  assert.match(collapsedRule, /margin-top:\s*0/)
+  assert.match(collapsedRule, /overflow:\s*clip/)
+  assert.match(collapsedRule, /border-color:\s*transparent/)
+  assert.match(collapsedRule, /border-width:\s*0/)
+  assert.match(collapsedRule, /transition:[\s\S]*max-height[\s\S]*margin-top[\s\S]*padding-top[\s\S]*opacity[\s\S]*transform/)
+  assert.match(hiddenRule, /display:\s*block\s*!important/)
+  assert.match(hiddenRule, /visibility:\s*hidden/)
+  assert.match(expandedRule, /max-height:\s*260px/)
+  assert.match(expandedRule, /border-width:\s*1px/)
+  assert.match(expandedRule, /margin-top:\s*8px/)
+  assert.match(expandedRule, /opacity:\s*1/)
+  assert.match(notReadyRule, /visibility:\s*hidden/)
+  assert.doesNotMatch(expandedRule, /animation:\s*options-reveal-enter/)
+})
+
 test('dashboard tag editor and tag popover have dialog semantics and keyboard path', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')

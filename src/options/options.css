@@ -1860,6 +1860,7 @@ a {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  position: relative;
 }
 
 .dashboard-card-grid {
@@ -1885,40 +1886,49 @@ a {
   opacity: 0;
 }
 
-.dashboard-card-grid.is-updating::before,
-.dashboard-card-grid.is-updating::after {
-  position: absolute;
-  z-index: 20;
-  pointer-events: none;
-}
-
 .dashboard-card-grid.is-updating::before {
   content: "";
+  position: absolute;
   inset: 0;
+  z-index: 20;
   border-radius: 10px;
   background:
     linear-gradient(180deg, rgba(18, 18, 20, 0.28), rgba(18, 18, 20, 0.18)),
     rgba(8, 8, 10, 0.22);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
+  pointer-events: none;
 }
 
-.dashboard-card-grid.is-updating::after {
-  content: "正在更新视图…";
-  top: clamp(24px, 18vh, 120px);
-  left: 50%;
-  transform: translateX(-50%);
+.dashboard-update-overlay {
+  position: absolute;
+  inset: 10px 8px 0 0;
+  z-index: 30;
+  display: grid;
+  align-items: start;
+  justify-items: center;
+  padding-top: clamp(24px, 18vh, 120px);
+  pointer-events: none;
+}
+
+.dashboard-update-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  padding: 8px 14px;
+  border-radius: 16px;
   background: rgba(10, 10, 12, 0.72);
   color: var(--text);
-  font-size: 12px;
-  font-weight: 760;
-  letter-spacing: 0;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 10px 30px rgba(0, 0, 0, 0.28);
+}
+
+.dashboard-update-dot-loader {
+  width: 30px;
+  height: 30px;
 }
 
 .dashboard-card-grid.is-virtualized {
@@ -2840,8 +2850,53 @@ a {
   animation: options-reveal-enter var(--motion-standard) var(--motion-ease-out) both;
 }
 
-#dashboard-selection-group:not(.hidden) {
-  animation: options-reveal-enter var(--motion-standard) var(--motion-ease-out) both;
+.dashboard-panel #dashboard-selection-group {
+  max-height: 0;
+  border-color: transparent;
+  border-width: 0;
+  margin-top: 0;
+  overflow: clip;
+  padding-top: 0;
+  padding-bottom: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    max-height 260ms var(--motion-ease-out),
+    border-color 220ms var(--motion-ease-out),
+    border-width 260ms var(--motion-ease-out),
+    background 220ms var(--motion-ease-out),
+    box-shadow 220ms var(--motion-ease-out),
+    margin-top 260ms var(--motion-ease-out),
+    padding-top 260ms var(--motion-ease-out),
+    padding-bottom 260ms var(--motion-ease-out),
+    opacity 180ms var(--motion-ease-out),
+    transform 260ms var(--motion-ease-out);
+  will-change: max-height, margin-top, padding, opacity, transform;
+}
+
+.dashboard-panel #dashboard-selection-group.hidden {
+  display: block !important;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.dashboard-panel #dashboard-selection-group:not(.hidden) {
+  max-height: 260px;
+  border-color: rgba(255, 255, 255, 0.085);
+  border-width: 1px;
+  margin-top: 8px;
+  background: #0d0d0e;
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.dashboard-panel[data-dashboard-ready="false"] #dashboard-selection-group {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .detect-results-actions {
@@ -5847,6 +5902,18 @@ body.dashboard-fullscreen-active {
   padding: 12px 14px;
 }
 
+.dashboard-panel #dashboard-selection-group {
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.dashboard-panel #dashboard-selection-group:not(.hidden) {
+  margin-top: 8px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
 .dashboard-panel .dashboard-results-group {
   margin-top: 10px;
   padding: 12px 14px 16px;
@@ -5912,6 +5979,30 @@ body.dashboard-fullscreen-active {
     rgba(245, 245, 247, 0.035);
   -webkit-backdrop-filter: blur(18px) saturate(130%);
   backdrop-filter: blur(18px) saturate(130%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 16px 42px rgba(0, 0, 0, 0.18);
+}
+
+.dashboard-fullscreen-active .dashboard-panel #dashboard-selection-group {
+  border-color: transparent;
+  border-width: 0;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dashboard-fullscreen-active .dashboard-panel #dashboard-selection-group:not(.hidden) {
+  border-color: rgba(255, 255, 255, 0.08);
+  border-width: 1px;
+  margin-top: 8px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+    rgba(245, 245, 247, 0.035);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.055),
     0 16px 42px rgba(0, 0, 0, 0.18);

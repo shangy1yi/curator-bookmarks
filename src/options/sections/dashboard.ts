@@ -142,6 +142,7 @@ const DASHBOARD_VIRTUAL_THRESHOLD = 120
 
 let dashboardStatusTimer = 0
 let dashboardResultsStableFrame = 0
+let dashboardResultsUpdateOverlay: HTMLElement | null = null
 let dashboardTagRegenerateController: AbortController | null = null
 let closingDashboardTagEditor = false
 let dashboardViewReady = false
@@ -2056,13 +2057,14 @@ function beginStableDashboardResultsUpdate(): void {
     container.style.setProperty('--dashboard-results-stable-height', `${stableHeight}px`)
   }
   container.classList.add('is-updating')
+  showDashboardResultsUpdateOverlay()
   if (dashboardResultsStableFrame) {
     window.cancelAnimationFrame(dashboardResultsStableFrame)
   }
   dashboardResultsStableFrame = window.requestAnimationFrame(() => {
     dashboardResultsStableFrame = window.requestAnimationFrame(() => {
       dashboardResultsStableFrame = 0
-      container.classList.remove('is-updating')
+      clearStableDashboardResultsUpdate()
     })
   })
 }
@@ -2088,6 +2090,35 @@ function clearStableDashboardResultsUpdate(): void {
   }
   dom.dashboardResults?.classList.remove('is-updating')
   dom.dashboardResults?.style.removeProperty('--dashboard-results-stable-height')
+  hideDashboardResultsUpdateOverlay()
+}
+
+function showDashboardResultsUpdateOverlay(): void {
+  const host = dom.dashboardCardRegion
+  if (!host) {
+    return
+  }
+
+  if (dashboardResultsUpdateOverlay?.isConnected) {
+    dashboardResultsUpdateOverlay.classList.remove('hidden')
+    return
+  }
+
+  const overlay = document.createElement('div')
+  overlay.className = 'dashboard-update-overlay'
+  overlay.setAttribute('aria-hidden', 'true')
+  overlay.innerHTML = `
+    <div class="dashboard-update-indicator">
+      ${renderDotMatrixLoader({ variant: 'spiral', className: 'dashboard-update-dot-loader' })}
+    </div>
+  `
+  dashboardResultsUpdateOverlay = overlay
+  host.append(overlay)
+}
+
+function hideDashboardResultsUpdateOverlay(): void {
+  dashboardResultsUpdateOverlay?.remove()
+  dashboardResultsUpdateOverlay = null
 }
 
 function syncDashboardPanelReadyState(): void {
