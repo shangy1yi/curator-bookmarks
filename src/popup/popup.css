@@ -3234,10 +3234,24 @@ input:not(.search-input):focus-visible {
   outline-offset: 2px;
 }
 
+.modal-card:focus-visible,
+.modal-input:focus-visible {
+  outline: 2px solid rgba(245, 245, 247, 0.86);
+  outline-offset: 2px;
+}
+
 .search-shell:focus-within {
   border-color: rgba(247, 247, 247, 0.52);
   background: #171717;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.2),
+    0 0 0 4px rgba(0, 0, 0, 0.48);
+}
+
+.modal-search:focus-within {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.24),
+    0 0 0 4px rgba(0, 0, 0, 0.54);
 }
 
 .search-shell:focus-within .search-icon {
