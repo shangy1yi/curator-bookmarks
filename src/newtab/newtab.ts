@@ -67,6 +67,8 @@ import {
   DEFAULT_NEW_TAB_FOLDER_TITLE,
   type NewTabFolderSettings,
   findNewTabFolder,
+  getDisplayableNewTabSourceFolders,
+  getFolderBookmarkCounts,
   normalizeFolderIds,
   normalizeFolderSettings,
   normalizeFolderSettingsWithDefault
@@ -192,10 +194,23 @@ const FOCUSABLE_SELECTOR = [
 
 interface NewTabFolderSection {
   id: string
+  sourceId: string
   title: string
   path: string
   node: chrome.bookmarks.BookmarkTreeNode
   bookmarks: chrome.bookmarks.BookmarkTreeNode[]
+  directBookmarkCount: number
+  totalBookmarkCount: number
+}
+
+interface NewTabFolderCandidate {
+  id: string
+  title: string
+  path: string
+  normalizedTitle: string
+  normalizedPath: string
+  directBookmarkCount: number
+  totalBookmarkCount: number
 }
 
 interface NewTabActivityRecord {
@@ -3241,7 +3256,11 @@ function createSearchWidget(): HTMLElement | null {
   suggestionsHeading.className = 'newtab-search-section-label'
   suggestionsHeading.textContent = '书签匹配'
 
-  suggestionsPanel.append(suggestionsHeading, suggestions)
+  const suggestionsHint = document.createElement('div')
+  suggestionsHint.className = 'newtab-search-hint'
+  suggestionsHint.hidden = true
+
+  suggestionsPanel.append(suggestionsHeading, suggestions, suggestionsHint)
 
   let searchSuggestions: SearchBookmarkSuggestion[] = []
   let activeSuggestionIndex = -1
@@ -3254,29 +3273,41 @@ function createSearchWidget(): HTMLElement | null {
     searchSuggestions = []
     activeSuggestionIndex = -1
     suggestions.replaceChildren()
+    suggestions.hidden = false
+    suggestionsHeading.textContent = '书签匹配'
+    suggestionsHeading.hidden = false
+    suggestionsHint.replaceChildren()
+    suggestionsHint.hidden = true
     suggestionsPanel.classList.add('hidden')
     input.setAttribute('aria-expanded', 'false')
     input.removeAttribute('aria-activedescendant')
   }
 
   const renderSuggestions = ({ preserveActive = false, queryOverride = input.value } = {}) => {
-    const query = input.value.trim()
+    const query = String(queryOverride || '').trim()
     const previousActiveIndex = activeSuggestionIndex
     searchSuggestions = getSearchBookmarkSuggestions(queryOverride)
     if (!searchSuggestions.length) {
       activeSuggestionIndex = -1
       suggestions.replaceChildren()
+      suggestions.hidden = true
       input.removeAttribute('aria-activedescendant')
-      input.setAttribute('aria-expanded', 'false')
       if (!query) {
         hideSuggestions()
         return
       }
 
-      hideSuggestions()
+      suggestionsHeading.textContent = '网页搜索'
+      suggestionsHeading.hidden = false
+      suggestionsHint.replaceChildren(createSearchWebFallbackButton(query))
+      suggestionsHint.hidden = false
+      suggestionsPanel.classList.remove('hidden')
+      input.setAttribute('aria-expanded', 'true')
       return
     }
 
+    suggestions.hidden = false
+    suggestionsHeading.textContent = '书签匹配'
     activeSuggestionIndex = preserveActive
       ? Math.max(0, Math.min(previousActiveIndex, searchSuggestions.length - 1))
       : 0
@@ -3296,6 +3327,8 @@ function createSearchWidget(): HTMLElement | null {
     ))
     suggestionsPanel.classList.remove('hidden')
     suggestionsHeading.hidden = false
+    suggestionsHint.textContent = `按 Enter 打开选中的书签；Cmd/Ctrl+Enter 用 ${getSearchEngineDisplayName()} 搜索网页`
+    suggestionsHint.hidden = false
     input.setAttribute('aria-expanded', 'true')
 
     if (activeSuggestionIndex >= 0) {
@@ -3371,7 +3404,7 @@ function createSearchWidget(): HTMLElement | null {
     }
 
     event.preventDefault()
-    if (searchSuggestions.length) {
+    if (searchSuggestions.length || !suggestionsPanel.classList.contains('hidden')) {
       hideSuggestions()
       return
     }
@@ -3425,6 +3458,28 @@ function createSearchWidget(): HTMLElement | null {
   syncSearchInputActions(input, clearButton, separator, submitButton)
   slot.append(form, suggestionsPanel)
   return slot
+
+  function createSearchWebFallbackButton(query: string): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.className = 'newtab-search-web-hint'
+    button.type = 'button'
+    button.textContent = `未找到书签，按 Enter 用 ${getSearchEngineDisplayName()} 搜索`
+    button.title = `用 ${getSearchEngineDisplayName()} 搜索「${query}」`
+    button.setAttribute('aria-label', button.textContent)
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault()
+    })
+    button.addEventListener('click', () => {
+      closeEngineMenu()
+      hideSuggestions()
+      submitSearch(query)
+    })
+    return button
+  }
+
+  function getSearchEngineDisplayName(): string {
+    return SEARCH_ENGINE_CONFIG_BY_ID.get(state.searchSettings.engine)?.name || 'Google'
+  }
 }
 
 function syncSearchInputActions(
@@ -4336,6 +4391,7 @@ function buildNewTabFolderSections(
   const resolvedFolderNodeMap = folderNodeMap.size ? folderNodeMap : buildFolderNodeMap(rootNode)
   const selectedIds = normalizeFolderIds(settings.selectedFolderIds)
   const sections: NewTabFolderSection[] = []
+  const seenSectionIds = new Set<string>()
 
   for (const folderId of selectedIds) {
     const node = resolvedFolderNodeMap.get(folderId) || null
@@ -4343,8 +4399,16 @@ function buildNewTabFolderSections(
       continue
     }
 
-    const folder = resolvedFolderData.folderMap.get(folderId)
-    sections.push(createFolderSection(node, folder))
+    for (const displayNode of getDisplayableNewTabSourceFolders(node)) {
+      const sectionId = String(displayNode.id || '').trim()
+      if (!sectionId || seenSectionIds.has(sectionId)) {
+        continue
+      }
+
+      const folder = resolvedFolderData.folderMap.get(sectionId)
+      sections.push(createFolderSection(displayNode, folder, folderId))
+      seenSectionIds.add(sectionId)
+    }
   }
 
   return sections
@@ -4352,15 +4416,20 @@ function buildNewTabFolderSections(
 
 function createFolderSection(
   node: chrome.bookmarks.BookmarkTreeNode,
-  folder?: FolderRecord
+  folder?: FolderRecord,
+  sourceId = String(node.id)
 ): NewTabFolderSection {
   const title = String(folder?.title || node.title || '未命名文件夹').trim() || '未命名文件夹'
+  const counts = getFolderBookmarkCounts(node)
   return {
     id: String(node.id),
+    sourceId,
     title,
     path: String(folder?.path || title),
     node,
-    bookmarks: getDirectBookmarks(node)
+    bookmarks: getDirectBookmarks(node),
+    directBookmarkCount: counts.directBookmarkCount,
+    totalBookmarkCount: counts.totalBookmarkCount
   }
 }
 
@@ -6245,14 +6314,19 @@ function createSelectedFolderControls(): HTMLElement[] {
     const path = document.createElement('span')
     path.textContent = folder?.path || folderId
 
-    copy.append(title, path)
+    const stats = document.createElement('span')
+    stats.textContent = folder
+      ? formatFolderCandidateCountSummary(folder)
+      : '来源不可用'
+
+    copy.append(title, path, stats)
 
     const remove = document.createElement('button')
     remove.className = 'folder-source-remove'
     remove.type = 'button'
     remove.dataset.folderRemoveId = folderId
     const folderTitle = folder?.title || '文件夹'
-    const affectedCount = folder?.bookmarkCount || 0
+    const affectedCount = folder?.totalBookmarkCount || 0
     const removeLabel = `从新标签页移除「${folderTitle}」，将隐藏 ${affectedCount} 个书签，不会删除书签`
     remove.setAttribute('aria-label', removeLabel)
     remove.title = removeLabel
@@ -6292,18 +6366,21 @@ function createFolderCandidateControls(): HTMLElement[] {
     const path = document.createElement('span')
     path.textContent = folder.path || folder.title || '未命名文件夹'
 
-    copy.append(title, path)
+    const stats = document.createElement('span')
+    stats.textContent = formatFolderCandidateCountSummary(folder)
+
+    copy.append(title, path, stats)
 
     const badge = document.createElement('span')
     badge.className = 'folder-candidate-badge'
-    badge.textContent = selected ? '已选' : `${folder.bookmarkCount}`
+    badge.textContent = selected ? '已选' : String(folder.totalBookmarkCount)
 
     button.append(copy, badge)
     return button
   })
 }
 
-function getFilteredFolderCandidates(): FolderRecord[] {
+function getFilteredFolderCandidates(): NewTabFolderCandidate[] {
   const query = normalizeSettingSearchText(state.folderCandidateQuery)
   return getFolderCandidates().filter((folder) => {
     if (!query) {
@@ -6314,16 +6391,33 @@ function getFilteredFolderCandidates(): FolderRecord[] {
   })
 }
 
-function getFolderCandidates(): FolderRecord[] {
+function getFolderCandidates(): NewTabFolderCandidate[] {
   if (!state.rootNode) {
     return []
   }
 
-  return state.folderData?.folders || extractBookmarkData(state.rootNode).folders
+  const folderData = state.folderData || extractBookmarkData(state.rootNode)
+  const folderNodeMap = state.folderNodeMap.size ? state.folderNodeMap : buildFolderNodeMap(state.rootNode)
+  return folderData.folders.map((folder) => {
+    const counts = getFolderBookmarkCounts(folderNodeMap.get(folder.id) || null)
+    return {
+      id: folder.id,
+      title: folder.title,
+      path: folder.path,
+      normalizedTitle: folder.normalizedTitle,
+      normalizedPath: folder.normalizedPath,
+      directBookmarkCount: counts.directBookmarkCount,
+      totalBookmarkCount: counts.totalBookmarkCount
+    }
+  })
 }
 
-function getFolderCandidateMap(): Map<string, FolderRecord> {
-  return state.folderData?.folderMap || new Map(getFolderCandidates().map((folder) => [folder.id, folder]))
+function getFolderCandidateMap(): Map<string, NewTabFolderCandidate> {
+  return new Map(getFolderCandidates().map((folder) => [folder.id, folder]))
+}
+
+function formatFolderCandidateCountSummary(folder: NewTabFolderCandidate): string {
+  return `直属 ${folder.directBookmarkCount} / 合计 ${folder.totalBookmarkCount}`
 }
 
 function normalizeSettingSearchText(value: string): string {

@@ -803,6 +803,39 @@ body.background-mask-enabled .newtab-background-mask {
   line-height: 1.2;
 }
 
+.newtab-search-hint {
+  padding: 3px 8px 2px;
+  color: rgba(245, 245, 247, 0.46);
+  font-size: 10px;
+  font-weight: 560;
+  line-height: 1.35;
+}
+
+.newtab-search-web-hint {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  overflow: hidden;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(245, 245, 247, 0.76);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.newtab-search-web-hint:hover,
+.newtab-search-web-hint:focus-visible {
+  background: rgba(245, 245, 247, 0.085);
+  color: var(--text);
+  outline: none;
+}
+
 .newtab-page.has-search .newtab-content,
 .newtab-page.has-search .newtab-state {
   margin-top: 10px;
