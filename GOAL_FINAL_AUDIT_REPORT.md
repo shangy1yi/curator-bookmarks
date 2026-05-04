@@ -7,7 +7,7 @@
 - 集成分支：`integration/goal-final-polish-20260504`
 - 集成 worktree：`/mnt/g/coding/worktrees/goal-final-polish-20260504`
 - 基线：`main@11582da` / `v1.4.23`
-- 当前集成提交：待本次最终提交后更新。
+- 当前集成提交：`32d636d`。
 
 本轮采用多 agent 分支审查与修复流程，覆盖性能、UI、功能、人性化体验、构建安全五个可合并改动方向。主工作区 `/mnt/g/coding/chromebookmark` 保持在 `main@11582da`，未合并到 `main`。
 
@@ -243,7 +243,7 @@
   - 影响范围：newtab/options/popup UI 与可访问性。
   - 测试方式：`npm test`、`npm run typecheck`
 
-- 集成分支补充优化 / 待本次最终提交后更新
+- 集成分支补充优化 / `5a8589c`、`32d636d`
   - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议。
   - 影响范围：`src/popup/popup.css`、`src/newtab/content-state.ts`、`src/newtab/newtab.ts`、相关测试。
   - 测试方式：focused tests、`npm test`、`npm run validate`、Playwright 产物/搜索冒烟。
