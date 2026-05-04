@@ -92,6 +92,16 @@ test('popup modals make the background app shell inert while open', () => {
   assert.doesNotMatch(popupSource, /element\.offsetParent !== null/)
 })
 
+test('popup bookmark action menus expose bookmark-specific labels', () => {
+  const popupSource = readProjectFile('src/popup/popup.ts')
+
+  assert.match(popupSource, /function getBookmarkActionMenuLabel\(bookmark\)/)
+  assert.match(popupSource, /return `打开 \$\{title\} 的操作菜单`/)
+  assert.match(popupSource, /const menuLabel = getBookmarkActionMenuLabel\(bookmark\)/)
+  assert.match(popupSource, /aria-label="\$\{escapeAttr\(menuLabel\)\}"/)
+  assert.doesNotMatch(popupSource, /aria-label="打开操作菜单"/)
+})
+
 test('popup shell can shrink below the extension popup width without horizontal overflow', () => {
   const popupCss = readProjectFile('src/popup/popup.css')
   const rootSizeRule = popupCss.match(/html,\s*body\s*\{[\s\S]*?\n\}/)?.[0] || ''

@@ -1967,6 +1967,7 @@ function renderFolderNode(node, depth) {
 function renderBookmarkRow(bookmark, depth) {
   const isMenuOpen = state.activeMenuBookmarkId === bookmark.id
   const menuId = getActionMenuId(bookmark.id)
+  const menuLabel = getBookmarkActionMenuLabel(bookmark)
 
   return `
     <div class="tree-row bookmark-row" style="--depth:${depth}">
@@ -1978,7 +1979,7 @@ function renderBookmarkRow(bookmark, depth) {
         </span>
       </button>
       <div class="menu-anchor">
-        <button class="icon-button" type="button" data-open-menu="${escapeAttr(bookmark.id)}" aria-label="打开操作菜单" aria-haspopup="menu" aria-expanded="${String(isMenuOpen)}" aria-controls="${escapeAttr(menuId)}"></button>
+        <button class="icon-button" type="button" data-open-menu="${escapeAttr(bookmark.id)}" aria-label="${escapeAttr(menuLabel)}" aria-haspopup="menu" aria-expanded="${String(isMenuOpen)}" aria-controls="${escapeAttr(menuId)}"></button>
         ${renderActionMenu(bookmark.id)}
       </div>
     </div>
@@ -1991,6 +1992,7 @@ function renderSearchResults() {
       const isActive = index === state.activeResultIndex
       const isMenuOpen = state.activeMenuBookmarkId === bookmark.id
       const menuId = getActionMenuId(bookmark.id)
+      const menuLabel = getBookmarkActionMenuLabel(bookmark)
       const matchReason = Array.isArray(bookmark.matchReasons) && bookmark.matchReasons.length
         ? bookmark.matchReasons.join(' · ')
         : ''
@@ -2014,13 +2016,18 @@ function renderSearchResults() {
             </span>
           </button>
           <div class="menu-anchor">
-            <button class="icon-button" type="button" data-open-menu="${escapeAttr(bookmark.id)}" aria-label="打开操作菜单" aria-haspopup="menu" aria-expanded="${String(isMenuOpen)}" aria-controls="${escapeAttr(menuId)}"></button>
+            <button class="icon-button" type="button" data-open-menu="${escapeAttr(bookmark.id)}" aria-label="${escapeAttr(menuLabel)}" aria-haspopup="menu" aria-expanded="${String(isMenuOpen)}" aria-controls="${escapeAttr(menuId)}"></button>
             ${renderActionMenu(bookmark.id)}
           </div>
         </article>
       `
     })
     .join('')
+}
+
+function getBookmarkActionMenuLabel(bookmark) {
+  const title = cleanSmartText(bookmark?.title || '未命名书签', 48)
+  return `打开 ${title} 的操作菜单`
 }
 
 function renderActionMenu(bookmarkId) {

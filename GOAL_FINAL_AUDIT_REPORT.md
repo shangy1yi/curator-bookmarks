@@ -7,7 +7,7 @@
 - 集成分支：`integration/goal-final-polish-20260504`
 - 集成 worktree：`/mnt/g/coding/worktrees/goal-final-polish-20260504`
 - 基线：`main@11582da` / `v1.4.23`
-- 当前集成代码状态：在 `e33821c` 基础上继续追加自动分析队列失败唤醒修正；报告最新提交以 `git log -1 --oneline` 为准。
+- 当前集成代码状态：在 `71770a7` 基础上继续追加 popup 操作菜单可访问名称修正；报告最新提交以 `git log -1 --oneline` 为准。
 
 本轮采用多 agent 分支审查与修复流程，覆盖性能、UI、功能、人性化体验、构建安全五个可合并改动方向。主工作区 `/mnt/g/coding/chromebookmark` 保持在 `main@11582da`，未合并到 `main`。
 
@@ -96,6 +96,12 @@
   - 影响：模态状态下焦点和语义上下文不够清晰。
   - 建议：模态打开时让背景 app shell `inert` 并设置 `aria-hidden`。
   - 处理：已完成，新增 `syncPopupAppShellModalState`。
+
+- [低] UI/可访问性：popup 书签操作菜单按钮名称重复
+  - 位置：`src/popup/popup.ts` / `renderBookmarkRow`、`renderSearchResults`
+  - 影响：屏幕阅读器用户在书签树或搜索结果中连续浏览菜单按钮时，只会听到重复的“打开操作菜单”，难以判断按钮对应哪条书签。
+  - 建议：操作菜单按钮的 `aria-label` 包含当前书签标题。
+  - 处理：已完成，菜单按钮现在使用 `打开 ${title} 的操作菜单`，并限制标题长度与 HTML 属性转义。
 
 - [中] 体验：newtab 首次默认来源不适合“书签栏只有子文件夹”的真实书签结构
   - 位置：`src/newtab/folder-settings.ts`
@@ -243,6 +249,14 @@
    - 推荐改进方案：保留扩展 popup 的 430px 理想宽度，但允许根宽收缩到 `100vw`。
    - 处理状态：已修复，`html, body` 使用 `width: min(430px, 100vw)`，并新增回归测试。
 
+6. popup 书签操作菜单按钮可访问名称重复
+   - 页面/组件位置：popup 书签树与搜索结果操作菜单
+   - 现象描述：每条书签的菜单按钮都暴露相同 `aria-label="打开操作菜单"`。
+   - 对用户的影响：辅助技术用户无法仅凭按钮名称判断菜单属于哪条书签。
+   - 严重程度：低
+   - 推荐改进方案：把书签标题纳入菜单按钮可访问名称，并对标题做长度限制和属性转义。
+   - 处理状态：已修复。
+
 ## 五、功能审查结果
 
 1. 标签索引写入并发覆盖
@@ -333,8 +347,8 @@
   - 影响范围：newtab/options/popup UI 与可访问性。
   - 测试方式：`npm test`、`npm run typecheck`
 
-- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、`b185052`、`87f4f3c`、`d4cb535`、`e33821c`、自动分析队列失败唤醒修正提交
-  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化、AI 响应解析、Inbox 状态模块、回收站事务 helper 和完整内容快照存储模块改为触发对应功能后再加载或通过轻量常量/搜索入口解耦；自动分析失败后按剩余队列重新计算下一次唤醒，移除首屏和后台队列的非必要运行成本。
+- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、`b185052`、`87f4f3c`、`d4cb535`、`e33821c`、`71770a7`、popup 操作菜单可访问名称修正提交
+  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化、AI 响应解析、Inbox 状态模块、回收站事务 helper 和完整内容快照存储模块改为触发对应功能后再加载或通过轻量常量/搜索入口解耦；自动分析失败后按剩余队列重新计算下一次唤醒，移除首屏和后台队列的非必要运行成本；popup 书签树和搜索结果的操作菜单按钮使用书签标题生成可访问名称，避免重复按钮名称。
   - 影响范围：`src/popup/popup.css`、`src/popup/popup.ts`、`src/newtab/content-state.ts`、`src/newtab/newtab.ts`、相关测试。
   - 测试方式：focused tests、`npm test`、`npm run validate`、Playwright 产物/搜索冒烟。
 
@@ -350,7 +364,7 @@
 - `npm audit --json`：0 vulnerabilities。
 - `npm run typecheck`：通过。
 - `npm run lint`：通过；当前脚本等价于 `npm run typecheck`。
-- `npm test`：317/317 通过。
+- `npm test`：318/318 通过。
 - `npm run check:version`：通过，版本 `1.4.23`。
 - `npm run build`：通过。
 - `npm run validate`：通过，覆盖 typecheck、test、check:version、build。
@@ -363,6 +377,9 @@
 - focused service worker 队列测试：通过。
   - `npm run test:build && node --test .tmp-test/tests/service-worker-save-guards.test.js .tmp-test/tests/ai-settings.test.js`：9/9 通过。
   - 覆盖自动分析队列复用树快照、失败后按剩余队列状态重新安排唤醒、AI 设置序列化。
+- focused popup 可访问性测试：通过。
+  - `npm run test:build && node --test .tmp-test/tests/popup-search-layout.test.js .tmp-test/tests/popup-search-empty-state.test.js`：22/22 通过。
+  - 覆盖 popup 书签操作菜单按钮的书签特定可访问名称、模态 inert、搜索/模态焦点和空状态。
 - Playwright 扩展冒烟：通过。
   - 实际加载 `dist` 扩展。
   - newtab：`#newtab-root` 可见，无 pageerror/console error。
@@ -410,6 +427,7 @@
 - dashboard overlay 增加关闭、超时、失败、重试状态。
 - dashboard 标签隐藏展开支持鼠标和键盘。
 - popup 模态背景 inert，改善可访问性。
+- popup 书签树和搜索结果的操作菜单按钮加入书签标题，避免重复可访问名称。
 - popup 根布局支持窄视口收缩，避免独立页面或窄屏容器横向溢出。
 - newtab 搜索保留轻量同步建议，将 pinyin、自然语言、复杂 popup 搜索 chunk 改为按需加载，降低普通打开新标签页和普通关键词搜索的初始资源成本。
 - newtab 标签索引读取改为本页轻量 normalizer，避免仅为读取标签数据而首屏加载完整 `bookmark-tags` 模块。
