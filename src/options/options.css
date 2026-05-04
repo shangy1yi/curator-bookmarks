@@ -1904,7 +1904,7 @@ a {
 }
 
 .dashboard-card-grid.is-updating::after {
-  content: "正在切换文件夹…";
+  content: "正在更新视图…";
   top: clamp(24px, 18vh, 120px);
   left: 50%;
   transform: translateX(-50%);
@@ -2931,7 +2931,13 @@ body.dashboard-fullscreen-active {
 
 .dashboard-fullscreen-active .dashboard-panel {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-areas:
+    "dashboard-label"
+    "dashboard-title"
+    "dashboard-toolbar"
+    "dashboard-selection"
+    "dashboard-results";
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   min-height: 100vh;
   max-height: 100vh;
   overflow: hidden;
@@ -2939,6 +2945,32 @@ body.dashboard-fullscreen-active {
   border: 0;
   border-radius: 0;
   background: #080809;
+}
+
+.dashboard-fullscreen-active .dashboard-panel > .options-section-label {
+  grid-area: dashboard-label;
+}
+
+.dashboard-fullscreen-active .dashboard-panel > .dashboard-title-row {
+  grid-area: dashboard-title;
+}
+
+.dashboard-fullscreen-active .dashboard-panel > .dashboard-toolbar {
+  grid-area: dashboard-toolbar;
+}
+
+.dashboard-fullscreen-active .dashboard-panel > .detect-selection-group {
+  grid-area: dashboard-selection;
+  align-self: start;
+  position: relative;
+  z-index: 2;
+}
+
+.dashboard-fullscreen-active .dashboard-panel > .dashboard-results-group {
+  grid-area: dashboard-results;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .options-dashboard-embed.dashboard-fullscreen-active .options-shell,

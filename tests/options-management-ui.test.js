@@ -221,7 +221,15 @@ test('dashboard fullscreen uses the compact top spacing for panel and toolbar', 
   assert.ok(panelPadding.top < 26, 'fullscreen dashboard panel top padding should be tighter than the old value')
   assert.match(
     optionsCss,
-    /\.dashboard-fullscreen-active\s+\.dashboard-panel\s*\{[\s\S]*?display:\s*grid[\s\S]*?grid-template-rows:\s*auto\s+auto\s+auto\s+minmax\(0,\s*1fr\)/
+    /\.dashboard-fullscreen-active\s+\.dashboard-panel\s*\{[\s\S]*?display:\s*grid[\s\S]*?grid-template-areas:\s*[\s\S]*"dashboard-label"[\s\S]*"dashboard-title"[\s\S]*"dashboard-toolbar"[\s\S]*"dashboard-selection"[\s\S]*"dashboard-results"[\s\S]*?grid-template-rows:\s*auto\s+auto\s+auto\s+auto\s+minmax\(0,\s*1fr\)/
+  )
+  assert.match(
+    optionsCss,
+    /\.dashboard-fullscreen-active\s+\.dashboard-panel\s*>\s*\.detect-selection-group\s*\{[\s\S]*?grid-area:\s*dashboard-selection[\s\S]*?z-index:\s*2/
+  )
+  assert.match(
+    optionsCss,
+    /\.dashboard-fullscreen-active\s+\.dashboard-panel\s*>\s*\.dashboard-results-group\s*\{[\s\S]*?grid-area:\s*dashboard-results[\s\S]*?min-height:\s*0/
   )
   assert.match(
     optionsCss,

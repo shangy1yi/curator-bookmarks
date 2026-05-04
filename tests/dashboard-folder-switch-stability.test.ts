@@ -63,6 +63,7 @@ test('dashboard folder switch update state masks partially rendered cards', () =
   assert.match(css, /\.dashboard-card-grid\.is-updating\s*>\s*\*\s*\{[\s\S]*?opacity:\s*0/)
   assert.match(css, /\.dashboard-card-grid\.is-updating::before/)
   assert.match(css, /\.dashboard-card-grid\.is-updating::after/)
+  assert.match(css, /\.dashboard-card-grid\.is-updating::after\s*\{[\s\S]*?正在更新视图/)
 })
 
 test('dashboard folder switch chrome keeps text layout stable', () => {
@@ -176,5 +177,23 @@ test('dashboard folder filter changes preserve virtual scroll reset state', () =
       reason: 'query'
     }),
     true
+  )
+})
+
+test('dashboard resize observer masks stale virtual cards before rerender', () => {
+  const testDir = dirname(fileURLToPath(import.meta.url))
+  const sourcePath = resolve(testDir, '../../src/options/sections/dashboard.ts')
+  const source = readFileSync(sourcePath, 'utf8')
+  const observerBody = source.match(
+    /virtualState\.resizeObserver\s*=\s*new ResizeObserver\(\(\)\s*=>\s*\{([\s\S]*?)\n\s*\}\)/
+  )?.[1] || ''
+
+  assert.match(observerBody, /beginStableDashboardResultsUpdate\(\)/)
+  assert.match(observerBody, /resetDashboardVirtualRenderCache\(\{\s*preserveItems:\s*true\s*\}\)/)
+  assert.match(observerBody, /scheduleDashboardVirtualRender\(\)/)
+  assert.ok(
+    observerBody.indexOf('beginStableDashboardResultsUpdate()') <
+      observerBody.indexOf('scheduleDashboardVirtualRender()'),
+    'resize should hide the old virtual window before scheduling the new render'
   )
 })

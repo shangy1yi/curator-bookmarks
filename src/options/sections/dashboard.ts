@@ -2003,6 +2003,7 @@ function ensureDashboardVirtualGrid(): void {
   container.addEventListener('scroll', handleDashboardVirtualScroll, { passive: true })
   if (typeof ResizeObserver !== 'undefined') {
     virtualState.resizeObserver = new ResizeObserver(() => {
+      beginStableDashboardResultsUpdate()
       resetDashboardVirtualRenderCache({ preserveItems: true })
       scheduleDashboardVirtualRender()
     })
