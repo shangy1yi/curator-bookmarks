@@ -648,6 +648,21 @@ test('smart bookmark analysis uses the decision panel summary layout', () => {
   assert.match(optionsCss, /\.ai-decision-grid/)
 })
 
+test('history and tag cleanup buttons expose specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['bookmark-add-history-clear', '清空自动分析添加历史记录'],
+    ['ai-clear-filters', '清空书签智能分析筛选条件'],
+    ['ai-tag-clear', '清空全部书签标签数据']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('smart bookmark analysis bulk selection buttons expose analysis-specific labels', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const labelledButtons = [
