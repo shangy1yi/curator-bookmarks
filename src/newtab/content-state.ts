@@ -86,6 +86,13 @@ export interface NewTabSearchIndexEntry {
   searchBookmark?: PopupSearchBookmark
 }
 
+export interface NewTabPreparedSearchIndex {
+  entries: NewTabSearchIndexEntry[]
+  popupBookmarks: PopupSearchBookmark[]
+  entriesById: Map<string, NewTabSearchIndexEntry>
+  supportsPopupSearch: boolean
+}
+
 export interface SearchBookmarkSuggestion {
   id: string
   title: string
@@ -370,6 +377,28 @@ export function buildNewTabSearchIndex(
   return entries
 }
 
+export function prepareNewTabSearchIndex(index: NewTabSearchIndexEntry[]): NewTabPreparedSearchIndex {
+  const entriesById = new Map<string, NewTabSearchIndexEntry>()
+  const popupBookmarks: PopupSearchBookmark[] = []
+  let supportsPopupSearch = true
+
+  for (const entry of index) {
+    entriesById.set(entry.id, entry)
+    if (!entry.searchBookmark) {
+      supportsPopupSearch = false
+      continue
+    }
+    popupBookmarks.push(entry.searchBookmark)
+  }
+
+  return {
+    entries: index,
+    popupBookmarks,
+    entriesById,
+    supportsPopupSearch
+  }
+}
+
 function buildNewTabSearchIndexFromBookmarks({
   bookmarks,
   tagIndex = null,
@@ -442,7 +471,7 @@ export function getNewTabSourceAnchorId(sourceId: string): string {
 
 export function getSearchBookmarkSuggestionsFromIndex(
   query: string,
-  index: NewTabSearchIndexEntry[],
+  index: NewTabSearchIndexEntry[] | NewTabPreparedSearchIndex,
   limit: number,
   options: NewTabSearchSuggestionOptions = {}
 ): SearchBookmarkSuggestion[] {
@@ -451,13 +480,14 @@ export function getSearchBookmarkSuggestionsFromIndex(
     return []
   }
 
-  const popupSuggestions = getPopupSearchBookmarkSuggestionsFromIndex(query, index, limit, options)
+  const preparedIndex = Array.isArray(index) ? prepareNewTabSearchIndex(index) : index
+  const popupSuggestions = getPopupSearchBookmarkSuggestionsFromIndex(query, preparedIndex, limit, options)
   if (popupSuggestions) {
     return popupSuggestions
   }
 
   const suggestions: SearchBookmarkSuggestion[] = []
-  for (const entry of index) {
+  for (const entry of preparedIndex.entries) {
     const score = getSearchSuggestionScore(
       normalizedQuery,
       entry.normalizedTitle,
@@ -486,27 +516,20 @@ export function getSearchBookmarkSuggestionsFromIndex(
 
 function getPopupSearchBookmarkSuggestionsFromIndex(
   query: string,
-  index: NewTabSearchIndexEntry[],
+  index: NewTabPreparedSearchIndex,
   limit: number,
   options: NewTabSearchSuggestionOptions
 ): SearchBookmarkSuggestion[] | null {
-  const searchBookmarksById = new Map<string, PopupSearchBookmark>()
-  const entriesById = new Map<string, NewTabSearchIndexEntry>()
-  for (const entry of index) {
-    if (!entry.searchBookmark) {
-      return null
-    }
-
-    searchBookmarksById.set(entry.id, entry.searchBookmark)
-    entriesById.set(entry.id, entry)
+  if (!index.supportsPopupSearch) {
+    return null
   }
 
-  if (!searchBookmarksById.size) {
+  if (!index.popupBookmarks.length) {
     return []
   }
 
   const plan = buildLocalNaturalSearchPlan(query, options.now)
-  const bookmarks = filterBookmarksByNaturalDateRange([...searchBookmarksById.values()], plan)
+  const bookmarks = filterBookmarksByNaturalDateRange(index.popupBookmarks, plan)
   const resultSets: NaturalSearchResultSet[] = []
   const seenQueries = new Set<string>()
 
@@ -538,7 +561,7 @@ function getPopupSearchBookmarkSuggestionsFromIndex(
 
   return mergeNaturalSearchResultSets(plan, resultSets)
     .map((result) => {
-      const entry = entriesById.get(result.id)
+      const entry = index.entriesById.get(result.id)
       if (!entry) {
         return null
       }

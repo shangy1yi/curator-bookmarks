@@ -302,6 +302,9 @@
             </button>
             <div id="icon-advanced-panel" class="icon-advanced-panel" hidden>
               <div class="reveal-panel-body">
+                <button id="icon-reset-defaults" class="icon-reset-defaults" type="button">
+                  恢复默认布局
+                </button>
                 <label class="setting-row slider-row">
                   <span>页面宽度 <output id="icon-page-width-value" class="setting-value">78%</output></span>
                   <input id="icon-page-width" class="setting-range" type="range" min="16" max="100" value="78">
@@ -537,9 +540,12 @@
     <section
       id="newtab-dashboard-overlay"
       class="newtab-dashboard-overlay"
+      role="dialog"
+      aria-modal="true"
       aria-label="书签仪表盘"
       aria-hidden="true"
       data-dashboard-ready="false"
+      tabindex="-1"
       hidden
     >
       <div class="newtab-dashboard-surface">
@@ -579,6 +585,7 @@
           class="newtab-dashboard-frame"
           title="书签仪表盘"
           loading="lazy"
+          tabindex="0"
         ></iframe>
       </div>
     </section>

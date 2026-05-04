@@ -3212,6 +3212,28 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   color: rgba(245, 245, 247, 0.34);
 }
 
+.icon-reset-defaults {
+  justify-self: end;
+  min-height: 30px;
+  margin-bottom: 2px;
+  padding: 0 10px;
+  border: 1px solid rgba(245, 245, 247, 0.13);
+  border-radius: 7px;
+  background: rgba(245, 245, 247, 0.055);
+  color: rgba(245, 245, 247, 0.76);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.icon-reset-defaults:hover,
+.icon-reset-defaults:focus-visible {
+  border-color: rgba(245, 245, 247, 0.24);
+  background: rgba(245, 245, 247, 0.09);
+  color: rgba(245, 245, 247, 0.94);
+  outline: none;
+}
+
 .icon-advanced-toggle {
   display: flex;
   min-height: 34px;

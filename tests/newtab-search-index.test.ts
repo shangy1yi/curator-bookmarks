@@ -5,7 +5,8 @@ import type { BookmarkRecord } from '../src/shared/types.js'
 import {
   buildNewTabSearchIndex,
   getSearchBookmarkSuggestionsFromIndex,
-  normalizeNewTabSearchText
+  normalizeNewTabSearchText,
+  prepareNewTabSearchIndex
 } from '../src/newtab/content-state.js'
 
 function bookmark(overrides: Partial<BookmarkRecord>): BookmarkRecord {
@@ -251,4 +252,53 @@ test('uses popup local natural-language expansion without remote AI', () => {
   )
 
   assert.deepEqual(suggestions.map((suggestion) => suggestion.id), ['article'])
+})
+
+test('prepares reusable search lookup structures without changing popup matching', () => {
+  const tagIndex: BookmarkTagIndex = {
+    version: 1,
+    updatedAt: 1,
+    records: {
+      tagged: {
+        schemaVersion: 1,
+        bookmarkId: 'tagged',
+        url: 'https://example.com/vue',
+        normalizedUrl: 'example.com/vue',
+        duplicateKey: 'example.com/vue',
+        title: '前端状态管理',
+        path: 'Bookmarks Bar / 中文资料',
+        summary: 'Vue Pinia 状态管理教程',
+        contentType: '文档',
+        topics: ['前端框架'],
+        tags: ['状态管理'],
+        aliases: ['Pinia Guide'],
+        confidence: 0.9,
+        source: 'manual',
+        model: 'local',
+        extraction: { status: 'ok', source: 'manual', warnings: [] },
+        generatedAt: 1,
+        updatedAt: 1
+      }
+    }
+  }
+  const index = buildNewTabSearchIndex({
+    bookmarks: [
+      bookmark({
+        id: 'tagged',
+        title: '前端状态管理',
+        normalizedTitle: '前端状态管理',
+        url: 'https://example.com/vue',
+        normalizedUrl: 'example.com/vue',
+        path: 'Bookmarks Bar / 中文资料'
+      })
+    ],
+    tagIndex
+  })
+  const prepared = prepareNewTabSearchIndex(index)
+
+  assert.equal(prepared.entries, index)
+  assert.equal(prepared.supportsPopupSearch, true)
+  assert.equal(prepared.popupBookmarks.length, 1)
+  assert.equal(prepared.entriesById.get('tagged'), index[0])
+  assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('pinia', prepared, 6).map((item) => item.id), ['tagged'])
 })

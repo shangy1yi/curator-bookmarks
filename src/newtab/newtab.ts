@@ -47,6 +47,7 @@ import {
   getPortalQuickAccessItems,
   getNewTabSourceAnchorId,
   getSearchBookmarkSuggestionsFromIndex,
+  prepareNewTabSearchIndex,
   getAdaptiveSearchOffsetBounds,
   getAdaptiveSearchWidthBounds,
   getVerticalCenterCollisionOffset,
@@ -57,6 +58,7 @@ import {
   resolveNewTabContentState,
   type NewTabPageModule,
   type NewTabSearchIndexEntry,
+  type NewTabPreparedSearchIndex,
   type SearchBookmarkSuggestion
 } from './content-state.js'
 import {
@@ -240,6 +242,7 @@ const state = {
   allBookmarks: [] as chrome.bookmarks.BookmarkTreeNode[],
   allBookmarkMap: new Map<string, chrome.bookmarks.BookmarkTreeNode>(),
   searchIndex: [] as NewTabSearchIndexEntry[],
+  preparedSearchIndex: prepareNewTabSearchIndex([]) as NewTabPreparedSearchIndex,
   activeMenuBookmarkId: '',
   menuX: 0,
   menuY: 0,
@@ -344,6 +347,7 @@ let timeSettingsSaveTimer = 0
 let settingsSaveStatusTimer = 0
 let bookmarkDragSlotRects = new Map<string, DOMRect>()
 let bookmarkDragSlotOrderIds: string[] = []
+let dashboardReturnFocusTarget: HTMLElement | null = null
 const backgroundPreloadPromise = preloadBackgroundSettings()
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -678,6 +682,7 @@ function bindIconSettingsEvents(): void {
   document.getElementById('icon-layout-control')?.addEventListener('click', handleIconLayoutModeClick)
   document.getElementById('icon-title-lines-control')?.addEventListener('click', handleIconTitleLinesClick)
   document.getElementById('icon-advanced-toggle')?.addEventListener('click', toggleIconAdvanced)
+  document.getElementById('icon-reset-defaults')?.addEventListener('click', resetIconSettingsToDefaults)
   document.getElementById('icon-preset-row')?.addEventListener('click', handlePresetCardClick)
 }
 
@@ -2735,6 +2740,12 @@ function syncDashboardRoute(): void {
 }
 
 function openDashboardRoute(): void {
+  dashboardReturnFocusTarget = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : dashboardTrigger instanceof HTMLElement
+      ? dashboardTrigger
+      : null
+
   if (window.location.hash === '#dashboard') {
     syncDashboardRoute()
     return
@@ -2747,13 +2758,13 @@ function closeDashboardRoute(): void {
   if (window.location.hash !== '#dashboard') {
     state.dashboardOpen = false
     renderDashboard()
-    dashboardTrigger?.focus()
+    restoreDashboardFocus()
     return
   }
 
   history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
   syncDashboardRoute()
-  dashboardTrigger?.focus()
+  restoreDashboardFocus()
 }
 
 function ensureDashboardFrameLoaded(): void {
@@ -2778,7 +2789,33 @@ function renderDashboard(): void {
 
   if (state.dashboardOpen) {
     ensureDashboardFrameLoaded()
+    focusDashboardOverlay()
   }
+}
+
+function focusDashboardOverlay(): void {
+  window.setTimeout(() => {
+    if (!state.dashboardOpen) {
+      return
+    }
+
+    if (state.dashboardFrameReady && dashboardFrame) {
+      dashboardFrame.focus()
+      return
+    }
+
+    dashboardOverlay?.focus()
+  }, 0)
+}
+
+function restoreDashboardFocus(): void {
+  const focusTarget = dashboardReturnFocusTarget?.isConnected
+    ? dashboardReturnFocusTarget
+    : dashboardTrigger instanceof HTMLElement
+      ? dashboardTrigger
+      : null
+  dashboardReturnFocusTarget = null
+  focusTarget?.focus()
 }
 
 function handleDashboardMessage(event: MessageEvent): void {
@@ -3304,7 +3341,7 @@ function syncSearchInputActions(
 function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[] {
   return getSearchBookmarkSuggestionsFromIndex(
     query,
-    state.searchIndex,
+    state.preparedSearchIndex,
     SEARCH_SUGGESTION_LIMIT
   )
 }
@@ -4136,6 +4173,7 @@ function refreshDerivedBookmarkState(): void {
     tagIndex: state.bookmarkTagIndex,
     snapshotIndex: state.searchSnapshotState?.index || null
   })
+  state.preparedSearchIndex = prepareNewTabSearchIndex(state.searchIndex)
 }
 
 function getBookmarkById(bookmarkId: string): chrome.bookmarks.BookmarkTreeNode | null {
@@ -5975,7 +6013,7 @@ function createSelectedFolderControls(): HTMLElement[] {
   if (!selectedIds.length) {
     const empty = document.createElement('p')
     empty.className = 'folder-source-empty'
-    empty.textContent = '未选择文件夹'
+    empty.textContent = '未选择来源文件夹。选择来源只会决定新标签页显示哪些书签，不会移动、删除或重排原有书签。'
     return [empty]
   }
 
@@ -6247,6 +6285,17 @@ function applyIconPreset(presetKey: IconLayoutPresetKey): void {
   })
   void saveIconSettings().catch((error) => {
     console.warn('新标签页图标预设保存失败。', error)
+  })
+  render()
+  syncIconSettingsControls()
+  updateAllSettingRangeVisuals()
+  updateClockText()
+}
+
+function resetIconSettingsToDefaults(): void {
+  state.iconSettings = normalizeIconSettings(DEFAULT_ICON_SETTINGS)
+  void saveIconSettings().catch((error) => {
+    console.warn('新标签页图标默认布局保存失败。', error)
   })
   render()
   syncIconSettingsControls()

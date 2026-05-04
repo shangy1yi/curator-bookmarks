@@ -32,3 +32,24 @@ test('newtab wallpaper startup motion respects reduced-motion preference', () =>
   assert.match(newtabCss, /html:not\(\.loading-wallpaper\) \.newtab-shell/)
   assert.match(newtabCss, /\.newtab-background-video/)
 })
+
+test('newtab dashboard overlay has modal dialog semantics and managed focus', () => {
+  const newtabHtml = readProjectFile('src/newtab/newtab.html')
+  const newtabSource = readProjectFile('src/newtab/newtab.ts')
+  const overlayMatch = newtabHtml.match(/<section[\s\S]*?id="newtab-dashboard-overlay"[\s\S]*?>/)
+  const frameMatch = newtabHtml.match(/<iframe[\s\S]*?id="newtab-dashboard-frame"[\s\S]*?>/)
+
+  assert.ok(overlayMatch)
+  assert.match(overlayMatch[0], /role="dialog"/)
+  assert.match(overlayMatch[0], /aria-modal="true"/)
+  assert.match(overlayMatch[0], /aria-hidden="true"/)
+  assert.match(overlayMatch[0], /tabindex="-1"/)
+  assert.ok(frameMatch)
+  assert.match(frameMatch[0], /tabindex="0"/)
+
+  assert.match(newtabSource, /dashboardReturnFocusTarget/)
+  assert.match(newtabSource, /function focusDashboardOverlay\(\): void/)
+  assert.match(newtabSource, /dashboardOverlay\?\.focus\(\)/)
+  assert.match(newtabSource, /dashboardFrame\.focus\(\)/)
+  assert.match(newtabSource, /function restoreDashboardFocus\(\): void/)
+})

@@ -378,11 +378,15 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
   assert.match(dashboardTrigger, /aria-controls="newtab-dashboard-overlay"/)
   assert.match(dashboardTrigger, />\s*书签仪表盘\s*<\/span>/)
   assert.match(dashboardOverlay, /\bhidden\b/)
+  assert.match(dashboardOverlay, /role="dialog"/)
+  assert.match(dashboardOverlay, /aria-modal="true"/)
   assert.match(dashboardOverlay, /aria-hidden="true"/)
+  assert.match(dashboardOverlay, /tabindex="-1"/)
   assert.match(dashboardOverlay, /data-dashboard-ready="false"/)
   assert.match(html, /class="newtab-dashboard-loading"/)
   assert.match(dashboardFrame, /loading="lazy"/)
   assert.match(dashboardFrame, /title="书签仪表盘"/)
+  assert.match(dashboardFrame, /tabindex="0"/)
   assert.doesNotMatch(html, /data-newtab-dashboard-root/)
 
   assert.ok(
@@ -396,6 +400,10 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
   assert.match(script, /curator:newtab-dashboard-ready/)
   assert.match(script, /dashboardFrameReady/)
   assert.match(script, /dashboardOverlay\.dataset\.dashboardReady/)
+  assert.match(script, /dashboardReturnFocusTarget/)
+  assert.match(script, /function focusDashboardOverlay\(\): void/)
+  assert.match(script, /dashboardFrame\.focus\(\)/)
+  assert.match(script, /function restoreDashboardFocus\(\): void/)
 
   for (const pattern of [
     /buildDashboardPanel/,
@@ -412,6 +420,16 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
   ]) {
     assert.doesNotMatch(script, pattern)
   }
+})
+
+test('newtab explains empty folder source selection without changing bookmarks', () => {
+  const html = readProjectFile('src/newtab/newtab.html')
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(html, /id="folder-selected-list"/)
+  assert.match(script, /未选择来源文件夹。选择来源只会决定新标签页显示哪些书签，不会移动、删除或重排原有书签。/)
+  assert.match(script, /removeLabel = `从新标签页移除/)
+  assert.match(script, /不会删除书签/)
 })
 
 test('newtab does not duplicate options dashboard markup or card semantics', () => {
@@ -578,6 +596,18 @@ test('newtab settings drawer layout responds to drawer width', () => {
   assert.match(script, /--preview-grid-max-width/)
   assert.match(script, /grid\.style\.gridTemplateColumns = `repeat\(\$\{previewColumns\}, minmax\(0, 1fr\)\)`/)
   assert.doesNotMatch(script, /grid\.style\.gridTemplateColumns = `repeat\(\$\{previewColumns\}, minmax\(0, var\(--preview-tile-width\)\)\)`/)
+})
+
+test('newtab advanced icon layout exposes a default reset control', () => {
+  const html = readProjectFile('src/newtab/newtab.html')
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+
+  assert.match(html, /id="icon-reset-defaults"[\s\S]*恢复默认布局/)
+  assert.match(script, /getElementById\('icon-reset-defaults'\)\?\.addEventListener\('click', resetIconSettingsToDefaults\)/)
+  assert.match(script, /function resetIconSettingsToDefaults\(\): void/)
+  assert.match(script, /normalizeIconSettings\(DEFAULT_ICON_SETTINGS\)/)
+  assert.match(css, /\.icon-reset-defaults/)
 })
 
 test('newtab settings rows avoid per-option divider lines', () => {
