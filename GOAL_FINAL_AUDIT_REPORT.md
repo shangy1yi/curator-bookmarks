@@ -130,6 +130,14 @@
    - 推荐改进方案：模态打开时背景设置 `inert` 和 `aria-hidden`。
    - 处理状态：已修复。
 
+5. popup 独立窄视口存在横向溢出
+   - 页面/组件位置：popup 根布局
+   - 现象描述：390px 窄视口运行时检查发现 popup 根宽仍固定 430px，产生 40px 横向溢出。
+   - 对用户的影响：在独立页面、窄屏调试或非标准容器中出现裁切和横向滚动。
+   - 严重程度：低
+   - 推荐改进方案：保留扩展 popup 的 430px 理想宽度，但允许根宽收缩到 `100vw`。
+   - 处理状态：已修复，`html, body` 使用 `width: min(430px, 100vw)`，并新增回归测试。
+
 ## 五、功能审查结果
 
 1. 标签索引写入并发覆盖
@@ -248,6 +256,9 @@
 - dist 产物引用完整性：通过。
   - `manifest.json` 中 action、newtab、background、icons 引用均存在。
   - `newtab.html`、`options.html`、`popup.html` 共 21 个本地 `src`/`href` 资源引用均存在。
+- Playwright 跨视口检查：通过。
+  - 1280x900 和 390x844 下，newtab、options dashboard、popup 根节点均可见。
+  - 修复后 popup 在 390px 窄视口下 `scrollWidth === clientWidth`，无横向溢出。
 
 ## 九、优化了哪些项目
 
@@ -262,6 +273,7 @@
 - dashboard overlay 增加关闭、超时、失败、重试状态。
 - dashboard 标签隐藏展开支持鼠标和键盘。
 - popup 模态背景 inert，改善可访问性。
+- popup 根布局支持窄视口收缩，避免独立页面或窄屏容器横向溢出。
 
 ## 十、创新了什么功能
 

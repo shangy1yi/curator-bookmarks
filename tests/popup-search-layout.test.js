@@ -91,3 +91,13 @@ test('popup modals make the background app shell inert while open', () => {
   assert.match(popupSource, /element\.getClientRects\(\)\.length > 0/)
   assert.doesNotMatch(popupSource, /element\.offsetParent !== null/)
 })
+
+test('popup shell can shrink below the extension popup width without horizontal overflow', () => {
+  const popupCss = readProjectFile('src/popup/popup.css')
+  const rootSizeRule = popupCss.match(/html,\s*body\s*\{[\s\S]*?\n\}/)?.[0] || ''
+
+  assert.match(rootSizeRule, /width:\s*min\(430px,\s*100vw\)/)
+  assert.match(rootSizeRule, /min-width:\s*0/)
+  assert.match(rootSizeRule, /max-width:\s*430px/)
+  assert.doesNotMatch(rootSizeRule, /min-width:\s*430px/)
+})
