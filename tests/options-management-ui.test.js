@@ -457,6 +457,20 @@ test('duplicate item recycle checkboxes expose bookmark-specific labels', () => 
   assert.match(duplicateSource, /位置：\$\{path\}/)
 })
 
+test('duplicate bulk selection buttons expose duplicate-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['duplicate-clear-selection', '清空重复书签已选项'],
+    ['duplicate-delete-selection', '将重复书签已选项移入回收站']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('broken-link guidance explains confidence levels and redirect handling', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const optionsSource = readProjectFile('src/options/options.ts')
