@@ -154,6 +154,25 @@ test('dashboard bulk selection buttons expose dashboard-specific labels', () => 
   }
 })
 
+test('dashboard tag editor action buttons expose bookmark tag context', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['dashboard-tag-editor-clear-ai', '清除当前 Dashboard 书签的 AI 标签'],
+    ['dashboard-tag-editor-regenerate-ai', '重新生成当前 Dashboard 书签的 AI 标签'],
+    ['dashboard-tag-editor-save', '保存当前 Dashboard 书签标签']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+
+  const closeButton = optionsHtml.match(/<button[^>]+data-dashboard-action="close-tag-editor"[^>]*>/)?.[0] || ''
+  assert.ok(closeButton, 'missing close tag editor button')
+  assert.match(closeButton, /aria-label="取消编辑当前 Dashboard 书签标签"/)
+})
+
 test('content snapshot full text search map is not awaited during initial options hydration', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
   const hydrateBody = optionsSource.match(/async function hydratePersistentState\(\) \{([\s\S]*?)async function saveAiNamingSettings/)?.[1] || ''
