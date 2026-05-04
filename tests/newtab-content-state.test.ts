@@ -837,6 +837,7 @@ test('newtab bookmark suggestions are debounced and cached', () => {
   assert.doesNotMatch(contentState, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/dot-matrix-loader\.js['"]/m)
   assert.doesNotMatch(script, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/motion\.js['"]/m)
   assert.doesNotMatch(script, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/recycle-bin\.js['"]/m)
+  assert.doesNotMatch(script, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/bookmarks-api\.js['"]/m)
   assert.doesNotMatch(script, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/bookmark-tags\.js['"]/m)
   assert.doesNotMatch(script, /input\.addEventListener\('input', \(\) => \{[\s\S]*?renderSuggestions\(\)/)
 })

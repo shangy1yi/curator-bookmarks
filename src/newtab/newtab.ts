@@ -3,12 +3,6 @@ import {
   STORAGE_KEYS
 } from '../shared/constants.js'
 import {
-  createBookmark,
-  getBookmarkTree,
-  moveBookmark,
-  updateBookmark
-} from '../shared/bookmarks-api.js'
-import {
   extractBookmarkData,
   findBookmarksBar
 } from '../shared/bookmark-tree.js'
@@ -250,6 +244,41 @@ async function closeWithExitMotion(
 const SEARCH_SUGGESTION_LIMIT = 6
 const SEARCH_SUGGESTION_DEBOUNCE_MS = 80
 const SEARCH_SUGGESTION_CACHE_LIMIT = 24
+
+function getBookmarkTree(): Promise<chrome.bookmarks.BookmarkTreeNode[]> {
+  return new Promise((resolve, reject) => {
+    chrome.bookmarks.getTree((tree) => {
+      const error = chrome.runtime.lastError
+      if (error) {
+        reject(new Error(error.message))
+        return
+      }
+
+      resolve(tree)
+    })
+  })
+}
+
+async function moveBookmarkLazy(
+  ...args: Parameters<typeof import('../shared/bookmarks-api.js').moveBookmark>
+): ReturnType<typeof import('../shared/bookmarks-api.js').moveBookmark> {
+  const { moveBookmark } = await import('../shared/bookmarks-api.js')
+  return moveBookmark(...args)
+}
+
+async function updateBookmarkLazy(
+  ...args: Parameters<typeof import('../shared/bookmarks-api.js').updateBookmark>
+): ReturnType<typeof import('../shared/bookmarks-api.js').updateBookmark> {
+  const { updateBookmark } = await import('../shared/bookmarks-api.js')
+  return updateBookmark(...args)
+}
+
+async function createBookmarkLazy(
+  ...args: Parameters<typeof import('../shared/bookmarks-api.js').createBookmark>
+): ReturnType<typeof import('../shared/bookmarks-api.js').createBookmark> {
+  const { createBookmark } = await import('../shared/bookmarks-api.js')
+  return createBookmark(...args)
+}
 
 async function deleteBookmarkToRecycleLazy(
   ...args: Parameters<typeof import('../shared/recycle-bin.js').deleteBookmarkToRecycle>
@@ -1988,7 +2017,7 @@ async function persistBookmarkOrder(
   syncBookmarkReorderBusyState()
   try {
     for (const operation of operations) {
-      await moveBookmark(operation.id, operation.parentId, operation.index)
+      await moveBookmarkLazy(operation.id, operation.parentId, operation.index)
     }
 
     if (!syncPersistedBookmarkOrderInState(folderId, operations, finalBookmarkIds)) {
@@ -2494,7 +2523,7 @@ async function saveBookmarkMenuChanges(): Promise<void> {
     state.menuStatus = ''
     renderBookmarkMenu()
 
-    await updateBookmark(bookmark.id, { title, url })
+    await updateBookmarkLazy(bookmark.id, { title, url })
     await persistCustomIconChoice(bookmark.id)
     if (previousUrl !== url) {
       await deleteFaviconAccentCacheEntry(bookmark.id)
@@ -2644,7 +2673,7 @@ async function undoLastDeletedBookmark(): Promise<void> {
   try {
     const bookmark = deleted.bookmark
     const parentId = await getRestorableParentId(bookmark.parentId)
-    const createdBookmark = await createBookmark({
+    const createdBookmark = await createBookmarkLazy({
       parentId,
       index: Number.isFinite(Number(bookmark.index)) ? Number(bookmark.index) : undefined,
       title: bookmark.title || '未命名书签',
@@ -2728,7 +2757,7 @@ async function saveAddedBookmark(): Promise<void> {
     renderAddBookmarkMenu({ focusFirst: false })
 
     const folderId = state.addFolderId || await ensureNewTabFolder()
-    await createBookmark({
+    await createBookmarkLazy({
       parentId: folderId,
       title,
       url
@@ -2837,7 +2866,7 @@ async function createNewTabFolder(): Promise<void> {
   try {
     const rootNode = state.rootNode || (await getBookmarkTree())[0] || null
     const bookmarksBar = findBookmarksBar(rootNode)
-    const createdFolder = await createBookmark({
+    const createdFolder = await createBookmarkLazy({
       parentId: bookmarksBar?.id || BOOKMARKS_BAR_ID,
       title: DEFAULT_NEW_TAB_FOLDER_TITLE
     })
@@ -2876,7 +2905,7 @@ async function ensureNewTabFolder(): Promise<string> {
   }
 
   const bookmarksBar = findBookmarksBar(rootNode)
-  const createdFolder = await createBookmark({
+  const createdFolder = await createBookmarkLazy({
     parentId: bookmarksBar?.id || BOOKMARKS_BAR_ID,
     title: DEFAULT_NEW_TAB_FOLDER_TITLE
   })
