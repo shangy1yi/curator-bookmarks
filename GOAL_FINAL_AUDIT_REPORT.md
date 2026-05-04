@@ -241,6 +241,10 @@
   - newtab：`#newtab-root` 可见，无 pageerror/console error。
   - options dashboard：`#dashboard` 可见，无 pageerror/console error。
   - popup：`#popup-app-shell` 可见，无 pageerror/console error。
+- Playwright 关键交互验证：通过。
+  - newtab 搜索无本地匹配时显示“未找到书签，按 Enter 用 Google 搜索”fallback。
+  - newtab dashboard overlay 可打开并关闭，`aria-hidden` 和 `hidden` 状态同步。
+  - popup 筛选模态打开时 `#popup-app-shell` 设置 `inert` 和 `aria-hidden="true"`，关闭后恢复。
 - dist 产物引用完整性：通过。
   - `manifest.json` 中 action、newtab、background、icons 引用均存在。
   - `newtab.html`、`options.html`、`popup.html` 共 21 个本地 `src`/`href` 资源引用均存在。
