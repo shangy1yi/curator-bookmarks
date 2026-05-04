@@ -40,5 +40,13 @@
   },
   "dependencies": {
     "pinyin-pro": "^3.28.1"
+  },
+  "overrides": {
+    "@crxjs/vite-plugin": {
+      "rollup": "2.80.0"
+    },
+    "vite": {
+      "rollup": "^4.34.9"
+    }
   }
 }

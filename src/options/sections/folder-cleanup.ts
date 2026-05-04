@@ -484,6 +484,8 @@ function findBookmarkTreeNode(
 }
 
 function buildSplitUndoNotice(splitUndo: FolderCleanupSplitUndo, locked: boolean): string {
+  const undoLabel = getFolderCleanupSplitUndoActionLabel('撤销本次拆分', splitUndo)
+
   return `
     <article class="detect-result-card folder-cleanup-undo-card">
       <div class="detect-result-head">
@@ -493,6 +495,7 @@ function buildSplitUndoNotice(splitUndo: FolderCleanupSplitUndo, locked: boolean
             class="detect-result-action"
             type="button"
             data-folder-cleanup-undo-split="${escapeAttr(splitUndo.id)}"
+            aria-label="${escapeAttr(undoLabel)}"
             ${locked ? 'disabled' : ''}
           >撤销本次拆分</button>
         </div>
@@ -505,9 +508,42 @@ function buildSplitUndoNotice(splitUndo: FolderCleanupSplitUndo, locked: boolean
   `
 }
 
+export function getFolderCleanupSuggestionActionLabel(
+  action: string,
+  suggestion: Pick<FolderCleanupSuggestion, 'title' | 'summary'>
+): string {
+  const context = getFolderCleanupActionContext(suggestion?.title || suggestion?.summary, '未命名清理建议')
+  return `${action}：${context}`
+}
+
+export function getFolderCleanupSplitUndoActionLabel(
+  action: string,
+  splitUndo: Pick<FolderCleanupSplitUndo, 'title' | 'moves'>
+): string {
+  const context = getFolderCleanupActionContext(splitUndo?.title, '拆分超大文件夹')
+  const moveCount = Array.isArray(splitUndo?.moves) ? splitUndo.moves.length : 0
+  return `${action}：${context}${moveCount ? `，${moveCount} 个书签` : ''}`
+}
+
+function getFolderCleanupActionContext(value: unknown, fallback: string): string {
+  const normalized = String(value || fallback)
+    .replace(/\s+/g, ' ')
+    .trim()
+  const safeValue = normalized.length > 48
+    ? `${normalized.slice(0, 47).trim()}…`
+    : normalized
+
+  return safeValue || fallback
+}
+
 function buildSuggestionCard(suggestion: FolderCleanupSuggestion, locked: boolean): string {
   const previewOpen = folderCleanupState.selectedSuggestionId === suggestion.id
   const operationCopy = getOperationCopy(suggestion)
+  const previewLabel = getFolderCleanupSuggestionActionLabel(
+    previewOpen ? '收起文件夹清理预览' : '查看文件夹清理预览',
+    suggestion
+  )
+  const operationLabel = getFolderCleanupSuggestionActionLabel(operationCopy, suggestion)
   const splitPreview = suggestion.splitGroups?.length
     ? `<div class="folder-cleanup-split-preview">${suggestion.splitGroups.map((group) => `
         <span class="options-chip muted">${escapeHtml(group.label)} · ${group.count}</span>
@@ -522,11 +558,17 @@ function buildSuggestionCard(suggestion: FolderCleanupSuggestion, locked: boolea
       <div class="detect-result-head">
         <span class="options-chip ${suggestion.severity === 'danger' ? 'danger' : suggestion.severity === 'warning' ? 'warning' : 'muted'}">${escapeHtml(KIND_LABELS[suggestion.kind])}</span>
         <div class="detect-result-actions">
-          <button class="detect-result-action" type="button" data-folder-cleanup-preview="${escapeAttr(suggestion.id)}">${previewOpen ? '收起预览' : '查看预览'}</button>
+          <button
+            class="detect-result-action"
+            type="button"
+            data-folder-cleanup-preview="${escapeAttr(suggestion.id)}"
+            aria-label="${escapeAttr(previewLabel)}"
+          >${previewOpen ? '收起预览' : '查看预览'}</button>
           <button
             class="detect-result-action ${suggestion.severity === 'danger' ? 'danger' : ''}"
             type="button"
             data-folder-cleanup-action="${escapeAttr(suggestion.id)}"
+            aria-label="${escapeAttr(operationLabel)}"
             ${locked || !suggestion.canExecute ? 'disabled' : ''}
           >${escapeHtml(operationCopy)}</button>
         </div>

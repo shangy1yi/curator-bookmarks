@@ -147,6 +147,22 @@ function renderIgnoreRuleList(container, rules, kind) {
     .join('')
 }
 
+export function getIgnoreRuleActionLabel(action, rule, kind) {
+  const title = kind === 'bookmark'
+    ? rule?.title || displayUrl(rule?.url)
+    : kind === 'folder'
+      ? rule?.path || rule?.title
+      : rule?.domain
+  const normalizedTitle = String(title || '未命名规则')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const safeTitle = normalizedTitle.length > 48
+    ? `${normalizedTitle.slice(0, 47).trim()}…`
+    : normalizedTitle
+
+  return `${action}：${safeTitle || '未命名规则'}`
+}
+
 function buildIgnoreRuleCard(rule, kind) {
   const title = kind === 'bookmark'
     ? rule.title
@@ -163,6 +179,7 @@ function buildIgnoreRuleCard(rule, kind) {
     : kind === 'folder'
       ? rule.folderId
       : rule.domain
+  const deleteLabel = getIgnoreRuleActionLabel('删除忽略规则', rule, kind)
 
   return `
     <article class="detect-result-card compact">
@@ -176,6 +193,7 @@ function buildIgnoreRuleCard(rule, kind) {
             type="button"
             data-ignore-remove="${escapeAttr(kind)}"
             data-ignore-id="${escapeAttr(ruleId)}"
+            aria-label="${escapeAttr(deleteLabel)}"
           >
             删除规则
           </button>

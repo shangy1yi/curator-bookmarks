@@ -19,6 +19,8 @@ function byId(id: string): OptionsDomElement {
 
 export function cacheDom() {
   dom.dashboardPanel = byId('dashboard')
+  dom.dashboardTitle = byId('dashboard-title')
+  dom.dashboardCardsTitle = byId('dashboard-cards-title')
   dom.dashboardStatus = byId('dashboard-status')
   dom.dashboardTotal = byId('dashboard-total')
   dom.dashboardQuery = byId('dashboard-query')

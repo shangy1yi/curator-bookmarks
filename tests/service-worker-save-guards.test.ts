@@ -70,3 +70,12 @@ test('auto analyze queue reuses a tree snapshot within one processing pass', () 
   assert.match(source, /function invalidateAutoAnalyzeTreeContext\(\)/)
   assert.match(source, /if \(moved\) \{[\s\S]*?invalidateAutoAnalyzeTreeContext\(\)/)
 })
+
+test('auto analyze queue failure schedules wake from remaining queue state', () => {
+  const source = readProjectFile('src/service-worker/service-worker.ts')
+  const failureBody = source.match(/async function markAutoAnalyzeQueueEntryFailed[\s\S]*?\n}\n\nasync function removeAutoAnalyzeQueueEntry/)?.[0] || ''
+
+  assert.match(failureBody, /const nextQueue = await updateAutoAnalyzeQueue/)
+  assert.match(failureBody, /scheduleNextAutoAnalyzeQueueWake\(nextQueue\)/)
+  assert.doesNotMatch(failureBody, /scheduleAutoAnalyzeQueueAlarm\(AUTO_ANALYZE_QUEUE_RETRY_MS\)/)
+})

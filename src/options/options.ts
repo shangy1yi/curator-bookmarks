@@ -105,6 +105,7 @@ import {
 } from './sections/content-extraction.js'
 import {
   buildContentSnapshotSearchMap,
+  buildContentSnapshotSearchText,
   buildContentSnapshotSearchMapWithFullText,
   normalizeContentSnapshotIndex,
   normalizeContentSnapshotSettings,
@@ -941,24 +942,36 @@ function bindEvents() {
   dom.confirmModalConfirm?.addEventListener('click', () => resolveConfirmModal(true))
   dom.moveSearchInput?.addEventListener('input', () => {
     managerState.moveSearchQuery = dom.moveSearchInput.value
+    managerState.moveFolderActiveId = ''
     renderMoveModal()
   })
+  dom.moveSearchInput?.addEventListener('keydown', handleMoveSearchKeydown)
   dom.moveFolderResults?.addEventListener('click', handleMoveFolderResultsClick)
+  dom.moveFolderResults?.addEventListener('keydown', handleMoveFolderResultsKeydown)
+  dom.moveFolderResults?.addEventListener('focusin', handleMoveFolderResultsFocus)
   dom.cancelMoveModal?.addEventListener('click', closeMoveModal)
   dom.scopeSearchInput?.addEventListener('input', () => {
     managerState.scopeSearchQuery = dom.scopeSearchInput.value
+    managerState.scopeFolderActiveId = null
     renderScopeModal()
   })
+  dom.scopeSearchInput?.addEventListener('keydown', handleScopeSearchKeydown)
   dom.scopeFolderResults?.addEventListener('click', handleScopeFolderResultsClick)
+  dom.scopeFolderResults?.addEventListener('keydown', handleScopeFolderResultsKeydown)
+  dom.scopeFolderResults?.addEventListener('focusin', handleScopeFolderResultsFocus)
   dom.cancelScopeModal?.addEventListener('click', closeScopeModal)
   dom.closeAiModelModal?.addEventListener('click', closeAiModelModal)
   dom.cancelAiModelModal?.addEventListener('click', closeAiModelModal)
   dom.saveAiModelModal?.addEventListener('click', saveAiModelModalSettings)
   dom.aiModelPickerSearchInput?.addEventListener('input', () => {
     managerState.aiModelPickerSearchQuery = dom.aiModelPickerSearchInput.value
+    managerState.aiModelPickerActiveId = ''
     renderAiModelPickerModal()
   })
+  dom.aiModelPickerSearchInput?.addEventListener('keydown', handleAiModelPickerSearchKeydown)
   dom.aiModelPickerResults?.addEventListener('click', handleAiModelPickerResultsClick)
+  dom.aiModelPickerResults?.addEventListener('keydown', handleAiModelPickerResultsKeydown)
+  dom.aiModelPickerResults?.addEventListener('focusin', handleAiModelPickerResultsFocus)
   dom.closeAiModelPickerModal?.addEventListener('click', closeAiModelPickerModal)
   dom.cancelAiModelPickerModal?.addEventListener('click', closeAiModelPickerModal)
   dom.aiModelPickerFetchButton?.addEventListener('click', handleFetchAiModels)
@@ -4228,6 +4241,7 @@ function openAiModelPickerModal() {
 
   managerState.aiModelPickerModalOpen = true
   managerState.aiModelPickerSearchQuery = ''
+  managerState.aiModelPickerActiveId = aiNamingManagerState.settings.model || AI_NAMING_DEFAULT_MODEL
   renderAiModelPickerModal()
 
   window.setTimeout(() => {
@@ -4241,6 +4255,7 @@ function openAiModelPickerModal() {
 function closeAiModelPickerModal() {
   managerState.aiModelPickerModalOpen = false
   managerState.aiModelPickerSearchQuery = ''
+  managerState.aiModelPickerActiveId = ''
   renderAiModelPickerModal()
 }
 
@@ -4316,12 +4331,14 @@ function renderAiModelPickerModal() {
     : allModels
 
   if (!filteredModels.length) {
+    managerState.aiModelPickerActiveId = ''
     dom.aiModelPickerResults.innerHTML = normalizedQuery
       ? '<div class="detect-empty">没有匹配的模型。</div>'
       : '<div class="detect-empty">尚未加载模型，可点击下方「获取模型」从 API 拉取。</div>'
     return
   }
 
+  resolveAiModelPickerActiveId(filteredModels, settings)
   dom.aiModelPickerResults.innerHTML = filteredModels
     .map((model) => buildAiModelPickerCard(model, settings))
     .join('')
@@ -4329,6 +4346,7 @@ function renderAiModelPickerModal() {
 
 function buildAiModelPickerCard(model, settings = aiNamingManagerState.settings) {
   const isCurrent = String(model) === String(settings.model || '')
+  const isActive = String(model) === String(managerState.aiModelPickerActiveId || '')
   const isFetched = settings.fetchedModels.some((value) => value === model)
   const isCustom = settings.customModels.some((value) => value === model)
   const isPreset = AI_NAMING_PRESET_MODELS.some((value) => value === model)
@@ -4356,6 +4374,7 @@ function buildAiModelPickerCard(model, settings = aiNamingManagerState.settings)
       role="option"
       aria-selected="${isCurrent ? 'true' : 'false'}"
       data-ai-model-id="${escapeAttr(model)}"
+      tabindex="${isActive ? '0' : '-1'}"
       title="${escapeAttr(model)}"
     >
       <div class="scope-folder-head">
@@ -4364,6 +4383,127 @@ function buildAiModelPickerCard(model, settings = aiNamingManagerState.settings)
       ${tagsHtml}
     </button>
   `
+}
+
+function resolveAiModelPickerActiveId(models, settings = aiNamingManagerState.settings) {
+  if (!models.length) {
+    managerState.aiModelPickerActiveId = ''
+    return ''
+  }
+
+  const activeId = models.some((model) => model === managerState.aiModelPickerActiveId)
+    ? managerState.aiModelPickerActiveId
+    : models.some((model) => model === settings.model)
+      ? settings.model
+      : models[0] || ''
+  managerState.aiModelPickerActiveId = activeId
+  return activeId
+}
+
+function getAiModelPickerOptionButtons() {
+  return [...dom.aiModelPickerResults.querySelectorAll<HTMLButtonElement>('[data-ai-model-id]')]
+}
+
+function handleAiModelPickerSearchKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  if (!getAiModelPickerOptionButtons().length) {
+    return
+  }
+
+  event.preventDefault()
+  focusAiModelPickerOption(event.key === 'ArrowDown' ? 'first' : 'last')
+}
+
+function handleAiModelPickerResultsKeydown(event) {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    dom.aiModelPickerSearchInput?.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusAiModelPickerOption('first')
+  } else if (event.key === 'End') {
+    focusAiModelPickerOption('last')
+  } else {
+    focusAiModelPickerOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function handleAiModelPickerResultsFocus(event) {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.dataset.aiModelId) {
+    return
+  }
+
+  managerState.aiModelPickerActiveId = target.dataset.aiModelId
+  syncAiModelPickerTabStops(managerState.aiModelPickerActiveId)
+}
+
+function syncAiModelPickerTabStops(activeId) {
+  for (const button of getAiModelPickerOptionButtons()) {
+    button.tabIndex = button.dataset.aiModelId === activeId ? 0 : -1
+  }
+}
+
+function focusAiModelPickerOptionById(modelId) {
+  let targetButton = null
+  for (const button of getAiModelPickerOptionButtons()) {
+    const isTarget = button.dataset.aiModelId === modelId
+    button.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = button
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  managerState.aiModelPickerActiveId = modelId
+  targetButton.focus()
+  return true
+}
+
+function focusAiModelPickerOption(direction) {
+  const buttons = getAiModelPickerOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  let nextIndex = managerState.aiModelPickerActiveId
+    ? buttons.findIndex((button) => button.dataset.aiModelId === managerState.aiModelPickerActiveId)
+    : -1
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  const modelId = String(button?.dataset.aiModelId || '')
+  if (modelId) {
+    focusAiModelPickerOptionById(modelId)
+  }
 }
 
 function handleAiModelPickerResultsClick(event) {
@@ -4381,6 +4521,7 @@ function handleAiModelPickerResultsClick(event) {
     return
   }
 
+  managerState.aiModelPickerActiveId = modelId
   aiNamingManagerState.settings = normalizeAiNamingSettings({
     ...aiNamingManagerState.settings,
     model: modelId
@@ -4761,12 +4902,28 @@ function levenshteinDistance(left, right) {
   return previous[right.length]
 }
 
+function getAiNamingResultActionLabel(action, result) {
+  const title = String(result?.currentTitle || result?.suggestedTitle || displayUrl(result?.url) || '未命名书签')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const safeTitle = title.length > 48 ? `${title.slice(0, 47).trim()}…` : title
+
+  return `${action}：${safeTitle || '未命名书签'}`
+}
+
 function buildAiNamingResultCard(result) {
   const selectable = result.status === 'suggested'
   const interactionLocked = aiNamingState.running || aiNamingState.applying
   const isSelected = aiNamingState.selectedResultIds.has(String(result.id))
   const canMoveToSuggestedFolder = canMoveAiNamingResultToSuggestedFolder(result)
   const pendingMove = aiNamingState.pendingMoveResultIds.has(String(result.id))
+  const selectionLabel = getAiNamingResultActionLabel(
+    selectable ? '选择书签智能分析建议' : '书签智能分析建议不可直接应用',
+    result
+  )
+  const openLabel = getAiNamingResultActionLabel('打开书签页面', result)
+  const applyLabel = getAiNamingResultActionLabel('应用书签智能分析建议', result)
+  const moveLabel = getAiNamingResultActionLabel('移动至推荐文件夹', result)
   const badgeTone = result.status === 'failed'
     ? 'danger'
     : result.confidence === 'high'
@@ -4796,6 +4953,7 @@ function buildAiNamingResultCard(result) {
           type="button"
           data-ai-move-recommended="${escapeAttr(result.id)}"
           title="${escapeAttr(pendingMove ? `再次点击，移动到 ${result.suggestedFolder}` : `移动到 ${result.suggestedFolder}`)}"
+          aria-label="${escapeAttr(moveLabel)}"
           ${interactionLocked ? 'disabled' : ''}
         >
           ${pendingMove ? '<span class="double-confirm-icon" aria-hidden="true">✓✓</span> 确认移动' : '移动至推荐文件夹'}
@@ -4846,6 +5004,7 @@ function buildAiNamingResultCard(result) {
             <input
               type="checkbox"
               data-ai-select="${escapeAttr(result.id)}"
+              aria-label="${escapeAttr(selectionLabel)}"
               ${selectable && isSelected ? 'checked' : ''}
               ${selectable && !interactionLocked ? '' : 'disabled'}
             >
@@ -4856,8 +5015,8 @@ function buildAiNamingResultCard(result) {
           ${Number.isFinite(Number(result.confidenceScore)) ? `<span class="options-chip muted">${escapeHtml(Math.round(Number(result.confidenceScore) * 100))}%</span>` : ''}
         </div>
         <div class="detect-result-actions">
-          <a class="detect-result-open" href="${escapeAttr(result.url)}" target="_blank" rel="noreferrer noopener">打开页面</a>
-          ${selectable ? `<button class="detect-result-action" type="button" data-ai-apply="${escapeAttr(result.id)}" ${interactionLocked ? 'disabled' : ''}>应用建议</button>` : ''}
+          <a class="detect-result-open" href="${escapeAttr(result.url)}" target="_blank" rel="noreferrer noopener" aria-label="${escapeAttr(openLabel)}">打开页面</a>
+          ${selectable ? `<button class="detect-result-action" type="button" data-ai-apply="${escapeAttr(result.id)}" aria-label="${escapeAttr(applyLabel)}" ${interactionLocked ? 'disabled' : ''}>应用建议</button>` : ''}
         </div>
       </div>
       <div class="detect-result-copy ai-result-copy">
@@ -6325,12 +6484,7 @@ async function saveContentSnapshotForAiPreparedItem(preparedItem): Promise<void>
         [record.bookmarkId]: record
       }
     })
-    contentSnapshotState.searchTextMap = await buildContentSnapshotSearchMapWithFullText(contentSnapshotState.index, {
-      includeFullText: contentSnapshotState.settings.fullTextSearchEnabled,
-      maxRecords: 1000
-    }).catch(() => contentSnapshotState.searchTextMap)
-    contentSnapshotState.searchTextMapIncludesFullText = contentSnapshotState.settings.fullTextSearchEnabled
-    contentSnapshotState.searchTextMapLoadingFullText = false
+    updateContentSnapshotSearchTextForRecord(record)
     resetContentSnapshotFullTextSearchMapRetry()
     contentSnapshotState.aiRunSavedCount += 1
     contentSnapshotState.statusMessage = ''
@@ -6342,6 +6496,30 @@ async function saveContentSnapshotForAiPreparedItem(preparedItem): Promise<void>
     contentSnapshotState.statusMessage = `书签智能分析保存网页内容索引失败：${title}：${message}`
     console.warn('[Curator] 书签智能分析保存网页内容索引失败', error)
     renderContentSnapshotSettings()
+  }
+}
+
+function updateContentSnapshotSearchTextForRecord(record): void {
+  const searchText = buildContentSnapshotSearchText(record, {
+    includeFullText: contentSnapshotState.searchTextMapIncludesFullText
+  })
+  const bookmarkId = String(record?.bookmarkId || '').trim()
+  if (!bookmarkId) {
+    return
+  }
+
+  const nextSearchMap = new Map(contentSnapshotState.searchTextMap)
+  if (searchText) {
+    nextSearchMap.set(bookmarkId, searchText)
+  } else {
+    nextSearchMap.delete(bookmarkId)
+  }
+  contentSnapshotState.searchTextMap = nextSearchMap
+  if (
+    contentSnapshotState.settings.fullTextSearchEnabled &&
+    !contentSnapshotState.searchTextMapIncludesFullText
+  ) {
+    scheduleContentSnapshotFullTextSearchMapHydration()
   }
 }
 
@@ -7001,10 +7179,10 @@ function renderScopeModal() {
     : `请选择一个文件夹作为当前${sourceLabel}，支持搜索文件夹名称或路径；选择后会立即更新可用性检测与历史记录视图。`
   dom.scopeSearchInput.value = managerState.scopeSearchQuery
 
-  const activeScopeFolderId = managerState.scopeModalSource === 'ai'
-    ? aiNamingState.scopeFolderId
-    : availabilityState.scopeFolderId
+  const activeScopeFolderId = getCurrentScopeFolderId()
   const allSelected = !activeScopeFolderId
+  const activeId = resolveScopeFolderActiveId(folders, activeScopeFolderId)
+  const allActive = activeId === ''
   const allOption = `
     <button
       class="scope-folder-card ${allSelected ? 'current' : ''}"
@@ -7012,6 +7190,7 @@ function renderScopeModal() {
       role="option"
       aria-selected="${allSelected ? 'true' : 'false'}"
       data-scope-folder-id=""
+      tabindex="${allActive ? '0' : '-1'}"
     >
       <div class="scope-folder-head">
         <span class="scope-folder-icon" aria-hidden="true"></span>
@@ -7033,10 +7212,9 @@ function renderScopeModal() {
 }
 
 function buildScopeFolderCard(folder) {
-  const activeScopeFolderId = managerState.scopeModalSource === 'ai'
-    ? aiNamingState.scopeFolderId
-    : availabilityState.scopeFolderId
+  const activeScopeFolderId = getCurrentScopeFolderId()
   const isCurrent = String(folder.id) === String(activeScopeFolderId || '')
+  const isActive = String(folder.id) === String(managerState.scopeFolderActiveId || '')
 
   return `
     <button
@@ -7045,6 +7223,7 @@ function buildScopeFolderCard(folder) {
       role="option"
       aria-selected="${isCurrent ? 'true' : 'false'}"
       data-scope-folder-id="${escapeAttr(folder.id)}"
+      tabindex="${isActive ? '0' : '-1'}"
       title="${escapeAttr(folder.path || folder.title || '未命名文件夹')}"
     >
       <div class="scope-folder-head">
@@ -7054,6 +7233,32 @@ function buildScopeFolderCard(folder) {
       <span>${escapeHtml(folder.path || folder.title || '未命名文件夹')}</span>
     </button>
   `
+}
+
+function getCurrentScopeFolderId() {
+  return managerState.scopeModalSource === 'ai'
+    ? aiNamingState.scopeFolderId
+    : availabilityState.scopeFolderId
+}
+
+function getScopeFolderOptionButtons() {
+  return [...dom.scopeFolderResults.querySelectorAll<HTMLButtonElement>('[data-scope-folder-id]')]
+}
+
+function resolveScopeFolderActiveId(folders, activeScopeFolderId = getCurrentScopeFolderId()) {
+  const optionIds = new Set(['', ...folders.map((folder) => String(folder.id || ''))])
+  const storedActiveId = managerState.scopeFolderActiveId === null
+    ? null
+    : String(managerState.scopeFolderActiveId || '')
+  const selectedId = String(activeScopeFolderId || '')
+  const activeId = storedActiveId !== null && optionIds.has(storedActiveId)
+    ? storedActiveId
+    : optionIds.has(selectedId)
+      ? selectedId
+      : ''
+
+  managerState.scopeFolderActiveId = activeId
+  return activeId
 }
 
 function renderReviewResults() {
@@ -7279,10 +7484,12 @@ function renderMoveModal() {
   dom.moveSearchInput.value = managerState.moveSearchQuery
 
   if (!folders.length) {
+    managerState.moveFolderActiveId = ''
     dom.moveFolderResults.innerHTML = '<div class="detect-empty">没有匹配的目标文件夹。</div>'
     return
   }
 
+  resolveMoveFolderActiveId(folders)
   dom.moveFolderResults.innerHTML = folders
     .map((folder) => buildMoveFolderCard(folder))
     .join('')
@@ -7301,6 +7508,8 @@ function buildAvailabilityDisplayCard(result, panel) {
   const statusLabel = getAvailabilityResultStatusLabel(result)
   const actionLocked = isAvailabilityResultActionLocked()
   const actionButton = getAvailabilityConfidenceMoveAction(result, actionLocked)
+  const selectionLabel = getAvailabilityResultActionLabel('选择异常书签', result)
+  const openLabel = getAvailabilityResultActionLabel('打开异常书签链接', result)
   const quickActions = buildAvailabilityQuickActions(result, actionLocked)
   const metadataItems = getAvailabilityResultMetadata(result)
   const evidenceCopy = getAvailabilityEvidenceSummary(result)
@@ -7318,6 +7527,7 @@ function buildAvailabilityDisplayCard(result, panel) {
                 type="checkbox"
                 data-availability-select="true"
                 data-bookmark-id="${escapeAttr(result.id)}"
+                aria-label="${escapeAttr(selectionLabel)}"
                 ${selected ? 'checked' : ''}
                 ${interactionLocked ? 'disabled' : ''}
               >
@@ -7335,6 +7545,7 @@ function buildAvailabilityDisplayCard(result, panel) {
               href="${escapeAttr(result.url)}"
               target="_blank"
               rel="noreferrer noopener"
+              aria-label="${escapeAttr(openLabel)}"
             >
               打开链接
             </a>
@@ -7417,14 +7628,30 @@ function getAvailabilityResultFallbackBadge(result) {
   return '忽略规则命中'
 }
 
+function getAvailabilityResultActionLabel(action, result) {
+  const title = String(result?.title || displayUrl(result?.url) || '未命名书签')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const path = String(result?.path || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const safeTitle = title.length > 48 ? `${title.slice(0, 47).trim()}…` : title
+  const safePath = path.length > 48 ? `${path.slice(0, 47).trim()}…` : path
+
+  return `${action}：${safeTitle || '未命名书签'}${safePath ? `，位置：${safePath}` : ''}`
+}
+
 function getAvailabilityConfidenceMoveAction(result, interactionLocked) {
   if (result.status === 'review') {
+    const actionLabel = getAvailabilityResultActionLabel('移入高置信异常', result)
+
     return `
       <button
         class="detect-result-action"
         type="button"
         data-review-action="promote-failed"
         data-bookmark-id="${escapeAttr(result.id)}"
+        aria-label="${escapeAttr(actionLabel)}"
         ${interactionLocked ? 'disabled' : ''}
       >
         移入高置信异常
@@ -7433,12 +7660,15 @@ function getAvailabilityConfidenceMoveAction(result, interactionLocked) {
   }
 
   if (result.status === 'failed') {
+    const actionLabel = getAvailabilityResultActionLabel('移回低置信异常', result)
+
     return `
       <button
         class="detect-result-action"
         type="button"
         data-failed-action="demote-review"
         data-bookmark-id="${escapeAttr(result.id)}"
+        aria-label="${escapeAttr(actionLabel)}"
         ${interactionLocked ? 'disabled' : ''}
       >
         移回低置信异常
@@ -7569,11 +7799,15 @@ function getAvailabilityEvidenceSummary(result) {
 }
 
 function buildMoveFolderCard(folder) {
+  const isActive = String(folder.id) === String(managerState.moveFolderActiveId || '')
   return `
     <button
       class="move-folder-card"
       type="button"
+      role="option"
+      aria-selected="false"
       data-move-target-folder="${escapeAttr(folder.id)}"
+      tabindex="${isActive ? '0' : '-1'}"
       ${isInteractionLocked() ? 'disabled' : ''}
     >
       <strong>${escapeHtml(folder.title || '未命名文件夹')}</strong>
@@ -8147,6 +8381,7 @@ function openMoveModal(source) {
 
   managerState.moveSelectionSource = source
   managerState.moveSearchQuery = ''
+  managerState.moveFolderActiveId = ''
   managerState.moveModalOpen = true
   renderMoveModal()
 
@@ -8166,6 +8401,7 @@ function openScopeModal(source) {
 
   managerState.scopeModalSource = source
   managerState.scopeSearchQuery = ''
+  managerState.scopeFolderActiveId = getCurrentScopeFolderId()
   managerState.scopeModalOpen = true
   renderScopeModal()
 
@@ -8181,6 +8417,7 @@ function closeMoveModal() {
 
   managerState.moveModalOpen = false
   managerState.moveSearchQuery = ''
+  managerState.moveFolderActiveId = ''
   managerState.moveDashboardBookmarkId = ''
   renderMoveModal()
 }
@@ -8192,6 +8429,7 @@ function closeScopeModal() {
 
   managerState.scopeModalOpen = false
   managerState.scopeSearchQuery = ''
+  managerState.scopeFolderActiveId = null
   renderScopeModal()
 }
 
@@ -8205,6 +8443,7 @@ async function handleMoveFolderResultsClick(event) {
   if (!folderId) {
     return
   }
+  managerState.moveFolderActiveId = folderId
 
   if (managerState.moveSelectionSource === 'dashboard') {
     await moveSelectedDashboardBookmarks(folderId, dashboardCallbacks)
@@ -8218,6 +8457,125 @@ async function handleMoveFolderResultsClick(event) {
   await moveSelectedAvailabilityToFolder(folderId)
 }
 
+function handleMoveSearchKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  if (!getMoveFolderOptionButtons().length) {
+    return
+  }
+
+  event.preventDefault()
+  focusMoveFolderOption(event.key === 'ArrowDown' ? 'first' : 'last')
+}
+
+function handleMoveFolderResultsKeydown(event) {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    dom.moveSearchInput?.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusMoveFolderOption('first')
+  } else if (event.key === 'End') {
+    focusMoveFolderOption('last')
+  } else {
+    focusMoveFolderOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function handleMoveFolderResultsFocus(event) {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.dataset.moveTargetFolder) {
+    return
+  }
+
+  managerState.moveFolderActiveId = target.dataset.moveTargetFolder
+  syncMoveFolderTabStops(managerState.moveFolderActiveId)
+}
+
+function getMoveFolderOptionButtons() {
+  return [...dom.moveFolderResults.querySelectorAll<HTMLButtonElement>('[data-move-target-folder]')]
+}
+
+function resolveMoveFolderActiveId(folders) {
+  if (!folders.length) {
+    managerState.moveFolderActiveId = ''
+    return ''
+  }
+
+  const activeId = folders.some((folder) => folder.id === managerState.moveFolderActiveId)
+    ? managerState.moveFolderActiveId
+    : folders[0]?.id || ''
+  managerState.moveFolderActiveId = activeId
+  return activeId
+}
+
+function syncMoveFolderTabStops(activeId) {
+  for (const button of getMoveFolderOptionButtons()) {
+    button.tabIndex = button.dataset.moveTargetFolder === activeId ? 0 : -1
+  }
+}
+
+function focusMoveFolderOptionById(folderId) {
+  let targetButton = null
+  for (const button of getMoveFolderOptionButtons()) {
+    const isTarget = button.dataset.moveTargetFolder === folderId
+    button.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = button
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  managerState.moveFolderActiveId = folderId
+  targetButton.focus()
+  return true
+}
+
+function focusMoveFolderOption(direction) {
+  const buttons = getMoveFolderOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  let nextIndex = managerState.moveFolderActiveId
+    ? buttons.findIndex((button) => button.dataset.moveTargetFolder === managerState.moveFolderActiveId)
+    : -1
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  const folderId = String(button?.dataset.moveTargetFolder || '')
+  if (folderId) {
+    focusMoveFolderOptionById(folderId)
+  }
+}
+
 async function handleScopeFolderResultsClick(event) {
   const targetButton = event.target.closest('[data-scope-folder-id]')
   if (
@@ -8228,6 +8586,7 @@ async function handleScopeFolderResultsClick(event) {
   }
 
   const folderId = String(targetButton.getAttribute('data-scope-folder-id') || '').trim()
+  managerState.scopeFolderActiveId = folderId
   const source = managerState.scopeModalSource
   if (source === 'ai' && (aiNamingState.running || aiNamingState.applying)) {
     return
@@ -8244,6 +8603,111 @@ async function handleScopeFolderResultsClick(event) {
   }
 
   await handleAvailabilityScopeChange(folderId)
+}
+
+function handleScopeSearchKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  if (!getScopeFolderOptionButtons().length) {
+    return
+  }
+
+  event.preventDefault()
+  focusScopeFolderOption(event.key === 'ArrowDown' ? 'first' : 'last')
+}
+
+function handleScopeFolderResultsKeydown(event) {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    dom.scopeSearchInput?.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusScopeFolderOption('first')
+  } else if (event.key === 'End') {
+    focusScopeFolderOption('last')
+  } else {
+    focusScopeFolderOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function handleScopeFolderResultsFocus(event) {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.hasAttribute('data-scope-folder-id')) {
+    return
+  }
+
+  managerState.scopeFolderActiveId = String(target.getAttribute('data-scope-folder-id') || '')
+  syncScopeFolderTabStops(managerState.scopeFolderActiveId)
+}
+
+function syncScopeFolderTabStops(activeId) {
+  for (const button of getScopeFolderOptionButtons()) {
+    button.tabIndex = String(button.getAttribute('data-scope-folder-id') || '') === activeId ? 0 : -1
+  }
+}
+
+function focusScopeFolderOptionById(folderId) {
+  const normalizedFolderId = String(folderId || '')
+  let targetButton = null
+  for (const button of getScopeFolderOptionButtons()) {
+    const isTarget = String(button.getAttribute('data-scope-folder-id') || '') === normalizedFolderId
+    button.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = button
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  managerState.scopeFolderActiveId = normalizedFolderId
+  targetButton.focus()
+  return true
+}
+
+function focusScopeFolderOption(direction) {
+  const buttons = getScopeFolderOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  const storedActiveId = managerState.scopeFolderActiveId === null
+    ? null
+    : String(managerState.scopeFolderActiveId || '')
+  let nextIndex = storedActiveId === null
+    ? -1
+    : buttons.findIndex((button) => String(button.getAttribute('data-scope-folder-id') || '') === storedActiveId)
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  if (button) {
+    focusScopeFolderOptionById(String(button.getAttribute('data-scope-folder-id') || ''))
+  }
 }
 
 async function moveSelectedAvailabilityToFolder(folderId) {

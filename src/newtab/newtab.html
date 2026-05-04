@@ -151,6 +151,8 @@
                       class="setting-text-input"
                       type="search"
                       placeholder="搜索文件夹"
+                      aria-label="搜索候选文件夹"
+                      aria-controls="folder-candidate-list"
                       spellcheck="false"
                     >
                   </label>
@@ -158,6 +160,7 @@
                     id="folder-candidate-list"
                     class="folder-candidate-list"
                     role="listbox"
+                    aria-label="候选文件夹列表"
                     aria-multiselectable="true"
                   ></div>
                 </div>
@@ -174,7 +177,7 @@
                 <span>背景类型</span>
                 <small>可选择纯色、本地图片/视频或远程图片链接。</small>
               </span>
-              <select id="background-type" class="setting-select setting-native-select">
+              <select id="background-type" class="setting-select setting-native-select" aria-label="背景类型">
                 <option value="image">图片</option>
                 <option value="video">视频</option>
                 <option value="urls">图片链接</option>
@@ -212,6 +215,7 @@
                   class="setting-url-input"
                   type="url"
                   placeholder="图片链接"
+                  aria-label="背景图片链接"
                   spellcheck="false"
                 >
               </span>
@@ -234,7 +238,7 @@
             </label>
             <div id="background-mask-style-row" class="setting-row" hidden>
               <span>模糊样式</span>
-              <select id="background-mask-style" class="setting-select setting-native-select">
+              <select id="background-mask-style" class="setting-select setting-native-select" aria-label="背景蒙版样式">
                 <option value="dark">暗色增强</option>
                 <option value="frosted">磨砂柔化</option>
                 <option value="light">亮色柔化</option>
@@ -242,7 +246,7 @@
             </div>
             <label id="background-mask-blur-row" class="setting-row slider-row" hidden>
               <span>模糊程度 <output id="background-mask-blur-value" class="setting-value">12px</output></span>
-              <input id="background-mask-blur" class="setting-range" type="range" min="0" max="32" value="12">
+              <input id="background-mask-blur" class="setting-range" type="range" min="0" max="32" value="12" aria-label="背景蒙版模糊程度">
             </label>
           </div>
         </section>
@@ -308,31 +312,31 @@
                 </button>
                 <label class="setting-row slider-row">
                   <span>页面宽度 <output id="icon-page-width-value" class="setting-value">78%</output></span>
-                  <input id="icon-page-width" class="setting-range" type="range" min="16" max="100" value="78">
+                  <input id="icon-page-width" class="setting-range" type="range" min="16" max="100" value="78" aria-label="书签卡片页面宽度">
                 </label>
                 <label id="icon-tile-width-row" class="setting-row slider-row">
                   <span>卡片宽度 <output id="icon-tile-width-value" class="setting-value">184px</output></span>
-                  <input id="icon-tile-width" class="setting-range" type="range" min="132" max="260" value="184">
+                  <input id="icon-tile-width" class="setting-range" type="range" min="132" max="260" value="184" aria-label="书签卡片宽度">
                 </label>
                 <label class="setting-row slider-row">
                   <span>图标区域 <output id="icon-shell-size-value" class="setting-value">32px</output></span>
-                  <input id="icon-shell-size" class="setting-range" type="range" min="24" max="48" value="32">
+                  <input id="icon-shell-size" class="setting-range" type="range" min="24" max="48" value="32" aria-label="书签图标区域尺寸">
                 </label>
                 <label class="setting-row slider-row">
                   <span>横向间距 <output id="icon-column-gap-value" class="setting-value">24px</output></span>
-                  <input id="icon-column-gap" class="setting-range" type="range" min="0" max="100" value="10">
+                  <input id="icon-column-gap" class="setting-range" type="range" min="0" max="100" value="10" aria-label="书签卡片横向间距">
                 </label>
                 <label class="setting-row slider-row">
                   <span>行距 <output id="icon-row-gap-value" class="setting-value">12px</output></span>
-                  <input id="icon-row-gap" class="setting-range" type="range" min="0" max="100" value="10">
+                  <input id="icon-row-gap" class="setting-range" type="range" min="0" max="100" value="10" aria-label="书签卡片行距">
                 </label>
                 <label class="setting-row slider-row">
                   <span>文件夹间距 <output id="icon-folder-gap-value" class="setting-value">20px</output></span>
-                  <input id="icon-folder-gap" class="setting-range" type="range" min="0" max="120" value="20">
+                  <input id="icon-folder-gap" class="setting-range" type="range" min="0" max="120" value="20" aria-label="书签文件夹间距">
                 </label>
                 <label id="icon-columns-row" class="setting-row slider-row">
                   <span>固定列数 <output id="icon-columns-value" class="setting-value">4</output></span>
-                  <input id="icon-columns" class="setting-range" type="range" min="2" max="8" value="4">
+                  <input id="icon-columns" class="setting-range" type="range" min="2" max="8" value="4" aria-label="书签卡片固定列数">
                 </label>
               </div>
             </div>
@@ -355,7 +359,7 @@
                 <span>显示内容</span>
                 <small>保留时间+日期、仅时间、仅日期三种模式。</small>
               </span>
-              <select id="time-display-mode" class="setting-select setting-native-select">
+              <select id="time-display-mode" class="setting-select setting-native-select" aria-label="时间显示内容">
                 <option value="time-date">时间和日期</option>
                 <option value="time">仅时间</option>
                 <option value="date">仅日期</option>
@@ -366,7 +370,7 @@
                 <span>时区</span>
                 <small>自动跟随系统，也可固定为常用城市。</small>
               </span>
-              <select id="time-time-zone" class="setting-select setting-native-select">
+              <select id="time-time-zone" class="setting-select setting-native-select" aria-label="时区">
                 <option value="auto">自动跟随系统</option>
                 <option value="UTC">UTC</option>
                 <option value="Asia/Shanghai">北京</option>
@@ -384,7 +388,7 @@
                 <span>日期格式</span>
                 <small>仅在显示日期时生效。</small>
               </span>
-              <select id="time-date-format" class="setting-select setting-native-select">
+              <select id="time-date-format" class="setting-select setting-native-select" aria-label="日期格式">
                 <option value="year-month-day-weekday">2026.05.01 周五</option>
                 <option value="chinese-date-weekday">2026年5月1日 周五</option>
                 <option value="month-day-weekday">05.01 周五</option>
@@ -414,7 +418,7 @@
                 <span>布局密度</span>
                 <small>切换时间模块的排版结构，不改变字号。</small>
               </span>
-              <select id="time-density" class="setting-select setting-native-select">
+              <select id="time-density" class="setting-select setting-native-select" aria-label="时间布局密度">
                 <option value="compact">极简单行</option>
                 <option value="balanced">平衡胶囊</option>
                 <option value="comfortable">独立卡片</option>
@@ -425,7 +429,7 @@
                 <span>字号 <output id="time-clock-size-value" class="setting-value">100%</output></span>
                 <small>只影响时间和日期，不改变搜索和书签区域。</small>
               </span>
-              <input id="time-clock-size" class="setting-range" type="range" min="70" max="140" value="100">
+              <input id="time-clock-size" class="setting-range" type="range" min="70" max="140" value="100" aria-label="时间字号">
             </label>
           </div>
         </section>
@@ -454,7 +458,7 @@
                 <span>搜索引擎</span>
                 <small>输入内容不是网址时使用此引擎。</small>
               </span>
-              <select id="search-engine" class="setting-select setting-native-select">
+              <select id="search-engine" class="setting-select setting-native-select" aria-label="默认搜索引擎">
                 <option value="google">Google</option>
                 <option value="bing">Bing</option>
                 <option value="baidu">百度</option>
@@ -513,24 +517,24 @@
             <div class="setting-row">
               <span>占位符文本</span>
               <span class="setting-floating-field">
-                <input id="search-placeholder" class="setting-text-input" type="text" placeholder="占位符文本" maxlength="40">
+                <input id="search-placeholder" class="setting-text-input" type="text" placeholder="占位符文本" maxlength="40" aria-label="搜索栏占位符文本">
               </span>
             </div>
             <label class="setting-row slider-row">
               <span>宽度 <output id="search-width-value" class="setting-value">44vw</output></span>
-              <input id="search-width" class="setting-range" type="range" min="16" max="72" value="44">
+              <input id="search-width" class="setting-range" type="range" min="16" max="72" value="44" aria-label="搜索栏宽度">
             </label>
             <label class="setting-row slider-row">
               <span>高度 <output id="search-height-value" class="setting-value">34px</output></span>
-              <input id="search-height" class="setting-range" type="range" min="28" max="56" value="34">
+              <input id="search-height" class="setting-range" type="range" min="28" max="56" value="34" aria-label="搜索栏高度">
             </label>
             <label class="setting-row slider-row">
               <span>上下位置 <output id="search-offset-y-value" class="setting-value">0px</output></span>
-              <input id="search-offset-y" class="setting-range" type="range" min="-240" max="240" value="0">
+              <input id="search-offset-y" class="setting-range" type="range" min="-240" max="240" value="0" aria-label="搜索栏上下位置">
             </label>
             <label class="setting-row slider-row">
               <span>背景 <output id="search-background-value" class="setting-value">58%</output></span>
-              <input id="search-background" class="setting-range" type="range" min="0" max="92" value="58">
+              <input id="search-background" class="setting-range" type="range" min="0" max="92" value="58" aria-label="搜索栏背景透明度">
             </label>
           </div>
         </section>
@@ -546,9 +550,20 @@
       aria-label="书签仪表盘"
       aria-hidden="true"
       data-dashboard-ready="false"
+      data-dashboard-error="false"
       tabindex="-1"
       hidden
     >
+      <button
+        id="newtab-dashboard-close"
+        class="newtab-dashboard-close"
+        type="button"
+        aria-label="返回新标签页"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="m6.5 6.5 11 11M17.5 6.5l-11 11"></path>
+        </svg>
+      </button>
       <div class="newtab-dashboard-surface">
         <div class="newtab-dashboard-loading" role="status" aria-label="正在打开书签仪表盘">
           <div class="newtab-dashboard-loading-card">
@@ -579,6 +594,23 @@
               <circle class="dot-matrix-loader-lit dot-matrix-loader-d43" cx="39" cy="50" r="3.1"></circle>
               <circle class="dot-matrix-loader-lit dot-matrix-loader-d44" cx="50" cy="50" r="3.1"></circle>
             </svg>
+          </div>
+        </div>
+        <div
+          id="newtab-dashboard-fallback"
+          class="newtab-dashboard-fallback"
+          role="alert"
+          aria-live="assertive"
+          hidden
+        >
+          <div class="newtab-dashboard-fallback-card">
+            <p class="newtab-dashboard-fallback-kicker">Dashboard</p>
+            <h2>书签仪表盘暂时无法打开</h2>
+            <p id="newtab-dashboard-fallback-copy">加载耗时过长。你可以返回新标签页，或重试打开仪表盘。</p>
+            <div class="newtab-dashboard-fallback-actions">
+              <button class="newtab-button secondary" type="button" data-dashboard-fallback-action="return">返回新标签页</button>
+              <button class="newtab-button" type="button" data-dashboard-fallback-action="retry">重试</button>
+            </div>
           </div>
         </div>
         <iframe

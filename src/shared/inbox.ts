@@ -1,12 +1,13 @@
 import {
   BOOKMARKS_BAR_ID,
+  DEFAULT_INBOX_FOLDER_TITLE,
   INBOX_AUTO_MOVE_MIN_CONFIDENCE,
   STORAGE_KEYS
 } from './constants.js'
 import { getLocalStorage, setLocalStorage } from './storage.js'
 
-export const DEFAULT_INBOX_FOLDER_TITLE = 'Inbox / 待整理'
 export const INBOX_UNDO_MOVE_WINDOW_MS = 10 * 60 * 1000
+export { DEFAULT_INBOX_FOLDER_TITLE } from './constants.js'
 
 export interface InboxSettings {
   version: 1

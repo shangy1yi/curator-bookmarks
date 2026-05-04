@@ -11,7 +11,7 @@
       <header class="options-header">
         <a class="options-brand" href="#general" data-section-link="general" aria-label="跳转到通用设置">
           <span class="options-brand-mark" aria-hidden="true">
-            <img src="../assets/icon4096.jpg" alt="">
+            <img src="../assets/icon128.png" alt="">
           </span>
           <span class="options-brand-copy">
             <span class="options-brand-eyebrow">Chrome Bookmark Manager</span>
@@ -227,9 +227,9 @@
                 <div class="detect-empty">正在读取当前快捷键绑定…</div>
               </div>
               <div class="shortcut-actions">
-                <button id="open-shortcuts-settings" class="options-button small" type="button">打开快捷键设置</button>
-                <button id="copy-shortcuts-url" class="options-button secondary small" type="button">复制设置地址</button>
-                <button id="refresh-shortcuts" class="options-button secondary small" type="button">刷新状态</button>
+                <button id="open-shortcuts-settings" class="options-button small" type="button" aria-label="打开 Chrome 扩展快捷键设置">打开快捷键设置</button>
+                <button id="copy-shortcuts-url" class="options-button secondary small" type="button" aria-label="复制 Chrome 扩展快捷键设置地址">复制设置地址</button>
+                <button id="refresh-shortcuts" class="options-button secondary small" type="button" aria-label="刷新扩展快捷键绑定状态">刷新状态</button>
               </div>
             </div>
 
@@ -299,7 +299,7 @@
                       <span id="ai-model-picker-label">gpt-5.5</span>
                       <span class="scope-picker-caret" aria-hidden="true"></span>
                     </button>
-                    <button id="ai-fetch-models" class="options-button secondary small" type="button">获取模型</button>
+                    <button id="ai-fetch-models" class="options-button secondary small" type="button" aria-label="从自定义 AI 渠道获取模型列表">获取模型</button>
                   </div>
                 </div>
 
@@ -365,7 +365,7 @@
 
                     <p class="ai-provider-field-tip">
                       支持搜索预设、自定义和已拉取的模型；若目标服务使用自定义模型 ID，可在
-                      <button id="ai-manage-models" class="ai-inline-action" type="button">设置更多模型</button>
+                      <button id="ai-manage-models" class="ai-inline-action" type="button" aria-label="打开自定义模型列表设置">设置更多模型</button>
                       里追加。
                     </p>
                   </div>
@@ -374,8 +374,8 @@
                 <div class="ai-provider-actions">
                   <span id="ai-save-status" class="ai-provider-save-state muted">待配置</span>
                   <div class="ai-provider-action-buttons">
-                    <button id="ai-test-connection" class="options-button" type="button">测试连接</button>
-                    <button id="ai-save-settings" class="options-button hidden" type="button">保存设置</button>
+                    <button id="ai-test-connection" class="options-button" type="button" aria-label="测试自定义 AI 渠道连接">测试连接</button>
+                    <button id="ai-save-settings" class="options-button hidden" type="button" aria-label="保存自定义 AI 渠道设置">保存设置</button>
                   </div>
                 </div>
               </div>
@@ -426,7 +426,7 @@
             <div class="dashboard-title-row">
               <div>
                 <p class="dashboard-kicker">Visual Bookmark Management</p>
-                <h1 id="dashboard-title">全部书签 <span id="dashboard-total">(0)</span></h1>
+                <h1 id="dashboard-title">书签栏 <span id="dashboard-total">(0)</span></h1>
               </div>
               <div class="dashboard-title-actions">
                 <span id="dashboard-status" class="ai-provider-save-state muted"></span>
@@ -452,7 +452,7 @@
                     >
                       ?
                     </button>
-                    <button id="dashboard-select-visible-top" class="options-button secondary small" type="button" data-dashboard-action="select-visible">选择当前可见</button>
+                    <button id="dashboard-select-visible-top" class="options-button secondary small" type="button" data-dashboard-action="select-visible" aria-label="选择当前可见的 Dashboard 书签">选择当前可见</button>
                   </span>
                 </label>
                 <p id="dashboard-search-help-description" class="sr-only">
@@ -470,16 +470,16 @@
                   <p class="detect-results-subtitle">所选书签可批量移动到目标文件夹，或删除并移入回收站。</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="dashboard-clear-selection" class="options-button secondary small" type="button" data-dashboard-action="clear-selection">清空选择</button>
-                  <button id="dashboard-move-selection" class="options-button secondary small" type="button" data-dashboard-action="move-selected">批量移动</button>
-                  <button id="dashboard-delete-selection" class="options-button danger small" type="button" data-dashboard-action="delete-selected">批量删除</button>
+                  <button id="dashboard-clear-selection" class="options-button secondary small" type="button" data-dashboard-action="clear-selection" aria-label="清空 Dashboard 已选书签">清空选择</button>
+                  <button id="dashboard-move-selection" class="options-button secondary small" type="button" data-dashboard-action="move-selected" aria-label="批量移动 Dashboard 已选书签">批量移动</button>
+                  <button id="dashboard-delete-selection" class="options-button danger small" type="button" data-dashboard-action="delete-selected" aria-label="批量删除 Dashboard 已选书签">批量删除</button>
                 </div>
               </div>
             </div>
 
             <section class="options-group dashboard-results-group" aria-labelledby="dashboard-cards-title">
               <div class="dashboard-results-head">
-                <strong id="dashboard-cards-title">全部书签</strong>
+                <strong id="dashboard-cards-title">书签栏</strong>
                 <p class="detect-results-subtitle">拖动卡片空白区域可拖入目标文件夹；按钮、链接和复选框不会触发拖拽。</p>
               </div>
               <div class="dashboard-content-layout">
@@ -545,10 +545,10 @@
                 <p id="dashboard-tag-editor-help" class="dashboard-tag-editor-help">每行一个标签，也可以用逗号、顿号分隔；保存后会自动去重。</p>
                 <p id="dashboard-tag-editor-status" class="detect-results-subtitle dashboard-tag-editor-status" role="status" aria-live="polite" aria-atomic="true"></p>
                 <div class="dashboard-tag-editor-actions">
-                  <button id="dashboard-tag-editor-clear-ai" class="options-button secondary small" type="button" data-dashboard-action="clear-ai-tags">清除 AI 标签</button>
-                  <button id="dashboard-tag-editor-regenerate-ai" class="options-button secondary small" type="button" data-dashboard-action="regenerate-ai-tags">重新生成 AI 标签</button>
-                  <button class="options-button secondary small" type="button" data-dashboard-action="close-tag-editor">取消</button>
-                  <button id="dashboard-tag-editor-save" class="options-button small" type="button" data-dashboard-action="save-tags">保存标签</button>
+                  <button id="dashboard-tag-editor-clear-ai" class="options-button secondary small" type="button" data-dashboard-action="clear-ai-tags" aria-label="清除当前 Dashboard 书签的 AI 标签">清除 AI 标签</button>
+                  <button id="dashboard-tag-editor-regenerate-ai" class="options-button secondary small" type="button" data-dashboard-action="regenerate-ai-tags" aria-label="重新生成当前 Dashboard 书签的 AI 标签">重新生成 AI 标签</button>
+                  <button class="options-button secondary small" type="button" data-dashboard-action="close-tag-editor" aria-label="取消编辑当前 Dashboard 书签标签">取消</button>
+                  <button id="dashboard-tag-editor-save" class="options-button small" type="button" data-dashboard-action="save-tags" aria-label="保存当前 Dashboard 书签标签">保存标签</button>
                 </div>
               </div>
             </div>
@@ -686,17 +686,17 @@
                   <strong id="availability-selection-count">0 条已选择</strong>
                   <p class="detect-results-subtitle">可对当前低/高置信异常执行批量移动、忽略或删除。</p>
                 </div>
-                <button id="availability-clear-selection" class="options-button secondary small" type="button">清空选择</button>
+                <button id="availability-clear-selection" class="options-button secondary small" type="button" aria-label="清空可用性检测已选书签">清空选择</button>
               </div>
               <div class="detect-toolbar-actions wrap-start">
-                <button id="availability-selection-retest" class="options-button secondary small" type="button">重新测试</button>
-                <button id="availability-selection-promote" class="options-button secondary small" type="button">移入高置信异常</button>
-                <button id="availability-selection-demote" class="options-button secondary small" type="button">移入低置信异常</button>
-                <button id="availability-selection-move" class="options-button secondary small" type="button">批量移动到文件夹</button>
-                <button id="availability-selection-ignore-bookmark" class="options-button secondary small" type="button">忽略所选书签</button>
-                <button id="availability-selection-ignore-domain" class="options-button secondary small" type="button">忽略所选域名</button>
-                <button id="availability-selection-ignore-folder" class="options-button secondary small" type="button">忽略所选文件夹</button>
-                <button id="availability-selection-delete" class="options-button danger small" type="button">批量删除所选</button>
+                <button id="availability-selection-retest" class="options-button secondary small" type="button" aria-label="重新测试可用性检测已选书签">重新测试</button>
+                <button id="availability-selection-promote" class="options-button secondary small" type="button" aria-label="将可用性检测已选书签移入高置信异常">移入高置信异常</button>
+                <button id="availability-selection-demote" class="options-button secondary small" type="button" aria-label="将可用性检测已选书签移入低置信异常">移入低置信异常</button>
+                <button id="availability-selection-move" class="options-button secondary small" type="button" aria-label="批量移动可用性检测已选书签到文件夹">批量移动到文件夹</button>
+                <button id="availability-selection-ignore-bookmark" class="options-button secondary small" type="button" aria-label="忽略可用性检测所选书签">忽略所选书签</button>
+                <button id="availability-selection-ignore-domain" class="options-button secondary small" type="button" aria-label="忽略可用性检测所选域名">忽略所选域名</button>
+                <button id="availability-selection-ignore-folder" class="options-button secondary small" type="button" aria-label="忽略可用性检测所选文件夹">忽略所选文件夹</button>
+                <button id="availability-selection-delete" class="options-button danger small" type="button" aria-label="批量删除可用性检测已选书签">批量删除所选</button>
               </div>
             </div>
 
@@ -707,7 +707,7 @@
                   <p id="availability-review-subtitle" class="detect-results-subtitle">导航失败但证据不足以直接判定为高置信异常，建议人工确认</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="availability-select-all-review" class="options-button secondary small" type="button">全选本区</button>
+                  <button id="availability-select-all-review" class="options-button secondary small" type="button" aria-label="全选低置信异常书签">全选本区</button>
                   <span id="availability-review-count" class="option-value">0 条低置信异常</span>
                 </div>
               </div>
@@ -724,8 +724,8 @@
                   <p id="availability-last-run" class="detect-results-subtitle">尚未执行检测</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="availability-select-all-failed" class="options-button secondary small" type="button">全选本区</button>
-                  <button id="delete-failed-bookmarks" class="options-button danger small" type="button" disabled>
+                  <button id="availability-select-all-failed" class="options-button secondary small" type="button" aria-label="全选高置信异常书签">全选本区</button>
+                  <button id="delete-failed-bookmarks" class="options-button danger small" type="button" aria-label="批量删除高置信异常书签" disabled>
                     批量删除
                   </button>
                   <span id="availability-error-count" class="option-value">0 条异常</span>
@@ -769,7 +769,7 @@
                 </div>
                 <div class="detect-results-actions">
                   <span id="availability-history-timestamp" class="option-value">尚无历史</span>
-                  <button id="availability-clear-history" class="options-button secondary small" type="button">清空历史日志</button>
+                  <button id="availability-clear-history" class="options-button secondary small" type="button" aria-label="清空可用性检测历史日志">清空历史日志</button>
                 </div>
               </div>
               <div class="detect-history-grid">
@@ -829,7 +829,7 @@
                 </div>
                 <div class="detect-results-actions">
                   <span id="bookmark-add-history-timestamp" class="option-value">尚无历史</span>
-                  <button id="bookmark-add-history-clear" class="options-button secondary small" type="button">清空自动分析添加历史</button>
+                  <button id="bookmark-add-history-clear" class="options-button secondary small" type="button" aria-label="清空自动分析添加历史记录">清空自动分析添加历史</button>
                 </div>
               </div>
               <div class="detect-history-grid bookmark-add-history-grid">
@@ -959,11 +959,11 @@
                   <p class="detect-results-subtitle">只会应用状态为“建议改名”的条目；“待确认”与“失败”结果需要先人工判断。</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="ai-select-all" class="options-button secondary small" type="button">全选</button>
-                  <button id="ai-select-high-confidence" class="options-button secondary small" type="button">全选高置信</button>
-                  <button id="ai-clear-selection" class="options-button secondary small" type="button">清空选择</button>
-                  <button id="ai-move-selection-to-suggested" class="options-button secondary small double-confirm-action" type="button">移动至推荐文件夹</button>
-                  <button id="ai-apply-selection" class="options-button small" type="button">应用所选建议</button>
+                  <button id="ai-select-all" class="options-button secondary small" type="button" aria-label="全选书签智能分析结果">全选</button>
+                  <button id="ai-select-high-confidence" class="options-button secondary small" type="button" aria-label="全选书签智能分析高置信结果">全选高置信</button>
+                  <button id="ai-clear-selection" class="options-button secondary small" type="button" aria-label="清空书签智能分析已选建议">清空选择</button>
+                  <button id="ai-move-selection-to-suggested" class="options-button secondary small double-confirm-action" type="button" aria-label="将书签智能分析已选建议移动至推荐文件夹">移动至推荐文件夹</button>
+                  <button id="ai-apply-selection" class="options-button small" type="button" aria-label="应用书签智能分析已选建议">应用所选建议</button>
                 </div>
               </div>
             </div>
@@ -991,8 +991,15 @@
                     <option value="medium">只看中置信</option>
                     <option value="low">只看低置信</option>
                   </select>
-                  <input id="ai-filter-query" class="options-search-input compact" type="search" spellcheck="false" placeholder="筛选文件夹或域名">
-                  <button id="ai-clear-filters" class="options-button secondary small" type="button">清空筛选</button>
+                  <input
+                    id="ai-filter-query"
+                    class="options-search-input compact"
+                    type="search"
+                    spellcheck="false"
+                    placeholder="筛选文件夹或域名"
+                    aria-label="筛选书签智能分析结果"
+                  >
+                  <button id="ai-clear-filters" class="options-button secondary small" type="button" aria-label="清空书签智能分析筛选条件">清空筛选</button>
                 </div>
               </div>
               <div id="ai-results" class="detect-results">
@@ -1026,9 +1033,9 @@
                   <p id="ai-tag-data-status" class="detect-status-copy"></p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="ai-tag-export" class="options-button secondary small" type="button">导出标签数据</button>
-                  <button id="ai-tag-import" class="options-button secondary small" type="button">导入标签数据</button>
-                  <button id="ai-tag-clear" class="options-button danger small" type="button">清空标签数据</button>
+                  <button id="ai-tag-export" class="options-button secondary small" type="button" aria-label="导出书签标签数据">导出标签数据</button>
+                  <button id="ai-tag-import" class="options-button secondary small" type="button" aria-label="导入书签标签数据">导入标签数据</button>
+                  <button id="ai-tag-clear" class="options-button danger small" type="button" aria-label="清空全部书签标签数据">清空标签数据</button>
                 </div>
                 <input id="ai-tag-import-input" class="hidden" type="file" accept="application/json,.json">
               </div>
@@ -1041,8 +1048,8 @@
                   <p class="detect-results-subtitle">导出 Chrome 书签树、标签数据、回收站、忽略规则、重定向历史、新标签页配置和 AI 设置；不会导出 API Key。</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="backup-export" class="options-button small" type="button">导出完整备份</button>
-                  <button id="backup-import" class="options-button secondary small" type="button">导入并预览</button>
+                  <button id="backup-export" class="options-button small" type="button" aria-label="导出完整书签备份">导出完整备份</button>
+                  <button id="backup-import" class="options-button secondary small" type="button" aria-label="导入完整备份并预览">导入并预览</button>
                 </div>
                 <input id="backup-import-input" class="hidden" type="file" accept="application/json,.json">
               </div>
@@ -1056,9 +1063,9 @@
                   <p class="detect-results-subtitle">导入文件后先查看差异，再选择恢复范围；新标签页恢复只写入设置项，不恢复背景媒体缓存，也不会直接替换整个 Chrome 书签树。</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="backup-restore-tags" class="options-button secondary small" type="button" disabled>只恢复标签数据</button>
-                  <button id="backup-restore-newtab" class="options-button secondary small" type="button" disabled>只恢复新标签页设置</button>
-                  <button id="backup-restore-safe-full" class="options-button small" type="button" disabled>恢复全部可安全恢复的数据</button>
+                  <button id="backup-restore-tags" class="options-button secondary small" type="button" disabled aria-label="从备份预览只恢复书签标签数据">只恢复标签数据</button>
+                  <button id="backup-restore-newtab" class="options-button secondary small" type="button" disabled aria-label="从备份预览只恢复新标签页设置">只恢复新标签页设置</button>
+                  <button id="backup-restore-safe-full" class="options-button small" type="button" disabled aria-label="从备份预览恢复全部可安全恢复的数据">恢复全部可安全恢复的数据</button>
                 </div>
               </div>
               <div id="backup-preview" class="detect-results">
@@ -1084,9 +1091,9 @@
                   <p class="detect-results-subtitle">可批量更新这些重定向书签为最终地址，或直接批量删除并移入回收站。</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="redirect-clear-selection" class="options-button secondary small" type="button">清空选择</button>
-                  <button id="redirect-batch-update" class="options-button small" type="button">批量更新最终 URL</button>
-                  <button id="redirect-delete-selection" class="options-button danger small" type="button">删除所选</button>
+                  <button id="redirect-clear-selection" class="options-button secondary small" type="button" aria-label="清空重定向更新已选书签">清空选择</button>
+                  <button id="redirect-batch-update" class="options-button small" type="button" aria-label="批量更新重定向已选书签为最终 URL">批量更新最终 URL</button>
+                  <button id="redirect-delete-selection" class="options-button danger small" type="button" aria-label="删除重定向更新已选书签">删除所选</button>
                 </div>
               </div>
             </div>
@@ -1098,8 +1105,8 @@
                   <p id="redirect-results-subtitle" class="detect-results-subtitle">完成检测后，这里会展示原书签地址与最终落地地址不一致的结果。结果会本地缓存，刷新页面后仍可直接更新。</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="redirect-select-all" class="options-button secondary small" type="button">全选本区</button>
-                  <button id="redirect-delete-all" class="options-button danger small" type="button">批量删除本区</button>
+                  <button id="redirect-select-all" class="options-button secondary small" type="button" aria-label="全选待更新重定向书签">全选本区</button>
+                  <button id="redirect-delete-all" class="options-button danger small" type="button" aria-label="批量删除待更新重定向书签">批量删除本区</button>
                   <span id="redirect-count" class="option-value">0 条待更新</span>
                 </div>
               </div>
@@ -1128,8 +1135,8 @@
                   <p id="duplicate-selection-warning" class="duplicate-selection-warning hidden"></p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="duplicate-clear-selection" class="options-button secondary small" type="button">清空选择</button>
-                  <button id="duplicate-delete-selection" class="options-button danger small" type="button">移入回收站</button>
+                  <button id="duplicate-clear-selection" class="options-button secondary small" type="button" aria-label="清空重复书签已选项">清空选择</button>
+                  <button id="duplicate-delete-selection" class="options-button danger small" type="button" aria-label="将重复书签已选项移入回收站">移入回收站</button>
                 </div>
               </div>
             </div>
@@ -1171,13 +1178,13 @@
               </div>
               <div class="duplicate-toolbar">
                 <div id="duplicate-strategy-controls" class="duplicate-strategy-controls duplicate-primary-action-row" aria-label="重复书签选择策略">
-                  <button class="options-button small duplicate-primary-action" type="button" data-duplicate-strategy="recommended">按推荐选择当前结果</button>
-                  <button class="options-button secondary small" type="button" data-duplicate-strategy="newest">保留最新</button>
-                  <button class="options-button secondary small" type="button" data-duplicate-strategy="oldest">保留最早</button>
-                  <button class="options-button secondary small" type="button" data-duplicate-strategy="shorter-path">保留路径最短</button>
-                  <button class="options-button secondary small" type="button" data-duplicate-strategy="tagged">保留有标签</button>
-                  <button class="options-button secondary small" type="button" data-duplicate-strategy="newtab-source">保留新标签页来源</button>
-                  <button class="options-button secondary small" type="button" data-duplicate-strategy="recent">保留最近访问</button>
+                  <button class="options-button small duplicate-primary-action" type="button" data-duplicate-strategy="recommended" aria-label="按推荐选择重复书签当前结果">按推荐选择当前结果</button>
+                  <button class="options-button secondary small" type="button" data-duplicate-strategy="newest" aria-label="保留重复书签中的最新项">保留最新</button>
+                  <button class="options-button secondary small" type="button" data-duplicate-strategy="oldest" aria-label="保留重复书签中的最早项">保留最早</button>
+                  <button class="options-button secondary small" type="button" data-duplicate-strategy="shorter-path" aria-label="保留重复书签中路径最短的项">保留路径最短</button>
+                  <button class="options-button secondary small" type="button" data-duplicate-strategy="tagged" aria-label="保留重复书签中已有标签的项">保留有标签</button>
+                  <button class="options-button secondary small" type="button" data-duplicate-strategy="newtab-source" aria-label="保留重复书签中的新标签页来源项">保留新标签页来源</button>
+                  <button class="options-button secondary small" type="button" data-duplicate-strategy="recent" aria-label="保留重复书签中的最近访问项">保留最近访问</button>
                   <span id="duplicate-strategy-status" class="duplicate-strategy-status"></span>
                 </div>
               </div>
@@ -1287,7 +1294,7 @@
                   <strong>按书签忽略</strong>
                   <p class="detect-results-subtitle">仅压制指定书签本身的异常提示。</p>
                 </div>
-                <button id="ignore-clear-bookmarks" class="options-button secondary small" type="button">清空本类</button>
+                <button id="ignore-clear-bookmarks" class="options-button secondary small" type="button" aria-label="清空按书签忽略规则">清空本类</button>
               </div>
               <div id="ignore-bookmark-rules" class="detect-results">
                 <div class="detect-empty">暂无按书签忽略的规则。</div>
@@ -1300,7 +1307,7 @@
                   <strong>按域名忽略</strong>
                   <p class="detect-results-subtitle">同一域名下的异常提示会被压制。</p>
                 </div>
-                <button id="ignore-clear-domains" class="options-button secondary small" type="button">清空本类</button>
+                <button id="ignore-clear-domains" class="options-button secondary small" type="button" aria-label="清空按域名忽略规则">清空本类</button>
               </div>
               <div id="ignore-domain-rules" class="detect-results">
                 <div class="detect-empty">暂无按域名忽略的规则。</div>
@@ -1313,7 +1320,7 @@
                   <strong>按文件夹忽略</strong>
                   <p class="detect-results-subtitle">命中该文件夹及其子层级的异常提示会被压制。</p>
                 </div>
-                <button id="ignore-clear-folders" class="options-button secondary small" type="button">清空本类</button>
+                <button id="ignore-clear-folders" class="options-button secondary small" type="button" aria-label="清空按文件夹忽略规则">清空本类</button>
               </div>
               <div id="ignore-folder-rules" class="detect-results">
                 <div class="detect-empty">暂无按文件夹忽略的规则。</div>
@@ -1338,9 +1345,9 @@
                   <p class="detect-results-subtitle">可批量恢复选中的回收站书签，也可只清除回收站记录。</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="recycle-clear-selection" class="options-button secondary small" type="button">清空选择</button>
-                  <button id="recycle-restore-selection" class="options-button small" type="button">批量恢复</button>
-                  <button id="recycle-clear-selected" class="options-button danger small" type="button">清除所选</button>
+                  <button id="recycle-clear-selection" class="options-button secondary small" type="button" aria-label="清空回收站已选书签">清空选择</button>
+                  <button id="recycle-restore-selection" class="options-button small" type="button" aria-label="批量恢复回收站已选书签">批量恢复</button>
+                  <button id="recycle-clear-selected" class="options-button danger small" type="button" aria-label="清除回收站已选记录">清除所选</button>
                 </div>
               </div>
             </div>
@@ -1352,8 +1359,8 @@
                   <p id="recycle-results-subtitle" class="detect-results-subtitle">恢复时会优先尝试放回原文件夹；若原文件夹已不存在，则回到书签栏。</p>
                 </div>
                 <div class="detect-results-actions">
-                  <button id="recycle-select-all" class="options-button secondary small" type="button">全选本区</button>
-                  <button id="recycle-clear-all" class="options-button danger small" type="button">清空回收站</button>
+                  <button id="recycle-select-all" class="options-button secondary small" type="button" aria-label="全选回收站条目">全选本区</button>
+                  <button id="recycle-clear-all" class="options-button danger small" type="button" aria-label="清空全部回收站记录">清空回收站</button>
                   <span id="recycle-count" class="option-value">0 条回收站条目</span>
                 </div>
               </div>
@@ -1372,8 +1379,8 @@
         <h2 id="delete-modal-title">批量删除高置信异常书签？</h2>
         <p id="delete-modal-copy" class="options-modal-copy">这些书签会从 Chrome 书签中移除，并直接从当前高置信异常列表里消失；低置信异常结果会保留。</p>
         <div class="options-modal-actions">
-          <button id="cancel-delete-modal" class="options-button secondary" type="button">取消</button>
-          <button id="confirm-delete-modal" class="options-button danger" type="button">确认删除</button>
+          <button id="cancel-delete-modal" class="options-button secondary" type="button" aria-label="取消批量删除高置信异常书签">取消</button>
+          <button id="confirm-delete-modal" class="options-button danger" type="button" aria-label="确认批量删除高置信异常书签">确认删除</button>
         </div>
       </section>
     </div>
@@ -1384,8 +1391,8 @@
         <h2 id="confirm-modal-title">确认操作？</h2>
         <p id="confirm-modal-copy" class="options-modal-copy">请确认是否继续。</p>
         <div class="options-modal-actions">
-          <button id="cancel-confirm-modal" class="options-button secondary" type="button">取消</button>
-          <button id="confirm-modal-confirm" class="options-button danger" type="button">确认</button>
+          <button id="cancel-confirm-modal" class="options-button secondary" type="button" aria-label="取消当前确认操作">取消</button>
+          <button id="confirm-modal-confirm" class="options-button danger" type="button" aria-label="确认当前操作">确认</button>
         </div>
       </section>
     </div>
@@ -1397,13 +1404,20 @@
         <p id="move-modal-copy" class="options-modal-copy">请选择一个目标文件夹，所选书签会被一起移动到该位置。</p>
         <label class="options-search">
           <span class="options-search-label">搜索目标文件夹</span>
-          <input id="move-search-input" class="options-search-input" type="search" placeholder="搜索文件夹名称或路径">
+          <input
+            id="move-search-input"
+            class="options-search-input"
+            type="search"
+            placeholder="搜索文件夹名称或路径"
+            aria-label="搜索移动目标文件夹"
+            aria-controls="move-folder-results"
+          >
         </label>
-        <div id="move-folder-results" class="detect-results modal-results">
+        <div id="move-folder-results" class="detect-results modal-results" role="listbox" aria-label="移动目标文件夹">
           <div class="detect-empty">正在加载文件夹列表。</div>
         </div>
         <div class="options-modal-actions">
-          <button id="cancel-move-modal" class="options-button secondary" type="button">取消</button>
+          <button id="cancel-move-modal" class="options-button secondary" type="button" aria-label="取消批量移动书签">取消</button>
         </div>
       </section>
     </div>
@@ -1415,13 +1429,20 @@
         <p id="scope-modal-copy" class="options-modal-copy">请选择一个文件夹作为当前筛选范围，可直接搜索文件夹名称或路径。</p>
         <label class="options-search">
           <span class="options-search-label">搜索文件夹</span>
-          <input id="scope-search-input" class="options-search-input" type="search" placeholder="搜索文件夹名称或路径">
+          <input
+            id="scope-search-input"
+            class="options-search-input"
+            type="search"
+            placeholder="搜索文件夹名称或路径"
+            aria-label="搜索筛选文件夹"
+            aria-controls="scope-folder-results"
+          >
         </label>
         <div id="scope-folder-results" class="detect-results modal-results" role="listbox" aria-label="筛选文件夹">
           <div class="detect-empty">正在加载文件夹列表。</div>
         </div>
         <div class="options-modal-actions">
-          <button id="cancel-scope-modal" class="options-button secondary" type="button">关闭</button>
+          <button id="cancel-scope-modal" class="options-button secondary" type="button" aria-label="关闭筛选文件夹弹窗">关闭</button>
         </div>
       </section>
     </div>
@@ -1443,8 +1464,8 @@
         </label>
         <p class="ai-model-modal-hint">这里只保存模型 ID，不解析别名、加减号或批量隐藏语法。</p>
         <div class="options-modal-actions ai-model-modal-actions">
-          <button id="cancel-ai-model-modal" class="options-button secondary" type="button">取消</button>
-          <button id="save-ai-model-modal" class="options-button" type="button">保存</button>
+          <button id="cancel-ai-model-modal" class="options-button secondary" type="button" aria-label="取消编辑自定义模型列表">取消</button>
+          <button id="save-ai-model-modal" class="options-button" type="button" aria-label="保存自定义模型列表">保存</button>
         </div>
       </section>
     </div>
@@ -1457,17 +1478,24 @@
         <p id="ai-model-picker-modal-copy" class="options-modal-copy">输入关键字筛选，点击卡片即可选中。可点击「获取模型」从 API 拉取最新列表。</p>
         <label class="options-search">
           <span class="options-search-label">搜索模型</span>
-          <input id="ai-model-picker-search-input" class="options-search-input" type="search" placeholder="搜索模型 ID">
+          <input
+            id="ai-model-picker-search-input"
+            class="options-search-input"
+            type="search"
+            placeholder="搜索模型 ID"
+            aria-label="搜索 AI 模型"
+            aria-controls="ai-model-picker-results"
+          >
         </label>
-        <div id="ai-model-picker-results" class="detect-results modal-results" role="listbox">
+        <div id="ai-model-picker-results" class="detect-results modal-results" role="listbox" aria-label="AI 模型候选列表">
           <div class="detect-empty">尚未获取模型列表，可点击下方「获取模型」从 API 拉取。</div>
         </div>
         <div class="options-modal-actions ai-model-picker-actions">
           <div class="ai-model-picker-footer-start">
-            <button id="ai-model-picker-fetch" class="options-button secondary" type="button">获取模型</button>
-            <button id="ai-model-picker-manage" class="options-button secondary" type="button">设置更多模型</button>
+            <button id="ai-model-picker-fetch" class="options-button secondary" type="button" aria-label="从 API 获取 AI 模型列表">获取模型</button>
+            <button id="ai-model-picker-manage" class="options-button secondary" type="button" aria-label="打开自定义模型列表设置">设置更多模型</button>
           </div>
-          <button id="cancel-ai-model-picker-modal" class="options-button secondary" type="button">关闭</button>
+          <button id="cancel-ai-model-picker-modal" class="options-button secondary" type="button" aria-label="关闭 AI 模型选择弹窗">关闭</button>
         </div>
       </section>
     </div>

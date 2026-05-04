@@ -1331,7 +1331,7 @@ async function undoLastInboxAutoMove(): Promise<InboxUndoLastMoveResult> {
 
 async function markAutoAnalyzeQueueEntryFailed(bookmarkId: string, lastError: string): Promise<void> {
   const now = Date.now()
-  await updateAutoAnalyzeQueue((entries) => {
+  const nextQueue = await updateAutoAnalyzeQueue((entries) => {
     return entries
       .map((entry) => {
         if (entry.bookmarkId !== bookmarkId) {
@@ -1348,7 +1348,7 @@ async function markAutoAnalyzeQueueEntryFailed(bookmarkId: string, lastError: st
       })
       .filter((entry) => entry.attempts < AUTO_ANALYZE_QUEUE_MAX_ATTEMPTS)
   })
-  scheduleAutoAnalyzeQueueAlarm(AUTO_ANALYZE_QUEUE_RETRY_MS)
+  scheduleNextAutoAnalyzeQueueWake(nextQueue)
 }
 
 async function removeAutoAnalyzeQueueEntry(bookmarkId: string): Promise<void> {

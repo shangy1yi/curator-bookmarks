@@ -1,20 +1,11 @@
-import { renderDotMatrixLoader } from '../shared/dot-matrix-loader.js'
-import type { BookmarkTagIndex } from '../shared/bookmark-tags.js'
-import type { ContentSnapshotIndex } from '../shared/content-snapshots.js'
+import type { BookmarkTagIndex, BookmarkTagRecord } from '../shared/bookmark-tags.js'
+import type {
+  ContentSnapshotIndex,
+  ContentSnapshotRecord
+} from '../shared/content-snapshots.js'
 import type { BookmarkRecord } from '../shared/types.js'
-import {
-  buildLightPopupSearchIndex
-} from '../popup/search-index.js'
-import {
-  searchBookmarks,
-  type PopupSearchBookmark
-} from '../popup/search.js'
-import {
-  buildLocalNaturalSearchPlan,
-  filterBookmarksByNaturalDateRange,
-  mergeNaturalSearchResultSets,
-  type NaturalSearchResultSet
-} from '../popup/natural-search.js'
+import type { NaturalSearchResultSet } from '../popup/natural-search.js'
+import type { PopupSearchBookmark } from '../popup/search.js'
 
 export type NewTabContentState =
   | { type: 'loading' }
@@ -82,14 +73,24 @@ export interface NewTabSearchIndexEntry {
   normalizedTitle: string
   normalizedUrl: string
   normalizedFolderTitle: string
+  normalizedSearchText: string
   order: number
-  searchBookmark?: PopupSearchBookmark
+  sourceBookmark?: BookmarkRecord
+  sourceTagRecord?: BookmarkTagRecord | null
+  sourceSnapshotRecord?: ContentSnapshotRecord | null
+}
+
+export interface NewTabPopupSearchSourceEntry {
+  entryId: string
+  bookmark: BookmarkRecord
+  tagRecord: BookmarkTagRecord | null
+  snapshotRecord: ContentSnapshotRecord | null
 }
 
 export interface NewTabPreparedSearchIndex {
   entries: NewTabSearchIndexEntry[]
-  popupBookmarks: PopupSearchBookmark[]
   entriesById: Map<string, NewTabSearchIndexEntry>
+  popupSearchEntries: NewTabPopupSearchSourceEntry[]
   supportsPopupSearch: boolean
 }
 
@@ -368,6 +369,12 @@ export function buildNewTabSearchIndex(
         normalizedTitle: normalizeNewTabSearchText(title),
         normalizedUrl: normalizeNewTabSearchText(url),
         normalizedFolderTitle,
+        normalizedSearchText: buildNewTabEntrySearchText({
+          title,
+          url,
+          folderTitle,
+          folderPath
+        }),
         order
       })
       order += 1
@@ -379,22 +386,27 @@ export function buildNewTabSearchIndex(
 
 export function prepareNewTabSearchIndex(index: NewTabSearchIndexEntry[]): NewTabPreparedSearchIndex {
   const entriesById = new Map<string, NewTabSearchIndexEntry>()
-  const popupBookmarks: PopupSearchBookmark[] = []
+  const popupSearchEntries: NewTabPopupSearchSourceEntry[] = []
   let supportsPopupSearch = true
 
   for (const entry of index) {
     entriesById.set(entry.id, entry)
-    if (!entry.searchBookmark) {
+    if (!entry.sourceBookmark) {
       supportsPopupSearch = false
       continue
     }
-    popupBookmarks.push(entry.searchBookmark)
+    popupSearchEntries.push({
+      entryId: entry.id,
+      bookmark: entry.sourceBookmark,
+      tagRecord: entry.sourceTagRecord || null,
+      snapshotRecord: entry.sourceSnapshotRecord || null
+    })
   }
 
   return {
     entries: index,
-    popupBookmarks,
     entriesById,
+    popupSearchEntries,
     supportsPopupSearch
   }
 }
@@ -404,11 +416,10 @@ function buildNewTabSearchIndexFromBookmarks({
   tagIndex = null,
   snapshotIndex = null
 }: NewTabSearchIndexSource): NewTabSearchIndexEntry[] {
-  return buildLightPopupSearchIndex({
-    bookmarks,
-    tagIndex,
-    snapshotIndex
-  })
+  const tagRecords = tagIndex?.records || {}
+  const snapshotRecords = snapshotIndex?.records || {}
+
+  return bookmarks
     .map((bookmark, order): NewTabSearchIndexEntry | null => {
       const url = String(bookmark.url || '').trim()
       if (!url) {
@@ -418,20 +429,76 @@ function buildNewTabSearchIndexFromBookmarks({
       const title = String(bookmark.title || '').trim() || url
       const folderPath = String(bookmark.path || '').trim()
       const folderTitle = getNewTabSearchFolderTitle(folderPath)
+      const tagRecord = tagRecords[bookmark.id] || null
+      const snapshotRecord = snapshotRecords[bookmark.id] || null
       return {
         id: String(bookmark.id),
         title,
         url,
         folderTitle,
         folderPath,
-        normalizedTitle: normalizeNewTabSearchText(title),
-        normalizedUrl: normalizeNewTabSearchText(url),
+        normalizedTitle: normalizeNewTabSearchText(bookmark.normalizedTitle || title),
+        normalizedUrl: normalizeNewTabSearchText(bookmark.normalizedUrl || url),
         normalizedFolderTitle: normalizeNewTabSearchText(folderTitle),
+        normalizedSearchText: buildNewTabEntrySearchText({
+          bookmark,
+          title,
+          url,
+          folderTitle,
+          folderPath,
+          tagRecord,
+          snapshotRecord
+        }),
         order,
-        searchBookmark: bookmark
+        sourceBookmark: bookmark,
+        sourceTagRecord: tagRecord,
+        sourceSnapshotRecord: snapshotRecord
       }
     })
     .filter((entry): entry is NewTabSearchIndexEntry => Boolean(entry))
+}
+
+function buildNewTabEntrySearchText({
+  bookmark,
+  title,
+  url,
+  folderTitle,
+  folderPath,
+  tagRecord = null,
+  snapshotRecord = null
+}: {
+  bookmark?: BookmarkRecord
+  title: string
+  url: string
+  folderTitle: string
+  folderPath: string
+  tagRecord?: BookmarkTagRecord | null
+  snapshotRecord?: ContentSnapshotRecord | null
+}): string {
+  return [
+    title,
+    url,
+    bookmark?.normalizedTitle,
+    bookmark?.normalizedUrl,
+    bookmark?.domain,
+    folderTitle,
+    folderPath,
+    tagRecord?.summary,
+    tagRecord?.contentType,
+    ...(tagRecord?.topics || []),
+    ...(tagRecord?.tags || []),
+    ...(tagRecord?.manualTags || []),
+    ...(tagRecord?.aliases || []),
+    snapshotRecord?.title,
+    snapshotRecord?.summary,
+    snapshotRecord?.canonicalUrl,
+    snapshotRecord?.finalUrl,
+    snapshotRecord?.contentType,
+    ...(snapshotRecord?.headings || [])
+  ]
+    .map((value) => normalizeNewTabSearchText(String(value || '')))
+    .filter(Boolean)
+    .join(' ')
 }
 
 function getNewTabSearchFolderTitle(path: string): string {
@@ -473,7 +540,7 @@ export function getSearchBookmarkSuggestionsFromIndex(
   query: string,
   index: NewTabSearchIndexEntry[] | NewTabPreparedSearchIndex,
   limit: number,
-  options: NewTabSearchSuggestionOptions = {}
+  _options: NewTabSearchSuggestionOptions = {}
 ): SearchBookmarkSuggestion[] {
   const normalizedQuery = normalizeNewTabSearchText(query)
   if (!normalizedQuery || limit <= 0) {
@@ -481,18 +548,14 @@ export function getSearchBookmarkSuggestionsFromIndex(
   }
 
   const preparedIndex = Array.isArray(index) ? prepareNewTabSearchIndex(index) : index
-  const popupSuggestions = getPopupSearchBookmarkSuggestionsFromIndex(query, preparedIndex, limit, options)
-  if (popupSuggestions) {
-    return popupSuggestions
-  }
-
   const suggestions: SearchBookmarkSuggestion[] = []
   for (const entry of preparedIndex.entries) {
     const score = getSearchSuggestionScore(
       normalizedQuery,
       entry.normalizedTitle,
       entry.normalizedUrl,
-      entry.normalizedFolderTitle
+      entry.normalizedFolderTitle,
+      entry.normalizedSearchText
     )
     if (score < 0) {
       continue
@@ -514,22 +577,37 @@ export function getSearchBookmarkSuggestionsFromIndex(
     .slice(0, limit)
 }
 
-function getPopupSearchBookmarkSuggestionsFromIndex(
+export async function getNaturalSearchBookmarkSuggestionsFromIndex(
   query: string,
-  index: NewTabPreparedSearchIndex,
+  index: NewTabSearchIndexEntry[] | NewTabPreparedSearchIndex,
   limit: number,
-  options: NewTabSearchSuggestionOptions
-): SearchBookmarkSuggestion[] | null {
-  if (!index.supportsPopupSearch) {
-    return null
-  }
-
-  if (!index.popupBookmarks.length) {
+  options: NewTabSearchSuggestionOptions = {}
+): Promise<SearchBookmarkSuggestion[]> {
+  const normalizedQuery = normalizeNewTabSearchText(query)
+  if (!normalizedQuery || limit <= 0) {
     return []
   }
 
+  const preparedIndex = Array.isArray(index) ? prepareNewTabSearchIndex(index) : index
+  if (!preparedIndex.supportsPopupSearch || !preparedIndex.popupSearchEntries.length) {
+    return getSearchBookmarkSuggestionsFromIndex(query, preparedIndex, limit, options)
+  }
+
+  const {
+    indexBookmarkForSearch,
+    searchBookmarks
+  } = await import('../popup/search.js')
+  const {
+    buildLocalNaturalSearchPlan,
+    filterBookmarksByNaturalDateRange,
+    mergeNaturalSearchResultSets
+  } = await import('../popup/natural-search.js')
+
   const plan = buildLocalNaturalSearchPlan(query, options.now)
-  const bookmarks = filterBookmarksByNaturalDateRange(index.popupBookmarks, plan)
+  const popupBookmarks: PopupSearchBookmark[] = preparedIndex.popupSearchEntries.map((entry) =>
+    indexBookmarkForSearch(entry.bookmark, entry.tagRecord, entry.snapshotRecord, { includeFullText: false })
+  )
+  const bookmarks = filterBookmarksByNaturalDateRange(popupBookmarks, plan)
   const resultSets: NaturalSearchResultSet[] = []
   const seenQueries = new Set<string>()
 
@@ -560,24 +638,30 @@ function getPopupSearchBookmarkSuggestionsFromIndex(
   }
 
   return mergeNaturalSearchResultSets(plan, resultSets)
-    .map((result) => {
-      const entry = index.entriesById.get(result.id)
-      if (!entry) {
-        return null
-      }
-
-      return {
-        id: entry.id,
-        title: entry.title,
-        url: entry.url,
-        folderTitle: entry.folderTitle,
-        folderPath: entry.folderPath,
-        score: result.score,
-        order: entry.order
-      }
-    })
+    .map((result) => getSuggestionFromPopupResult(preparedIndex, result.id, result.score))
     .filter((suggestion): suggestion is SearchBookmarkSuggestion => Boolean(suggestion))
     .slice(0, limit)
+}
+
+function getSuggestionFromPopupResult(
+  index: NewTabPreparedSearchIndex,
+  resultId: string,
+  score: number
+): SearchBookmarkSuggestion | null {
+  const entry = index.entriesById.get(resultId)
+  if (!entry) {
+    return null
+  }
+
+  return {
+    id: entry.id,
+    title: entry.title,
+    url: entry.url,
+    folderTitle: entry.folderTitle,
+    folderPath: entry.folderPath,
+    score,
+    order: entry.order
+  }
 }
 
 export function buildNewTabPortalOverview({
@@ -808,7 +892,8 @@ function getSearchSuggestionScore(
   query: string,
   title: string,
   url: string,
-  folderTitle: string
+  folderTitle: string,
+  searchText: string
 ): number {
   if (title === query) {
     return 0
@@ -824,6 +909,13 @@ function getSearchSuggestionScore(
   }
   if (folderTitle.includes(query)) {
     return 4
+  }
+  if (searchText.includes(query)) {
+    return 5
+  }
+  const terms = query.split(/\s+/).filter(Boolean)
+  if (terms.length > 1 && terms.every((term) => searchText.includes(term))) {
+    return 6
   }
   return -1
 }
@@ -940,9 +1032,44 @@ export function createLoadingStateView(label = '正在加载书签'): HTMLElemen
   view.className = 'newtab-state newtab-loading-state'
   view.setAttribute('role', 'status')
   view.setAttribute('aria-label', label)
-  view.innerHTML = renderDotMatrixLoader({
-    variant: 'spiral',
-    className: 'newtab-state-loader'
-  })
+  view.innerHTML = renderNewTabDotMatrixLoader('newtab-state-loader')
   return view
+}
+
+function renderNewTabDotMatrixLoader(className = ''): string {
+  const classes = ['dot-matrix-loader', 'dot-matrix-loader--spiral', className]
+    .filter(Boolean)
+    .join(' ')
+  const dots: Array<[string, number, number]> = [
+    ['00', 6, 6],
+    ['01', 17, 6],
+    ['02', 28, 6],
+    ['03', 39, 6],
+    ['04', 50, 6],
+    ['10', 6, 17],
+    ['11', 17, 17],
+    ['12', 28, 17],
+    ['13', 39, 17],
+    ['14', 50, 17],
+    ['20', 6, 28],
+    ['21', 17, 28],
+    ['22', 28, 28],
+    ['23', 39, 28],
+    ['24', 50, 28],
+    ['30', 6, 39],
+    ['31', 17, 39],
+    ['32', 28, 39],
+    ['33', 39, 39],
+    ['34', 50, 39],
+    ['40', 6, 50],
+    ['41', 17, 50],
+    ['42', 28, 50],
+    ['43', 39, 50],
+    ['44', 50, 50]
+  ]
+  const litDots = dots
+    .map(([key, x, y]) => `<circle class="dot-matrix-loader-lit dot-matrix-loader-d${key}" cx="${x}" cy="${y}" r="3.1"></circle>`)
+    .join('')
+
+  return `<svg class="${classes}" viewBox="0 0 56 56" aria-hidden="true" focusable="false">${litDots}</svg>`
 }

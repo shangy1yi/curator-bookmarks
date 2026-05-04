@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { test } from 'node:test'
 
 import {
@@ -9,7 +11,12 @@ import {
   removeRecycleEntries
 } from '../src/shared/recycle-bin.js'
 import { normalizeRecycleBin } from '../src/options/sections/recycle.js'
+import { getRecycleEntryActionLabel } from '../src/options/sections/recycle.js'
 import { STORAGE_KEYS } from '../src/shared/constants.js'
+
+function readProjectFile(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), 'utf8')
+}
 
 test('normalizes recycle bin entries and filters invalid records', () => {
   const entries = normalizeRecycleBin([
@@ -44,6 +51,54 @@ test('normalizes recycle bin entries and filters invalid records', () => {
   assert.equal(entries[1].parentId, '10')
   assert.equal(entries[1].index, 2)
   assert.equal(entries[1].source, '删除')
+})
+
+test('recycle entry action labels include bookmark context', () => {
+  const label = getRecycleEntryActionLabel('清除回收站记录', {
+    title: 'React 表格教程',
+    url: 'https://example.com/react-table'
+  })
+  const fallbackLabel = getRecycleEntryActionLabel('恢复书签', {
+    title: '',
+    url: 'https://platform.openai.com/docs/'
+  })
+  const longLabel = getRecycleEntryActionLabel('选择回收站书签', {
+    title: '这是一个非常长的回收站书签标题，用于验证回收站列表按钮可访问名称会被合理截断并且不会过度冗长，同时仍然保留关键上下文',
+    url: 'https://example.com/long-title'
+  })
+
+  assert.equal(label, '清除回收站记录：React 表格教程')
+  assert.equal(fallbackLabel, '恢复书签：platform.openai.com/docs')
+  assert.ok(longLabel.length < 70)
+  assert.match(longLabel, /…$/)
+})
+
+test('recycle entry controls render bookmark-specific labels', () => {
+  const recycleSource = readProjectFile('src/options/sections/recycle.ts')
+
+  assert.match(recycleSource, /const selectionLabel = getRecycleEntryActionLabel\('选择回收站书签', entry\)/)
+  assert.match(recycleSource, /const restoreLabel = getRecycleEntryActionLabel\('恢复书签', entry\)/)
+  assert.match(recycleSource, /const clearLabel = getRecycleEntryActionLabel\('清除回收站记录', entry\)/)
+  assert.match(recycleSource, /data-recycle-id="\$\{escapeAttr\(entry\.recycleId\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(selectionLabel\)\}"/)
+  assert.match(recycleSource, /data-recycle-restore="\$\{escapeAttr\(entry\.recycleId\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(restoreLabel\)\}"/)
+  assert.match(recycleSource, /data-recycle-clear="\$\{escapeAttr\(entry\.recycleId\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(clearLabel\)\}"/)
+})
+
+test('recycle bulk selection buttons expose recycle-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['recycle-clear-selection', '清空回收站已选书签'],
+    ['recycle-restore-selection', '批量恢复回收站已选书签'],
+    ['recycle-clear-selected', '清除回收站已选记录'],
+    ['recycle-select-all', '全选回收站条目'],
+    ['recycle-clear-all', '清空全部回收站记录']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
 })
 
 test('serializes recycle bin append and remove operations in one context', async () => {

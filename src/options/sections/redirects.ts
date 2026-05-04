@@ -105,6 +105,15 @@ export function synchronizeRedirectResults() {
   }
 }
 
+export function getRedirectResultActionLabel(action, result) {
+  const title = String(result?.title || displayUrl(result?.finalUrl || result?.url) || '未命名书签')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const safeTitle = title.length > 48 ? `${title.slice(0, 47).trim()}…` : title
+
+  return `${action}：${safeTitle || '未命名书签'}`
+}
+
 function getCachedRedirectResults() {
   return managerState.redirectCache.results
     .map((cachedResult) => {
@@ -254,6 +263,9 @@ export function renderRedirectSection(callbacks) {
 function buildRedirectResultCard(result) {
   const selected = managerState.selectedRedirectIds.has(String(result.id))
   const interactionLocked = isInteractionLocked()
+  const selectionLabel = getRedirectResultActionLabel('选择重定向书签', result)
+  const updateLabel = getRedirectResultActionLabel('更新为最终 URL', result)
+  const openFinalLabel = getRedirectResultActionLabel('打开最终链接', result)
 
   return `
     <article class="detect-result-card ${selected ? 'selected' : ''}">
@@ -264,6 +276,7 @@ function buildRedirectResultCard(result) {
               type="checkbox"
               data-redirect-select="true"
               data-bookmark-id="${escapeAttr(result.id)}"
+              aria-label="${escapeAttr(selectionLabel)}"
               ${selected ? 'checked' : ''}
               ${interactionLocked ? 'disabled' : ''}
             >
@@ -276,11 +289,12 @@ function buildRedirectResultCard(result) {
             class="detect-result-action"
             type="button"
             data-redirect-update="${escapeAttr(result.id)}"
+            aria-label="${escapeAttr(updateLabel)}"
             ${interactionLocked ? 'disabled' : ''}
           >
             更新为最终 URL
           </button>
-          <a class="detect-result-open" href="${escapeAttr(result.finalUrl || result.url)}" target="_blank" rel="noreferrer noopener">
+          <a class="detect-result-open" href="${escapeAttr(result.finalUrl || result.url)}" target="_blank" rel="noreferrer noopener" aria-label="${escapeAttr(openFinalLabel)}">
             打开最终链接
           </a>
         </div>

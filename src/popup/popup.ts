@@ -2,6 +2,7 @@ import {
   AUTO_ANALYZE_STATUS_ACTIVE_EXPIRE_MS,
   AUTO_ANALYZE_STATUS_FINAL_EXPIRE_MS,
   BOOKMARKS_BAR_ID,
+  DEFAULT_INBOX_FOLDER_TITLE,
   POPUP_COMMAND_INTENT_TTL_MS,
   ROOT_ID,
   RECYCLE_BIN_LIMIT,
@@ -31,40 +32,12 @@ import {
   moveBookmark,
   updateBookmark
 } from '../shared/bookmarks-api.js'
-import {
-  deleteBookmarkToRecycle,
-  removeRecycleEntry
-} from '../shared/recycle-bin.js'
 import { getLocalStorage, removeLocalStorage, setLocalStorage } from '../shared/storage.js'
 import { requestBookmarkSave } from '../shared/messages.js'
 import { loadBookmarkTagIndex, normalizeBookmarkTags } from '../shared/bookmark-tags.js'
 import type { BookmarkTagIndex } from '../shared/bookmark-tags.js'
 import { renderDotMatrixLoader } from '../shared/dot-matrix-loader.js'
-import {
-  extractAiErrorMessage,
-  extractChatCompletionsJsonText,
-  extractResponsesJsonText,
-  getAiEndpoint
-} from '../shared/ai-response.js'
 import { cancelExitMotion, closeWithExitMotion } from '../shared/motion.js'
-import { normalizeAiNamingSettings } from '../options/sections/ai-settings.js'
-import {
-  buildFallbackPageContentFromUrl,
-  buildJinaReaderUrl,
-  buildPageContextForAi,
-  buildRemotePageContentFromText,
-  combinePageContentContexts,
-  decideDirectPageFetch,
-  extractPageContentFromHtml,
-  appendPageContentWarnings,
-  getDirectPageFetchFailureWarning,
-  getDirectPageFetchOriginPattern,
-  normalizePageContentContext
-} from '../options/sections/content-extraction.js'
-import {
-  AI_NAMING_DEFAULT_TIMEOUT_MS,
-  AI_NAMING_JINA_READER_ORIGIN
-} from '../options/shared-options/constants.js'
 import {
   MAX_POPUP_SEARCH_RESULTS,
   POPUP_SEARCH_ASYNC_THRESHOLD,
@@ -77,15 +50,9 @@ import {
 import {
   parseSearchQuery
 } from '../shared/search-query.js'
-import { DEFAULT_INBOX_FOLDER_TITLE } from '../shared/inbox.js'
-import {
-  buildLocalNaturalSearchPlan,
-  filterBookmarksByNaturalDateRange,
-  getNaturalSearchStatusLabel,
-  mergeNaturalSearchResultSets,
-  normalizeNaturalSearchAiPlan,
-  type NaturalSearchPlan,
-  type NaturalSearchResultSet
+import type {
+  NaturalSearchPlan,
+  NaturalSearchResultSet
 } from './natural-search.js'
 import {
   buildLightPopupSearchIndex,
@@ -103,6 +70,8 @@ const MAX_VISIBLE_TOASTS = 2
 const SEARCH_SNAPSHOT_WARM_DELAY_MS = 220
 const SMART_RECOMMENDATION_LIMIT = 3
 const SMART_LOADING_STEP_COUNT = 3
+const POPUP_SMART_DEFAULT_TIMEOUT_MS = 30000
+const POPUP_JINA_READER_ORIGIN = 'https://r.jina.ai/*'
 const DEFAULT_POPUP_PREFERENCES = {
   naturalSearchEnabled: false
 }
@@ -115,6 +84,36 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(',')
 let popupDialogReturnFocusElement: HTMLElement | null = null
+let naturalSearchModulePromise: Promise<typeof import('./natural-search.js')> | null = null
+let contentExtractionModulePromise: Promise<typeof import('../options/sections/content-extraction.js')> | null = null
+let aiSettingsModulePromise: Promise<typeof import('../options/sections/ai-settings.js')> | null = null
+let aiResponseModulePromise: Promise<typeof import('../shared/ai-response.js')> | null = null
+let recycleBinModulePromise: Promise<typeof import('../shared/recycle-bin.js')> | null = null
+
+function loadNaturalSearchModule(): Promise<typeof import('./natural-search.js')> {
+  naturalSearchModulePromise ||= import('./natural-search.js')
+  return naturalSearchModulePromise
+}
+
+function loadContentExtractionModule(): Promise<typeof import('../options/sections/content-extraction.js')> {
+  contentExtractionModulePromise ||= import('../options/sections/content-extraction.js')
+  return contentExtractionModulePromise
+}
+
+function loadAiSettingsModule(): Promise<typeof import('../options/sections/ai-settings.js')> {
+  aiSettingsModulePromise ||= import('../options/sections/ai-settings.js')
+  return aiSettingsModulePromise
+}
+
+function loadAiResponseModule(): Promise<typeof import('../shared/ai-response.js')> {
+  aiResponseModulePromise ||= import('../shared/ai-response.js')
+  return aiResponseModulePromise
+}
+
+function loadRecycleBinModule(): Promise<typeof import('../shared/recycle-bin.js')> {
+  recycleBinModulePromise ||= import('../shared/recycle-bin.js')
+  return recycleBinModulePromise
+}
 
 const SMART_CLASSIFY_SCHEMA = {
   type: 'object',
@@ -243,10 +242,14 @@ function bindEvents() {
   dom.content.addEventListener('pointerover', handleContentPointerOver)
   dom.folderBreadcrumbs.addEventListener('click', handlePopupBreadcrumbClick)
   dom.filterFolderList.addEventListener('click', handleFilterListClick)
+  dom.filterFolderList.addEventListener('keydown', handleFilterListKeydown)
+  dom.filterFolderList.addEventListener('focusin', handleFilterListFocus)
   dom.filterSearchInput.addEventListener('input', () => {
     state.filterSearchQuery = dom.filterSearchInput.value
+    state.filterFolderActiveId = ''
     renderFilterModal()
   })
+  dom.filterSearchInput.addEventListener('keydown', handleFilterSearchKeydown)
   dom.closeFilterModal.addEventListener('click', closeDialogs)
   dom.moveFolderList.addEventListener('click', handleMoveListClick)
   dom.moveSearchInput.addEventListener('input', () => {
@@ -1014,27 +1017,47 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
   const planCacheKey = getNaturalSearchPlanCacheKey(normalizedQuery)
   const cachedResults = state.searchCache.get(cacheKey)
 
-  if (cachedResults) {
-    const cachedPlan = await resolveCachedNaturalSearchPlan(query, planCacheKey)
-    state.naturalSearchPlan = cachedPlan
-    state.searchHighlightQuery = cachedPlan.highlightQuery || normalizedQuery
-    state.searchPending = false
-    state.naturalSearchPending = false
-    state.searchResults = cachedResults.slice(0, MAX_POPUP_SEARCH_RESULTS)
-    state.activeResultIndex = Math.min(
-      state.activeResultIndex,
-      Math.max(state.searchResults.length - 1, 0)
-    )
-    return
+  if (!cachedResults) {
+    state.searchPending = true
+    state.naturalSearchPending = true
+    state.searchResults = []
+    state.activeResultIndex = 0
   }
 
-  state.searchPending = true
-  state.naturalSearchPending = true
-  state.searchResults = []
-  state.activeResultIndex = 0
-
   try {
-    const plan = await resolveNaturalSearchPlan(query, normalizedQuery)
+    const naturalSearch = await loadNaturalSearchModule()
+    if (state.searchRunId !== runId) {
+      return
+    }
+
+    if (cachedResults) {
+      const cachedPlanResult = await resolveCachedNaturalSearchPlan(query, planCacheKey, naturalSearch)
+      if (state.searchRunId !== runId) {
+        return
+      }
+
+      if (cachedPlanResult.canReuseResults) {
+        state.naturalSearchPlan = cachedPlanResult.plan
+        state.searchHighlightQuery = cachedPlanResult.plan.highlightQuery || normalizedQuery
+        state.searchPending = false
+        state.naturalSearchPending = false
+        state.searchResults = cachedResults.slice(0, MAX_POPUP_SEARCH_RESULTS)
+        state.activeResultIndex = Math.min(
+          state.activeResultIndex,
+          Math.max(state.searchResults.length - 1, 0)
+        )
+        render()
+        return
+      }
+
+      state.searchCache.delete(cacheKey)
+      state.searchPending = true
+      state.naturalSearchPending = true
+      state.searchResults = []
+      state.activeResultIndex = 0
+    }
+
+    const plan = await resolveNaturalSearchPlan(query, normalizedQuery, naturalSearch)
     if (state.searchRunId !== runId) {
       return
     }
@@ -1042,7 +1065,7 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
     state.naturalSearchPlan = plan
     state.searchHighlightQuery = plan.highlightQuery || normalizedQuery
 
-    const bookmarks = filterBookmarksByNaturalDateRange(getFilteredBookmarks(), plan)
+    const bookmarks = naturalSearch.filterBookmarksByNaturalDateRange(getFilteredBookmarks(), plan)
     const resultSets: NaturalSearchResultSet[] = []
     for (const naturalQuery of plan.queries) {
       if (state.searchRunId !== runId) {
@@ -1057,7 +1080,7 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
       return
     }
 
-    const results = mergeNaturalSearchResultSets(plan, resultSets)
+    const results = naturalSearch.mergeNaturalSearchResultSets(plan, resultSets)
     cacheSearchResults(cacheKey, results)
     state.searchPending = false
     state.naturalSearchPending = false
@@ -1080,17 +1103,21 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
   }
 }
 
-async function resolveCachedNaturalSearchPlan(query, planCacheKey): Promise<NaturalSearchPlan> {
-  const localPlan = buildLocalNaturalSearchPlan(query)
+async function resolveCachedNaturalSearchPlan(
+  query,
+  planCacheKey,
+  naturalSearch: typeof import('./natural-search.js')
+): Promise<{ plan: NaturalSearchPlan; canReuseResults: boolean }> {
+  const localPlan = naturalSearch.buildLocalNaturalSearchPlan(query)
   const cachedPlan = state.naturalSearchPlanCache.get(planCacheKey)
   if (!cachedPlan || cachedPlan.source !== 'ai') {
-    return localPlan
+    return { plan: localPlan, canReuseResults: true }
   }
 
   try {
     const settings = await loadAiProviderSettings()
     if (hasConfiguredAiProviderSettings(settings)) {
-      return cachedPlan
+      return { plan: cachedPlan, canReuseResults: true }
     }
   } catch {
     // Fall through to local parsing when provider settings cannot be read.
@@ -1098,12 +1125,16 @@ async function resolveCachedNaturalSearchPlan(query, planCacheKey): Promise<Natu
 
   state.naturalSearchPlanCache.delete(planCacheKey)
   state.naturalSearchError = '未配置 AI 渠道，已使用本地解析。'
-  return localPlan
+  return { plan: localPlan, canReuseResults: false }
 }
 
-async function resolveNaturalSearchPlan(query, normalizedQuery): Promise<NaturalSearchPlan> {
+async function resolveNaturalSearchPlan(
+  query,
+  normalizedQuery,
+  naturalSearch: typeof import('./natural-search.js')
+): Promise<NaturalSearchPlan> {
   const cacheKey = getNaturalSearchPlanCacheKey(normalizedQuery)
-  const localPlan = buildLocalNaturalSearchPlan(query)
+  const localPlan = naturalSearch.buildLocalNaturalSearchPlan(query)
   let plan = localPlan
   let settings
 
@@ -1125,7 +1156,7 @@ async function resolveNaturalSearchPlan(query, normalizedQuery): Promise<Natural
   }
 
   try {
-    plan = await requestNaturalSearchAiPlan(query, localPlan, settings)
+    plan = await requestNaturalSearchAiPlan(query, localPlan, settings, naturalSearch)
     state.naturalSearchError = ''
   } catch (error) {
     state.naturalSearchError = normalizeNaturalSearchError(error)
@@ -1304,9 +1335,50 @@ function getNaturalSearchResultCaption() {
   const modeLabel = plan?.source === 'ai' && !state.naturalSearchError
     ? 'AI 改写后匹配'
     : '本地自然语言筛选'
-  const statusLabel = getNaturalSearchStatusLabel(plan)
+  const statusLabel = getNaturalSearchStatusLabelFallback(plan)
   const detail = statusLabel.replace(/^(AI 解析|本地解析)( · )?/, '').trim()
   return detail ? `${modeLabel} · ${detail}` : modeLabel
+}
+
+function getNaturalSearchStatusLabelFallback(plan: NaturalSearchPlan | null): string {
+  if (!plan) {
+    return '自然语言搜索'
+  }
+
+  const parts = [plan.source === 'ai' ? 'AI 解析' : '本地解析']
+  if (plan.dateRange?.label) {
+    parts.push(plan.dateRange.label)
+  }
+  const keywordSummary = getNaturalKeywordSummaryFallback(plan)
+  if (keywordSummary) {
+    parts.push(`关键词 ${keywordSummary}`)
+  }
+  const exclusionSummary = formatNaturalTermsFallback(plan.excludedTerms, 2)
+  if (exclusionSummary) {
+    parts.push(`排除 ${exclusionSummary}`)
+  }
+  return parts.join(' · ')
+}
+
+function getNaturalKeywordSummaryFallback(plan: NaturalSearchPlan): string {
+  const terms = getQueryTerms(plan.highlightQuery)
+    .filter((term) => !plan.excludedTerms.includes(term))
+  return formatNaturalTermsFallback(terms, 3)
+}
+
+function formatNaturalTermsFallback(terms: string[], limit: number): string {
+  const uniqueTerms = [...new Set(terms)]
+  const visibleTerms = uniqueTerms
+    .slice(0, Math.max(1, limit))
+    .map((term) => cleanSmartText(term, 20))
+    .filter(Boolean)
+
+  if (!visibleTerms.length) {
+    return ''
+  }
+
+  const suffix = uniqueTerms.length > visibleTerms.length ? ` 等 ${uniqueTerms.length} 个` : ''
+  return `${visibleTerms.join(' / ')}${suffix}`
 }
 
 function showViewNotice(message, { durationMs = VIEW_NOTICE_MS } = {}) {
@@ -1838,6 +1910,10 @@ function renderFolderNode(node, depth) {
     isPinnedRoot || state.expandedFolders.has(node.id)
   const children = Array.isArray(node.children) ? node.children : []
   const folderInfo = state.folderMap.get(node.id)
+  const toggleLabel = getPopupFolderToggleLabel(
+    isExpanded ? '折叠文件夹' : '展开文件夹',
+    folderInfo ? formatFolderPath(folderInfo, state.folderMap) || folderInfo.title : node.title
+  )
   const childMarkup = isExpanded
     ? children
         .map((child) => {
@@ -1858,7 +1934,7 @@ function renderFolderNode(node, depth) {
         class="tree-toggle ${isExpanded ? 'expanded' : ''}"
         type="button"
         data-toggle-folder="${escapeAttr(node.id)}"
-        aria-label="${isExpanded ? '折叠文件夹' : '展开文件夹'}"
+        aria-label="${escapeAttr(toggleLabel)}"
       ></button>
     `
 
@@ -1899,6 +1975,7 @@ function renderFolderNode(node, depth) {
 function renderBookmarkRow(bookmark, depth) {
   const isMenuOpen = state.activeMenuBookmarkId === bookmark.id
   const menuId = getActionMenuId(bookmark.id)
+  const menuLabel = getBookmarkActionMenuLabel(bookmark)
 
   return `
     <div class="tree-row bookmark-row" style="--depth:${depth}">
@@ -1910,7 +1987,7 @@ function renderBookmarkRow(bookmark, depth) {
         </span>
       </button>
       <div class="menu-anchor">
-        <button class="icon-button" type="button" data-open-menu="${escapeAttr(bookmark.id)}" aria-label="打开操作菜单" aria-haspopup="menu" aria-expanded="${String(isMenuOpen)}" aria-controls="${escapeAttr(menuId)}"></button>
+        <button class="icon-button" type="button" data-open-menu="${escapeAttr(bookmark.id)}" aria-label="${escapeAttr(menuLabel)}" aria-haspopup="menu" aria-expanded="${String(isMenuOpen)}" aria-controls="${escapeAttr(menuId)}"></button>
         ${renderActionMenu(bookmark.id)}
       </div>
     </div>
@@ -1923,6 +2000,7 @@ function renderSearchResults() {
       const isActive = index === state.activeResultIndex
       const isMenuOpen = state.activeMenuBookmarkId === bookmark.id
       const menuId = getActionMenuId(bookmark.id)
+      const menuLabel = getBookmarkActionMenuLabel(bookmark)
       const matchReason = Array.isArray(bookmark.matchReasons) && bookmark.matchReasons.length
         ? bookmark.matchReasons.join(' · ')
         : ''
@@ -1946,13 +2024,29 @@ function renderSearchResults() {
             </span>
           </button>
           <div class="menu-anchor">
-            <button class="icon-button" type="button" data-open-menu="${escapeAttr(bookmark.id)}" aria-label="打开操作菜单" aria-haspopup="menu" aria-expanded="${String(isMenuOpen)}" aria-controls="${escapeAttr(menuId)}"></button>
+            <button class="icon-button" type="button" data-open-menu="${escapeAttr(bookmark.id)}" aria-label="${escapeAttr(menuLabel)}" aria-haspopup="menu" aria-expanded="${String(isMenuOpen)}" aria-controls="${escapeAttr(menuId)}"></button>
             ${renderActionMenu(bookmark.id)}
           </div>
         </article>
       `
     })
     .join('')
+}
+
+function getBookmarkActionMenuLabel(bookmark) {
+  const title = cleanSmartText(bookmark?.title || '未命名书签', 48)
+  return `打开 ${title} 的操作菜单`
+}
+
+function getBookmarkActionLabel(action, bookmarkId) {
+  const bookmark = state.bookmarkMap.get(String(bookmarkId || ''))
+  const title = cleanSmartText(bookmark?.title || bookmark?.displayUrl || bookmarkId || '未命名书签', 48)
+  return `${action}：${title || '未命名书签'}`
+}
+
+function getPopupFolderToggleLabel(action, folderPath) {
+  const target = cleanSmartText(folderPath || '未命名文件夹', 72)
+  return `${action}：${target || '未命名文件夹'}`
 }
 
 function renderActionMenu(bookmarkId) {
@@ -1967,14 +2061,19 @@ function renderActionMenu(bookmarkId) {
   const editBusy = isPopupActionPending('edit', bookmarkId)
   const deleteBusy = isPopupActionPending('delete', bookmarkId)
   const menuId = getActionMenuId(bookmarkId)
+  const editLabel = getBookmarkActionLabel('编辑书签', bookmarkId)
+  const copyLabel = getBookmarkActionLabel('复制书签链接', bookmarkId)
+  const openLabel = getBookmarkActionLabel('当前页打开书签', bookmarkId)
+  const moveLabel = getBookmarkActionLabel('移动书签', bookmarkId)
+  const deleteLabel = getBookmarkActionLabel('删除书签', bookmarkId)
 
   return `
     <div id="${escapeAttr(menuId)}" class="action-menu" role="menu" aria-label="书签操作">
-      <button role="menuitem" type="button" data-menu-action="edit" data-bookmark-id="${escapeAttr(bookmarkId)}" ${menuBusy || editBusy ? 'disabled' : ''}>编辑</button>
-      <button role="menuitem" type="button" data-menu-action="copy-url" data-bookmark-id="${escapeAttr(bookmarkId)}" ${copyBusy ? 'disabled' : ''}>复制链接</button>
-      <button role="menuitem" type="button" data-menu-action="open-current-tab" data-bookmark-id="${escapeAttr(bookmarkId)}" ${menuBusy || openBusy ? 'disabled' : ''}>当前页打开</button>
-      <button role="menuitem" type="button" data-menu-action="move" data-bookmark-id="${escapeAttr(bookmarkId)}" ${menuBusy || moveBusy ? 'disabled' : ''}>移动至</button>
-      <button role="menuitem" class="danger" type="button" data-menu-action="delete" data-bookmark-id="${escapeAttr(bookmarkId)}" ${menuBusy || deleteBusy ? 'disabled' : ''}>删除</button>
+      <button role="menuitem" type="button" data-menu-action="edit" data-bookmark-id="${escapeAttr(bookmarkId)}" aria-label="${escapeAttr(editLabel)}" ${menuBusy || editBusy ? 'disabled' : ''}>编辑</button>
+      <button role="menuitem" type="button" data-menu-action="copy-url" data-bookmark-id="${escapeAttr(bookmarkId)}" aria-label="${escapeAttr(copyLabel)}" ${copyBusy ? 'disabled' : ''}>复制链接</button>
+      <button role="menuitem" type="button" data-menu-action="open-current-tab" data-bookmark-id="${escapeAttr(bookmarkId)}" aria-label="${escapeAttr(openLabel)}" ${menuBusy || openBusy ? 'disabled' : ''}>当前页打开</button>
+      <button role="menuitem" type="button" data-menu-action="move" data-bookmark-id="${escapeAttr(bookmarkId)}" aria-label="${escapeAttr(moveLabel)}" ${menuBusy || moveBusy ? 'disabled' : ''}>移动至</button>
+      <button role="menuitem" class="danger" type="button" data-menu-action="delete" data-bookmark-id="${escapeAttr(bookmarkId)}" aria-label="${escapeAttr(deleteLabel)}" ${menuBusy || deleteBusy ? 'disabled' : ''}>删除</button>
     </div>
   `
 }
@@ -2201,8 +2300,24 @@ function syncBackdropVisibility() {
       state.editTargetBookmarkId ||
       state.confirmDeleteBookmarkId
   )
+  syncPopupAppShellModalState(hasOpenModal)
   dom.modalBackdrop.setAttribute('aria-hidden', String(!hasOpenModal))
   setPopupSurfaceOpen(dom.modalBackdrop, hasOpenModal)
+}
+
+function syncPopupAppShellModalState(hasOpenModal) {
+  if (!dom.appShell) {
+    return
+  }
+
+  if (hasOpenModal) {
+    dom.appShell.setAttribute('aria-hidden', 'true')
+    dom.appShell.setAttribute('inert', '')
+    return
+  }
+
+  dom.appShell.setAttribute('aria-hidden', 'false')
+  dom.appShell.removeAttribute('inert')
 }
 
 function renderFilterFolderList() {
@@ -2216,9 +2331,11 @@ function renderFilterFolderList() {
       })
     : state.allFolders
 
+  const activeId = resolveFilterFolderActiveId(folders)
   const folderItems = folders
     .map((folder) => {
       const isSelected = state.selectedFolderFilterId === folder.id
+      const isActive = folder.id === activeId
       const folderPath = formatFolderPath(folder, state.folderMap) || folder.title || '未命名文件夹'
       return `
         <button
@@ -2227,6 +2344,7 @@ function renderFilterFolderList() {
           role="option"
           aria-selected="${isSelected ? 'true' : 'false'}"
           data-select-filter-folder="${escapeAttr(folder.id)}"
+          tabindex="${isActive ? '0' : '-1'}"
           title="${escapeAttr(folder.path)}"
         >
           <span class="folder-kind" aria-hidden="true"></span>
@@ -2301,6 +2419,7 @@ function renderSmartFolderNode(node, depth, query) {
   const isExpanded = isFilterMode || state.moveExpandedFolders.has(node.id)
   const saving = state.smartSaving || isPopupActionPending('save-current-page', node.id)
   const folderPath = formatFolderPath(folder, state.folderMap) || folder.title || '未命名文件夹'
+  const toggleLabel = getPopupFolderToggleLabel(isExpanded ? '折叠文件夹' : '展开文件夹', folderPath)
 
   return `
     <div class="picker-row" style="--depth:${depth}">
@@ -2312,7 +2431,7 @@ function renderSmartFolderNode(node, depth, query) {
         role="treeitem"
         aria-level="${depth + 1}"
         aria-expanded="${childFolders.length ? String(isExpanded) : 'false'}"
-        aria-label="${isExpanded ? '折叠文件夹' : '展开文件夹'}"
+        aria-label="${escapeAttr(toggleLabel)}"
       ></button>
       <button
         class="picker-folder-card"
@@ -2363,6 +2482,7 @@ function renderMoveFolderNode(node, depth, query, bookmark) {
   const isCurrentFolder = bookmark.parentId === node.id
   const moving = isPopupActionPending('move', bookmark.id)
   const folderPath = formatFolderPath(folder, state.folderMap) || folder.title || '未命名文件夹'
+  const toggleLabel = getPopupFolderToggleLabel(isExpanded ? '折叠文件夹' : '展开文件夹', folderPath)
 
   return `
     <div class="picker-row ${isCurrentFolder ? 'current' : ''}" style="--depth:${depth}">
@@ -2374,7 +2494,7 @@ function renderMoveFolderNode(node, depth, query, bookmark) {
         role="treeitem"
         aria-level="${depth + 1}"
         aria-expanded="${childFolders.length ? String(isExpanded) : 'false'}"
-        aria-label="${isExpanded ? '折叠文件夹' : '展开文件夹'}"
+        aria-label="${escapeAttr(toggleLabel)}"
       ></button>
       <button
         class="picker-folder-card"
@@ -2486,14 +2606,10 @@ function handleContentClick(event) {
   if (menuToggle) {
     const bookmarkId = menuToggle.getAttribute('data-open-menu')
     if (state.activeMenuBookmarkId === bookmarkId) {
-      closeActionMenu()
+      closeActionMenu({ restoreFocus: true, focusBookmarkId: bookmarkId })
       return
     }
-    state.activeMenuBookmarkId = bookmarkId
-    renderMainContent()
-    window.requestAnimationFrame(() => {
-      focusActionMenuItem(0)
-    })
+    openActionMenuFromToggle(bookmarkId)
     return
   }
 
@@ -2608,7 +2724,130 @@ function handleFilterListClick(event) {
   }
 
   const folderId = filterButton.getAttribute('data-select-filter-folder')
+  state.filterFolderActiveId = String(folderId || '')
   applyFolderFilter(folderId === 'all' ? null : folderId)
+}
+
+function handleFilterSearchKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  if (!getFilterFolderOptionButtons().length) {
+    return
+  }
+
+  event.preventDefault()
+  focusFilterFolderOption(event.key === 'ArrowDown' ? 'first' : 'last')
+}
+
+function handleFilterListKeydown(event) {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    dom.filterSearchInput.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusFilterFolderOption('first')
+  } else if (event.key === 'End') {
+    focusFilterFolderOption('last')
+  } else {
+    focusFilterFolderOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function handleFilterListFocus(event) {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.dataset.selectFilterFolder) {
+    return
+  }
+
+  state.filterFolderActiveId = target.dataset.selectFilterFolder
+  syncFilterFolderTabStops(state.filterFolderActiveId)
+}
+
+function getFilterFolderOptionButtons() {
+  return [...dom.filterFolderList.querySelectorAll<HTMLButtonElement>('[data-select-filter-folder]')]
+}
+
+function resolveFilterFolderActiveId(folders) {
+  if (!folders.length) {
+    state.filterFolderActiveId = ''
+    return ''
+  }
+
+  const selectedId = state.selectedFolderFilterId || ''
+  const activeId = folders.some((folder) => folder.id === state.filterFolderActiveId)
+    ? state.filterFolderActiveId
+    : folders.some((folder) => folder.id === selectedId)
+      ? selectedId
+      : folders[0]?.id || ''
+  state.filterFolderActiveId = activeId
+  return activeId
+}
+
+function syncFilterFolderTabStops(activeId) {
+  for (const button of getFilterFolderOptionButtons()) {
+    button.tabIndex = button.dataset.selectFilterFolder === activeId ? 0 : -1
+  }
+}
+
+function focusFilterFolderOptionById(folderId) {
+  let targetButton = null
+  for (const button of getFilterFolderOptionButtons()) {
+    const isTarget = button.dataset.selectFilterFolder === folderId
+    button.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = button
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  state.filterFolderActiveId = folderId
+  targetButton.focus()
+  return true
+}
+
+function focusFilterFolderOption(direction) {
+  const buttons = getFilterFolderOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  let nextIndex = state.filterFolderActiveId
+    ? buttons.findIndex((button) => button.dataset.selectFilterFolder === state.filterFolderActiveId)
+    : -1
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  const folderId = String(button?.dataset.selectFilterFolder || '')
+  if (folderId) {
+    focusFilterFolderOptionById(folderId)
+  }
 }
 
 function handleMoveListClick(event) {
@@ -2646,20 +2885,40 @@ function handleSmartFolderListClick(event) {
   }
 }
 
-function closeActionMenu() {
+function openActionMenuFromToggle(bookmarkId, { focusLast = false } = {}) {
+  if (!bookmarkId) {
+    return
+  }
+
+  state.activeMenuBookmarkId = bookmarkId
+  renderMainContent()
+  window.requestAnimationFrame(() => {
+    focusActionMenuItem(focusLast ? getActionMenuItems().length - 1 : 0)
+  })
+}
+
+function closeActionMenu({ restoreFocus = false, focusBookmarkId = state.activeMenuBookmarkId } = {}) {
   const menu = document.querySelector('.action-menu')
   const hadMenu = Boolean(state.activeMenuBookmarkId)
+  const returnBookmarkId = focusBookmarkId
   state.activeMenuBookmarkId = null
+  const focusMenuToggle = () => {
+    if (restoreFocus) {
+      getMenuToggleForBookmark(returnBookmarkId)?.focus()
+    }
+  }
 
   if (menu instanceof HTMLElement && !menu.classList.contains('is-closing')) {
     void closeWithExitMotion(menu, 'is-closing', () => {
       renderMainContent()
+      focusMenuToggle()
     }, 180)
     return
   }
 
   if (hadMenu) {
     renderMainContent()
+    focusMenuToggle()
   }
 }
 
@@ -2694,6 +2953,10 @@ function handleDocumentKeydown(event) {
   }
 
   if (handleSearchFocusShortcut(event)) {
+    return
+  }
+
+  if (handleActionMenuToggleKeydown(event)) {
     return
   }
 
@@ -2733,7 +2996,7 @@ function handleEscapeAction() {
   }
 
   if (state.activeMenuBookmarkId) {
-    closeActionMenu()
+    closeActionMenu({ restoreFocus: true })
     return true
   }
 
@@ -2819,6 +3082,28 @@ function handleActionMenuKeydown(event) {
   return false
 }
 
+function handleActionMenuToggleKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return false
+  }
+
+  const toggle = event.target instanceof Element
+    ? event.target.closest('[data-open-menu]')
+    : null
+  if (!toggle) {
+    return false
+  }
+
+  const bookmarkId = toggle.getAttribute('data-open-menu')
+  if (!bookmarkId) {
+    return false
+  }
+
+  event.preventDefault()
+  openActionMenuFromToggle(bookmarkId, { focusLast: event.key === 'ArrowUp' })
+  return true
+}
+
 function focusActionMenuItem(index) {
   const items = getActionMenuItems()
   if (!items.length) {
@@ -2885,7 +3170,7 @@ function getFocusableElements(container) {
 
     return !element.hasAttribute('disabled') &&
       !element.getAttribute('aria-hidden') &&
-      element.offsetParent !== null
+      element.getClientRects().length > 0
   })
 }
 
@@ -3578,6 +3863,7 @@ async function confirmDeleteBookmark() {
   renderDeleteModal()
 
   try {
+    const recycleBin = await loadRecycleBinModule()
     state.lastDeletedBookmark = {
       title: bookmark.title,
       url: bookmark.url,
@@ -3586,7 +3872,7 @@ async function confirmDeleteBookmark() {
       recycleId: `recycle-${bookmark.id}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
     }
 
-    await deleteBookmarkToRecycle(bookmark.id, {
+    await recycleBin.deleteBookmarkToRecycle(bookmark.id, {
       recycleId: state.lastDeletedBookmark.recycleId,
       bookmarkId: String(bookmark.id),
       title: bookmark.title,
@@ -3640,7 +3926,8 @@ async function undoDelete() {
       parentId
     })
     if (payload.recycleId) {
-      await removeRecycleEntry(payload.recycleId)
+      const recycleBin = await loadRecycleBinModule()
+      await recycleBin.removeRecycleEntry(payload.recycleId)
     }
     showToast({
       type: 'success',
@@ -3799,6 +4086,7 @@ function writeClipboardText(text) {
 
 async function loadAiProviderSettings() {
   const stored = await getLocalStorage([STORAGE_KEYS.aiProviderSettings])
+  const { normalizeAiNamingSettings } = await loadAiSettingsModule()
   return normalizeAiNamingSettings(stored[STORAGE_KEYS.aiProviderSettings])
 }
 
@@ -3837,11 +4125,17 @@ async function ensureSmartClassifyPermissions(settings, { interactive = false } 
   return true
 }
 
-async function requestNaturalSearchAiPlan(query, localPlan: NaturalSearchPlan, settings): Promise<NaturalSearchPlan> {
+async function requestNaturalSearchAiPlan(
+  query,
+  localPlan: NaturalSearchPlan,
+  settings,
+  naturalSearch: typeof import('./natural-search.js')
+): Promise<NaturalSearchPlan> {
   validateSmartAiSettings(settings)
   await ensureSmartClassifyPermissions(settings, { interactive: false })
 
-  const endpoint = getAiEndpoint(settings)
+  const aiResponse = await loadAiResponseModule()
+  const endpoint = aiResponse.getAiEndpoint(settings)
   const requestBody = buildNaturalSearchRequestBody({ settings, query, localPlan })
   const response = await fetchWithSmartTimeout(endpoint, {
     method: 'POST',
@@ -3854,15 +4148,15 @@ async function requestNaturalSearchAiPlan(query, localPlan: NaturalSearchPlan, s
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new Error(extractAiErrorMessage(payload, response.status))
+    throw new Error(aiResponse.extractAiErrorMessage(payload, response.status))
   }
 
   const rawJsonText = settings.apiStyle === 'responses'
-    ? extractResponsesJsonText(payload)
-    : extractChatCompletionsJsonText(payload)
+    ? aiResponse.extractResponsesJsonText(payload)
+    : aiResponse.extractChatCompletionsJsonText(payload)
 
   try {
-    return normalizeNaturalSearchAiPlan(JSON.parse(rawJsonText), localPlan)
+    return naturalSearch.normalizeNaturalSearchAiPlan(JSON.parse(rawJsonText), localPlan)
   } catch {
     throw new Error('AI 返回了无法解析的自然语言搜索结果。')
   }
@@ -3870,7 +4164,7 @@ async function requestNaturalSearchAiPlan(query, localPlan: NaturalSearchPlan, s
 
 function buildNaturalSearchRequestBody({ settings, query, localPlan }) {
   const today = formatLocalDate(Date.now())
-  const examplePlan = buildLocalNaturalSearchPlan('帮我找上周收藏的那个 React 表格教程')
+  const exampleDateRange = getPreviousWeekDateRange()
   const systemPrompt = [
     '你是浏览器书签搜索查询理解器。',
     '你的任务是把用户自然语言改写为本地书签搜索关键词，不要回答用户问题。',
@@ -3901,11 +4195,11 @@ function buildNaturalSearchRequestBody({ settings, query, localPlan }) {
           queries: ['react 表格 教程 table grid tutorial guide', 'react table tutorial'],
           keywords: ['react', '表格', '教程', 'table', 'grid', 'tutorial'],
           excluded_terms: [],
-          date_range: examplePlan.dateRange
+          date_range: exampleDateRange
             ? {
-                from: formatLocalDate(examplePlan.dateRange.from),
-                to: formatLocalDate(examplePlan.dateRange.to),
-                label: examplePlan.dateRange.label
+                from: formatLocalDate(exampleDateRange.from),
+                to: formatLocalDate(exampleDateRange.to),
+                label: exampleDateRange.label
               }
             : { from: '', to: '', label: '' },
           explanation: '按上周收藏和 React 表格教程关键词匹配'
@@ -3949,6 +4243,20 @@ function buildNaturalSearchRequestBody({ settings, query, localPlan }) {
   }
 }
 
+function getPreviousWeekDateRange(): NaturalSearchPlan['dateRange'] {
+  const now = new Date()
+  const day = now.getDay()
+  const daysFromMonday = (day + 6) % 7
+  const thisWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysFromMonday)
+  thisWeekStart.setHours(0, 0, 0, 0)
+  const previousWeekStart = thisWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000
+  return {
+    from: previousWeekStart,
+    to: thisWeekStart.getTime(),
+    label: '上周收藏'
+  }
+}
+
 function normalizeNaturalSearchError(error) {
   if (isSmartPermissionRequiredError(error)) {
     return 'AI 渠道未授权，已使用本地自然语言解析。'
@@ -3967,15 +4275,16 @@ function normalizeNaturalSearchError(error) {
 }
 
 async function buildCurrentPageContext(currentUrl, settings) {
+  const contentExtraction = await loadContentExtractionModule()
   const timeoutMs = settings.timeoutMs
   let context = null
-  const originPattern = getDirectPageFetchOriginPattern(currentUrl)
+  const originPattern = contentExtraction.getDirectPageFetchOriginPattern(currentUrl)
   const canFetchDirectly = originPattern ? Boolean(await hasOptionalOriginPermission(originPattern)) : false
-  const directFetchDecision = decideDirectPageFetch(currentUrl, canFetchDirectly)
+  const directFetchDecision = contentExtraction.decideDirectPageFetch(currentUrl, canFetchDirectly)
 
   if (!directFetchDecision.allowed) {
-    context = appendPageContentWarnings(
-      buildFallbackPageContentFromUrl(currentUrl, {
+    context = contentExtraction.appendPageContentWarnings(
+      contentExtraction.buildFallbackPageContentFromUrl(currentUrl, {
         currentTitle: getCurrentPageTitle()
       }),
       [directFetchDecision.warning]
@@ -3994,32 +4303,32 @@ async function buildCurrentPageContext(currentUrl, settings) {
 
       if (contentType.includes('text/html')) {
         const html = await response.text()
-        context = extractPageContentFromHtml(html, {
+        context = contentExtraction.extractPageContentFromHtml(html, {
           url: finalUrl,
           currentTitle: getCurrentPageTitle(),
           contentType
         })
       } else {
-        context = buildFallbackPageContentFromUrl(finalUrl, {
+        context = contentExtraction.buildFallbackPageContentFromUrl(finalUrl, {
           currentTitle: getCurrentPageTitle(),
           contentType
         })
       }
     } catch (error) {
-      context = appendPageContentWarnings(
-        buildFallbackPageContentFromUrl(currentUrl, {
+      context = contentExtraction.appendPageContentWarnings(
+        contentExtraction.buildFallbackPageContentFromUrl(currentUrl, {
           currentTitle: getCurrentPageTitle(),
           error
         }),
-        [getDirectPageFetchFailureWarning(error)]
+        [contentExtraction.getDirectPageFetchFailureWarning(error)]
       )
     }
   }
 
   if (settings.allowRemoteParsing) {
-    const canUseRemoteParser = await hasOptionalOriginPermission(AI_NAMING_JINA_READER_ORIGIN)
+    const canUseRemoteParser = await hasOptionalOriginPermission(POPUP_JINA_READER_ORIGIN)
     if (!canUseRemoteParser) {
-      return normalizePageContentContext({
+      return contentExtraction.normalizePageContentContext({
         ...context,
         warnings: [
           ...(context.warnings || []),
@@ -4029,10 +4338,10 @@ async function buildCurrentPageContext(currentUrl, settings) {
     }
 
     try {
-      const remoteContext = await fetchRemoteCurrentPageContext(context.finalUrl || currentUrl, timeoutMs, context)
-      return combinePageContentContexts(context, remoteContext)
+      const remoteContext = await fetchRemoteCurrentPageContext(context.finalUrl || currentUrl, timeoutMs, context, contentExtraction)
+      return contentExtraction.combinePageContentContexts(context, remoteContext)
     } catch (error) {
-      return normalizePageContentContext({
+      return contentExtraction.normalizePageContentContext({
         ...context,
         warnings: [
           ...(context.warnings || []),
@@ -4045,8 +4354,13 @@ async function buildCurrentPageContext(currentUrl, settings) {
   return context
 }
 
-async function fetchRemoteCurrentPageContext(url, timeoutMs, fallbackContext) {
-  const readerUrl = buildJinaReaderUrl(url)
+async function fetchRemoteCurrentPageContext(
+  url,
+  timeoutMs,
+  fallbackContext,
+  contentExtraction: typeof import('../options/sections/content-extraction.js')
+) {
+  const readerUrl = contentExtraction.buildJinaReaderUrl(url)
   if (!readerUrl) {
     throw new Error('远程解析 URL 无效。')
   }
@@ -4067,18 +4381,23 @@ async function fetchRemoteCurrentPageContext(url, timeoutMs, fallbackContext) {
   }
 
   const text = await response.text()
-  return buildRemotePageContentFromText(text, {
+  return contentExtraction.buildRemotePageContentFromText(text, {
     url: fallbackContext?.finalUrl || url,
     currentTitle: fallbackContext?.title || getCurrentPageTitle()
   })
 }
 
 async function requestSmartClassification({ settings, pageContext, currentUrl }) {
-  const endpoint = getAiEndpoint(settings)
+  const [contentExtraction, aiResponse] = await Promise.all([
+    loadContentExtractionModule(),
+    loadAiResponseModule()
+  ])
+  const endpoint = aiResponse.getAiEndpoint(settings)
   const requestBody = buildSmartAiRequestBody({
     settings,
     pageContext,
-    currentUrl
+    currentUrl,
+    contentExtraction
   })
   const response = await fetchWithSmartTimeout(endpoint, {
     method: 'POST',
@@ -4091,12 +4410,12 @@ async function requestSmartClassification({ settings, pageContext, currentUrl })
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new Error(extractAiErrorMessage(payload, response.status))
+    throw new Error(aiResponse.extractAiErrorMessage(payload, response.status))
   }
 
   const rawJsonText = settings.apiStyle === 'responses'
-    ? extractResponsesJsonText(payload)
-    : extractChatCompletionsJsonText(payload)
+    ? aiResponse.extractResponsesJsonText(payload)
+    : aiResponse.extractChatCompletionsJsonText(payload)
 
   try {
     return normalizeSmartAiResult(JSON.parse(rawJsonText))
@@ -4105,7 +4424,7 @@ async function requestSmartClassification({ settings, pageContext, currentUrl })
   }
 }
 
-function buildSmartAiRequestBody({ settings, pageContext, currentUrl }) {
+function buildSmartAiRequestBody({ settings, pageContext, currentUrl, contentExtraction }) {
   const systemPrompt = [
     '你是浏览器书签智能分类助手。',
     '你需要根据当前网页内容和用户已有书签文件夹，为当前网页推荐保存位置。',
@@ -4127,7 +4446,10 @@ function buildSmartAiRequestBody({ settings, pageContext, currentUrl }) {
       title: getCurrentPageTitle(),
       url: currentUrl,
       domain: extractDomain(currentUrl),
-      page_context: buildPageContextForAi(normalizePageContentContext(pageContext), { mainTextLimit: 4200 })
+      page_context: contentExtraction.buildPageContextForAi(
+        contentExtraction.normalizePageContentContext(pageContext),
+        { mainTextLimit: 4200 }
+      )
     },
     existing_folders: buildSmartFolderCandidates()
   }, null, 2)
@@ -4472,11 +4794,11 @@ function formatPermissionOrigin(origin) {
   return String(origin || '').replace(/\/\*$/, '')
 }
 
-function fetchWithSmartTimeout(url, options = {}, timeoutMs = AI_NAMING_DEFAULT_TIMEOUT_MS) {
+function fetchWithSmartTimeout(url, options = {}, timeoutMs = POPUP_SMART_DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => {
     controller.abort()
-  }, Math.max(1000, Number(timeoutMs) || AI_NAMING_DEFAULT_TIMEOUT_MS))
+  }, Math.max(1000, Number(timeoutMs) || POPUP_SMART_DEFAULT_TIMEOUT_MS))
 
   return fetch(url, {
     ...options,

@@ -2,12 +2,11 @@ import type { BookmarkTagIndex } from '../shared/bookmark-tags.js'
 import type {
   ContentSnapshotIndex,
   ContentSnapshotSettings
-} from '../shared/content-snapshots.js'
+} from '../shared/content-snapshot-search.js'
 import {
-  buildContentSnapshotSearchMapWithFullText,
   loadContentSnapshotIndex,
   loadContentSnapshotSettings
-} from '../shared/content-snapshots.js'
+} from '../shared/content-snapshot-search.js'
 import type { BookmarkRecord } from '../shared/types.js'
 import {
   indexBookmarkForSearch,
@@ -75,6 +74,7 @@ export async function enrichPopupSearchIndexWithSnapshotFullText({
     return buildLightPopupSearchIndex({ bookmarks, tagIndex, snapshotIndex })
   }
 
+  const { buildContentSnapshotSearchMapWithFullText } = await import('../shared/content-snapshots.js')
   const snapshotSearchMap = await buildContentSnapshotSearchMapWithFullText(snapshotIndex, {
     includeFullText: true,
     maxRecords: POPUP_SNAPSHOT_FULL_TEXT_LIMIT

@@ -30,6 +30,26 @@ function getCssRuleBodies(css: string, selector: string): string[] {
   return [...css.matchAll(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, 'g'))].map((match) => match[1] || '')
 }
 
+function getFunctionBody(source: string, functionName: string): string {
+  const start = source.indexOf(`function ${functionName}`)
+  assert.ok(start >= 0, `${functionName} should exist`)
+  const bodyStart = source.indexOf('{', start)
+  assert.ok(bodyStart >= 0, `${functionName} should have a body`)
+  let depth = 0
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index]
+    if (char === '{') {
+      depth += 1
+    } else if (char === '}') {
+      depth -= 1
+      if (depth === 0) {
+        return source.slice(bodyStart + 1, index)
+      }
+    }
+  }
+  assert.fail(`${functionName} body should close`)
+}
+
 test('does not offset vertically centered icons when utility stack has enough clearance', () => {
   assert.equal(getVerticalCenterCollisionOffset({
     utilityBottom: 120,
@@ -383,7 +403,13 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
   assert.match(dashboardOverlay, /aria-hidden="true"/)
   assert.match(dashboardOverlay, /tabindex="-1"/)
   assert.match(dashboardOverlay, /data-dashboard-ready="false"/)
+  assert.match(dashboardOverlay, /data-dashboard-error="false"/)
+  assert.match(html, /id="newtab-dashboard-close"[\s\S]*?aria-label="返回新标签页"/)
   assert.match(html, /class="newtab-dashboard-loading"/)
+  assert.match(html, /id="newtab-dashboard-fallback"/)
+  assert.match(html, /role="alert"/)
+  assert.match(html, /data-dashboard-fallback-action="return"[\s\S]*?>返回新标签页<\/button>/)
+  assert.match(html, /data-dashboard-fallback-action="retry"[\s\S]*?>重试<\/button>/)
   assert.match(dashboardFrame, /loading="lazy"/)
   assert.match(dashboardFrame, /title="书签仪表盘"/)
   assert.match(dashboardFrame, /tabindex="0"/)
@@ -399,7 +425,14 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
   assert.match(script, /addEventListener\(['"]message['"][\s\S]*curator:newtab-dashboard-close/)
   assert.match(script, /curator:newtab-dashboard-ready/)
   assert.match(script, /dashboardFrameReady/)
+  assert.match(script, /DASHBOARD_FRAME_READY_TIMEOUT_MS/)
+  assert.match(script, /scheduleDashboardFrameReadyTimeout/)
+  assert.match(script, /setDashboardFrameError\('书签仪表盘加载耗时过长。你可以返回新标签页，或重试打开仪表盘。'\)/)
+  assert.match(script, /data-dashboard-fallback-action/)
+  assert.match(script, /function retryDashboardFrame\(\): void/)
+  assert.match(script, /dashboardFrame\.removeAttribute\('src'\)/)
   assert.match(script, /dashboardOverlay\.dataset\.dashboardReady/)
+  assert.match(script, /dashboardOverlay\.dataset\.dashboardError/)
   assert.match(script, /dashboardReturnFocusTarget/)
   assert.match(script, /function focusDashboardOverlay\(\): void/)
   assert.match(script, /dashboardFrame\.focus\(\)/)
@@ -601,6 +634,28 @@ test('newtab exposes source navigation anchors and a folder source setting switc
   assert.match(css, /\.source-navigation/)
 })
 
+test('newtab folder candidate search exposes a stable accessible name', () => {
+  const html = readProjectFile('src/newtab/newtab.html')
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const searchInput = html.match(/<input[\s\S]*?id="folder-candidate-search"[\s\S]*?>/)?.[0] || ''
+  const candidateList = html.match(/<div[\s\S]*?id="folder-candidate-list"[\s\S]*?>/)?.[0] || ''
+
+  assert.match(searchInput, /type="search"/)
+  assert.match(searchInput, /aria-label="搜索候选文件夹"/)
+  assert.match(searchInput, /aria-controls="folder-candidate-list"/)
+  assert.match(candidateList, /role="listbox"/)
+  assert.match(candidateList, /aria-multiselectable="true"/)
+  assert.match(script, /folderCandidateActiveId: ''/)
+  assert.match(script, /handleFolderCandidateSearchKeydown/)
+  assert.match(script, /handleFolderCandidateListKeydown/)
+  assert.match(script, /addEventListener\('focusin', handleFolderCandidateFocus\)/)
+  assert.match(script, /function focusFolderCandidateOption\(direction: 1 \| -1 \| 'first' \| 'last'\)/)
+  assert.match(script, /event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(script, /document\.getElementById\('folder-candidate-search'\)\?\.focus\(\)/)
+  assert.match(script, /button\.tabIndex = folder\.id === activeId \? 0 : -1/)
+  assert.match(script, /focusFolderCandidateOptionById\(focusCandidateId \|\| state\.folderCandidateActiveId\)/)
+})
+
 test('newtab settings drawer layout responds to drawer width', () => {
   const html = readProjectFile('src/newtab/newtab.html')
   const css = readProjectFile('src/newtab/newtab.css')
@@ -706,12 +761,17 @@ test('newtab dashboard glass layer only styles the iframe shell', () => {
   assert.match(newtabCss, /\.newtab-dashboard-overlay\s*\{[\s\S]*?justify-items:\s*stretch/)
   assert.match(newtabCss, /\.newtab-dashboard-overlay\s*\{[\s\S]*?padding:\s*0/)
   assert.match(newtabCss, /\.newtab-dashboard-overlay\[hidden\]\s*\{[\s\S]*?display:\s*none/)
+  assert.match(newtabCss, /\.newtab-dashboard-close\s*\{[\s\S]*?position:\s*fixed/)
+  assert.match(newtabCss, /\.newtab-dashboard-close\s*\{[\s\S]*?z-index:\s*4/)
   assert.match(newtabCss, /\.newtab-dashboard-surface\s*\{[\s\S]*?width:\s*100dvw/)
   assert.match(newtabCss, /\.newtab-dashboard-surface\s*\{[\s\S]*?height:\s*100dvh/)
   assert.match(newtabCss, /\.newtab-dashboard-surface\s*\{[\s\S]*?border-radius:\s*0/)
   assert.match(newtabCss, /\.newtab-dashboard-surface\s*\{[\s\S]*?backdrop-filter:\s*blur\(/)
   assert.match(newtabCss, /\.newtab-dashboard-loading\s*\{[\s\S]*?position:\s*absolute/)
   assert.match(newtabCss, /\.newtab-dashboard-loading-card\s*\{[\s\S]*?backdrop-filter:\s*blur\(/)
+  assert.match(newtabCss, /\.newtab-dashboard-fallback\s*\{[\s\S]*?position:\s*absolute/)
+  assert.match(newtabCss, /\.newtab-dashboard-fallback\[hidden\]\s*\{[\s\S]*?display:\s*none/)
+  assert.match(newtabCss, /\.newtab-dashboard-overlay\[data-dashboard-error="true"\]\s+\.newtab-dashboard-loading\s*\{[\s\S]*?opacity:\s*0/)
   assert.match(newtabCss, /\.newtab-dashboard-frame\s*\{[\s\S]*?opacity:\s*0/)
   assert.match(newtabCss, /\.newtab-dashboard-frame\s*\{[\s\S]*?visibility:\s*hidden/)
   assert.match(newtabCss, /\.newtab-dashboard-overlay\[data-dashboard-ready="true"\]\s+\.newtab-dashboard-frame\s*\{[\s\S]*?opacity:\s*1/)
@@ -777,14 +837,86 @@ test('newtab large bookmark lists render tiles incrementally', () => {
 
 test('newtab bookmark suggestions are debounced and cached', () => {
   const script = readProjectFile('src/newtab/newtab.ts')
+  const contentState = readProjectFile('src/newtab/content-state.ts')
 
   assert.match(script, /const SEARCH_SUGGESTION_DEBOUNCE_MS = 80/)
   assert.match(script, /const SEARCH_SUGGESTION_CACHE_LIMIT = 24/)
   assert.match(script, /const scheduleSuggestionsRender = \(\{ preserveActive = false, immediate = false \} = \{\}\) =>/)
-  assert.match(script, /window\.setTimeout\(\(\) => \{[\s\S]*?renderSuggestions\(\{ preserveActive, queryOverride: query \}\)/)
+  assert.match(script, /window\.setTimeout\(\(\) => \{[\s\S]*?renderCurrentSuggestions\(\)/)
   assert.match(script, /const searchSuggestionCache = new Map<string, SearchBookmarkSuggestion\[\]>\(\)/)
+  assert.match(script, /const naturalSearchSuggestionCache = new Map<string, Promise<SearchBookmarkSuggestion\[\]>>\(\)/)
   assert.match(script, /function getSearchSuggestionCacheKey/)
   assert.match(script, /normalizeNewTabSearchText\(query\)/)
   assert.match(script, /searchSuggestionCache\.clear\(\)/)
+  assert.match(script, /naturalSearchSuggestionCache\.clear\(\)/)
+  assert.match(script, /getNaturalSearchBookmarkSuggestions\(query\)\.then/)
+  assert.match(script, /function shouldLoadNaturalSearchSuggestions/)
+  assert.match(script, /if \(!shouldLoadNaturalSearchSuggestions\(query, directSuggestions\)\) \{[\s\S]*?return[\s\S]*?\}/)
+  assert.match(contentState, /await import\('\.\.\/popup\/natural-search\.js'\)/)
+  assert.match(contentState, /await import\('\.\.\/popup\/search\.js'\)/)
+  assert.doesNotMatch(contentState, /^import\s+(?!type)[^\n]*['"]\.\.\/popup\/natural-search\.js['"]/m)
+  assert.doesNotMatch(contentState, /^import\s+(?!type)[^\n]*['"]\.\.\/popup\/search(?:-index)?\.js['"]/m)
+  assert.doesNotMatch(contentState, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/dot-matrix-loader\.js['"]/m)
+  assert.doesNotMatch(script, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/motion\.js['"]/m)
+  assert.doesNotMatch(script, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/recycle-bin\.js['"]/m)
+  assert.doesNotMatch(script, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/bookmarks-api\.js['"]/m)
+  assert.doesNotMatch(script, /^import\s+(?!type)[^\n]*['"]\.\.\/shared\/bookmark-tags\.js['"]/m)
   assert.doesNotMatch(script, /input\.addEventListener\('input', \(\) => \{[\s\S]*?renderSuggestions\(\)/)
+})
+
+test('newtab bookmark change events are coalesced before full refresh', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /const BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS = 120/)
+  assert.match(script, /let bookmarkChangeRefreshTimer = 0/)
+  assert.match(script, /let bookmarkChangeRefreshInFlight = false/)
+  assert.match(script, /let bookmarkChangeRefreshQueued = false/)
+  assert.match(script, /function scheduleBookmarkChangeRefresh\(\): void/)
+  assert.match(script, /function flushBookmarkChangeRefresh\(\): Promise<void>/)
+  assert.match(getFunctionBody(script, 'handleBookmarksChanged'), /scheduleBookmarkChangeRefresh\(\)/)
+  assert.doesNotMatch(getFunctionBody(script, 'handleBookmarksChanged'), /refreshNewTab\(\)/)
+  assert.match(getFunctionBody(script, 'scheduleBookmarkChangeRefresh'), /window\.setTimeout/)
+  assert.match(getFunctionBody(script, 'flushBookmarkChangeRefresh'), /await refreshNewTab\(\)/)
+})
+
+test('newtab source candidates distinguish direct and total bookmark counts', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /interface NewTabFolderCandidate[\s\S]*directBookmarkCount: number[\s\S]*totalBookmarkCount: number/)
+  assert.match(script, /function formatFolderCandidateCountSummary\(folder: NewTabFolderCandidate\): string/)
+  assert.match(script, /直属 \$\{folder\.directBookmarkCount\} \/ 合计 \$\{folder\.totalBookmarkCount\}/)
+  assert.match(script, /badge\.textContent = selected \? '已选' : String\(folder\.totalBookmarkCount\)/)
+  assert.doesNotMatch(script, /badge\.textContent = selected \? '已选' : `\$\{folder\.bookmarkCount\}`/)
+})
+
+test('newtab search suggestions explain bookmark enter behavior and empty web search fallback', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+
+  assert.match(script, /input\.setAttribute\('role', 'combobox'\)/)
+  assert.match(script, /input\.setAttribute\('aria-autocomplete', 'list'\)/)
+  assert.match(script, /input\.setAttribute\('aria-controls', 'newtab-search-suggestions'\)/)
+  assert.match(script, /suggestions\.setAttribute\('role', 'listbox'\)/)
+  assert.match(script, /suggestionsHint\.className = 'newtab-search-hint'/)
+  assert.match(script, /createSearchWebFallbackButton\(trimmedQuery\)/)
+  assert.match(script, /未找到书签，按 Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索/)
+  assert.match(script, /suggestionsHint\.textContent = `按 Enter 打开选中的书签；Cmd\/Ctrl\+Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页`/)
+  assert.match(script, /button\.addEventListener\('click', \(\) => \{[\s\S]*?submitSearch\(query\)/)
+  assert.match(css, /\.newtab-search-hint\s*\{/)
+  assert.match(css, /\.newtab-search-web-hint\s*\{/)
+})
+
+test('newtab search engine menu supports menu radio keyboard navigation', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /engineButton\.setAttribute\('aria-haspopup', 'menu'\)/)
+  assert.match(script, /menu\.setAttribute\('role', 'menu'\)/)
+  assert.match(script, /item\.setAttribute\('role', 'menuitemradio'\)/)
+  assert.match(script, /item\.setAttribute\('aria-checked', String\(engineId === state\.searchSettings\.engine\)\)/)
+  assert.match(script, /item\.tabIndex = -1/)
+  assert.match(script, /const focusEngineMenuItem = \(menu: HTMLElement, direction: 1 \| -1 \| 'first' \| 'last'\)/)
+  assert.match(script, /engineButton\.addEventListener\('keydown', \(event\) => \{[\s\S]*?event\.key !== 'ArrowDown'[\s\S]*?event\.key !== 'ArrowUp'[\s\S]*?renderEngineMenu\(event\.key === 'ArrowDown' \? 'first' : 'last'\)/)
+  assert.match(script, /menu\.addEventListener\('keydown', \(event\) => \{[\s\S]*?event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(script, /if \(event\.key === 'Escape'\) \{[\s\S]*?closeEngineMenu\(\{ restoreFocus: true \}\)/)
+  assert.match(script, /focusEngineMenuItem\(menu, event\.key === 'ArrowDown' \? 1 : -1\)/)
 })

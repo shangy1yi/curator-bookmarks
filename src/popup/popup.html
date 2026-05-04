@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./popup.css">
   </head>
   <body>
-    <main class="app-shell">
+    <main id="popup-app-shell" class="app-shell">
       <header class="hero">
         <button
           id="search-help-toggle"
@@ -20,7 +20,7 @@
         </button>
         <div class="hero-brand">
           <div class="hero-mark" aria-hidden="true">
-            <img class="hero-logo" src="../assets/icon4096.jpg" alt="">
+            <img class="hero-logo" src="../assets/icon128.png" alt="">
           </div>
           <div class="hero-copy">
             <p class="hero-eyebrow">Chrome Bookmark Manager</p>
@@ -131,10 +131,12 @@
             spellcheck="false"
             autocomplete="off"
             placeholder="搜索文件夹名称或路径"
+            aria-label="搜索筛选文件夹"
+            aria-controls="filter-folder-list"
           >
         </label>
 
-        <div id="filter-folder-list" class="modal-list" role="listbox"></div>
+        <div id="filter-folder-list" class="modal-list" role="listbox" aria-label="筛选文件夹候选列表"></div>
       </section>
 
       <section id="move-modal" class="modal-card hidden" role="dialog" aria-modal="true" aria-labelledby="move-modal-title" tabindex="-1">
@@ -163,10 +165,12 @@
             spellcheck="false"
             autocomplete="off"
             placeholder="搜索目标文件夹"
+            aria-label="搜索移动目标文件夹"
+            aria-controls="move-folder-list"
           >
         </label>
 
-        <div id="move-folder-list" class="modal-list" role="tree"></div>
+        <div id="move-folder-list" class="modal-list" role="tree" aria-label="移动目标文件夹"></div>
       </section>
 
       <section id="smart-folder-modal" class="modal-card hidden" role="dialog" aria-modal="true" aria-labelledby="smart-folder-modal-title" tabindex="-1">
@@ -195,10 +199,12 @@
             spellcheck="false"
             autocomplete="off"
             placeholder="搜索目标文件夹"
+            aria-label="搜索保存目标文件夹"
+            aria-controls="smart-folder-list"
           >
         </label>
 
-        <div id="smart-folder-list" class="modal-list" role="tree"></div>
+        <div id="smart-folder-list" class="modal-list" role="tree" aria-label="保存目标文件夹"></div>
       </section>
 
       <section id="edit-modal" class="modal-card hidden" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" tabindex="-1">

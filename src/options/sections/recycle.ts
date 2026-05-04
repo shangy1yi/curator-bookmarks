@@ -41,6 +41,15 @@ export function normalizeRecycleBin(rawEntries) {
     .sort((left, right) => right.deletedAt - left.deletedAt)
 }
 
+export function getRecycleEntryActionLabel(action, entry) {
+  const title = String(entry?.title || displayUrl(entry?.url) || '未命名书签')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const safeTitle = title.length > 48 ? `${title.slice(0, 47).trim()}…` : title
+
+  return `${action}：${safeTitle || '未命名书签'}`
+}
+
 export async function saveRecycleBin() {
   const nextEntries = mergeRecycleEntries(managerState.recycleBin as RecycleEntry[])
   managerState.recycleBin = nextEntries
@@ -92,6 +101,9 @@ export function renderRecycleSection(callbacks) {
 
 function buildRecycleEntryCard(entry) {
   const selected = managerState.selectedRecycleIds.has(String(entry.recycleId))
+  const selectionLabel = getRecycleEntryActionLabel('选择回收站书签', entry)
+  const restoreLabel = getRecycleEntryActionLabel('恢复书签', entry)
+  const clearLabel = getRecycleEntryActionLabel('清除回收站记录', entry)
 
   return `
     <article class="detect-result-card ${selected ? 'selected' : ''}">
@@ -102,6 +114,7 @@ function buildRecycleEntryCard(entry) {
               type="checkbox"
               data-recycle-select="true"
               data-recycle-id="${escapeAttr(entry.recycleId)}"
+              aria-label="${escapeAttr(selectionLabel)}"
               ${selected ? 'checked' : ''}
               ${availabilityState.deleting ? 'disabled' : ''}
             >
@@ -114,6 +127,7 @@ function buildRecycleEntryCard(entry) {
             class="detect-result-action"
             type="button"
             data-recycle-restore="${escapeAttr(entry.recycleId)}"
+            aria-label="${escapeAttr(restoreLabel)}"
             ${availabilityState.deleting ? 'disabled' : ''}
           >
             恢复书签
@@ -122,6 +136,7 @@ function buildRecycleEntryCard(entry) {
             class="detect-result-action danger"
             type="button"
             data-recycle-clear="${escapeAttr(entry.recycleId)}"
+            aria-label="${escapeAttr(clearLabel)}"
             ${availabilityState.deleting ? 'disabled' : ''}
           >
             清除

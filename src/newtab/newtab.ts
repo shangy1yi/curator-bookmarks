@@ -3,23 +3,18 @@ import {
   STORAGE_KEYS
 } from '../shared/constants.js'
 import {
-  createBookmark,
-  getBookmarkTree,
-  moveBookmark,
-  updateBookmark
-} from '../shared/bookmarks-api.js'
-import {
   extractBookmarkData,
   findBookmarksBar
 } from '../shared/bookmark-tree.js'
-import { deleteBookmarkToRecycle, removeRecycleEntry } from '../shared/recycle-bin.js'
 import { getLocalStorage, setLocalStorage } from '../shared/storage.js'
 import type { ExtractedBookmarkData, FolderRecord } from '../shared/types.js'
-import {
-  loadBookmarkTagIndex,
-  type BookmarkTagIndex
+import type {
+  BookmarkTagExtraction,
+  BookmarkTagIndex,
+  BookmarkTagRecord,
+  BookmarkTagSource
 } from '../shared/bookmark-tags.js'
-import { cancelExitMotion, closeWithExitMotion } from '../shared/motion.js'
+import type { ContentSnapshotIndex } from '../shared/content-snapshots.js'
 import {
   DEFAULT_ICON_SETTINGS,
   ICON_LAYOUT_PRESETS,
@@ -45,6 +40,7 @@ import {
   collectPortalBookmarkSourceItems,
   createLoadingStateView,
   getPortalQuickAccessItems,
+  getNaturalSearchBookmarkSuggestionsFromIndex,
   getNewTabSourceAnchorId,
   getSearchBookmarkSuggestionsFromIndex,
   prepareNewTabSearchIndex,
@@ -67,6 +63,8 @@ import {
   DEFAULT_NEW_TAB_FOLDER_TITLE,
   type NewTabFolderSettings,
   findNewTabFolder,
+  getDisplayableNewTabSourceFolders,
+  getFolderBookmarkCounts,
   normalizeFolderIds,
   normalizeFolderSettings,
   normalizeFolderSettingsWithDefault
@@ -118,11 +116,8 @@ import {
   normalizeTimeSettings,
   type NewTabTimeSettings
 } from './time-settings.js'
-import {
-  loadPopupSearchIndexSnapshotState,
-  type PopupSearchIndexSnapshotState
-} from '../popup/search-index.js'
 const FAVICON_SIZE = 64
+const MOTION_CLOSE_TOKEN = 'motionCloseToken'
 const FAVICON_COLOR_SAMPLE_SIZE = 32
 const CUSTOM_ICON_MAX_BYTES = 2 * 1024 * 1024
 const BOOKMARK_DRAG_LONG_PRESS_MS = 320
@@ -166,13 +161,145 @@ const SEARCH_OFFSET_ABSOLUTE_MIN = -240
 const SEARCH_OFFSET_ABSOLUTE_MAX = 240
 const SEARCH_WIDTH_BOUNDS_FALLBACK = { min: 16, max: 72 }
 const NEWTAB_LAYOUT_SAFE_GAP = 12
+
+type MotionCleanup = () => void | Promise<void>
+
+function prefersReducedMotion(): boolean {
+  return Boolean(
+    typeof window !== 'undefined' &&
+      'matchMedia' in window &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+}
+
+function waitForMotionEnd(element: Element, timeoutMs = 260): Promise<void> {
+  if (prefersReducedMotion()) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false
+    let timeoutId = 0
+
+    let finishFromEvent: (event: Event) => void
+    const finish = () => {
+      if (resolved) {
+        return
+      }
+      resolved = true
+      window.clearTimeout(timeoutId)
+      element.removeEventListener('animationend', finishFromEvent)
+      element.removeEventListener('transitionend', finishFromEvent)
+      resolve()
+    }
+    finishFromEvent = (event: Event) => {
+      if (event.target === element) {
+        finish()
+      }
+    }
+
+    element.addEventListener('animationend', finishFromEvent)
+    element.addEventListener('transitionend', finishFromEvent)
+    timeoutId = window.setTimeout(finish, timeoutMs)
+  })
+}
+
+function cancelExitMotion(element: Element, closingClass = 'is-closing'): void {
+  if (element instanceof HTMLElement) {
+    delete element.dataset[MOTION_CLOSE_TOKEN]
+  }
+  element.classList.remove(closingClass)
+}
+
+async function closeWithExitMotion(
+  element: Element,
+  closingClass: string,
+  removeOrHide: MotionCleanup,
+  timeoutMs = 260
+): Promise<void> {
+  if (prefersReducedMotion()) {
+    cancelExitMotion(element, closingClass)
+    await removeOrHide()
+    return
+  }
+
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  if (element instanceof HTMLElement) {
+    element.dataset[MOTION_CLOSE_TOKEN] = token
+  }
+  element.classList.add(closingClass)
+
+  await waitForMotionEnd(element, timeoutMs)
+
+  if (
+    element instanceof HTMLElement &&
+    element.dataset[MOTION_CLOSE_TOKEN] !== token
+  ) {
+    return
+  }
+
+  cancelExitMotion(element, closingClass)
+  await removeOrHide()
+}
 const SEARCH_SUGGESTION_LIMIT = 6
 const SEARCH_SUGGESTION_DEBOUNCE_MS = 80
 const SEARCH_SUGGESTION_CACHE_LIMIT = 24
+
+function getBookmarkTree(): Promise<chrome.bookmarks.BookmarkTreeNode[]> {
+  return new Promise((resolve, reject) => {
+    chrome.bookmarks.getTree((tree) => {
+      const error = chrome.runtime.lastError
+      if (error) {
+        reject(new Error(error.message))
+        return
+      }
+
+      resolve(tree)
+    })
+  })
+}
+
+async function moveBookmarkLazy(
+  ...args: Parameters<typeof import('../shared/bookmarks-api.js').moveBookmark>
+): ReturnType<typeof import('../shared/bookmarks-api.js').moveBookmark> {
+  const { moveBookmark } = await import('../shared/bookmarks-api.js')
+  return moveBookmark(...args)
+}
+
+async function updateBookmarkLazy(
+  ...args: Parameters<typeof import('../shared/bookmarks-api.js').updateBookmark>
+): ReturnType<typeof import('../shared/bookmarks-api.js').updateBookmark> {
+  const { updateBookmark } = await import('../shared/bookmarks-api.js')
+  return updateBookmark(...args)
+}
+
+async function createBookmarkLazy(
+  ...args: Parameters<typeof import('../shared/bookmarks-api.js').createBookmark>
+): ReturnType<typeof import('../shared/bookmarks-api.js').createBookmark> {
+  const { createBookmark } = await import('../shared/bookmarks-api.js')
+  return createBookmark(...args)
+}
+
+async function deleteBookmarkToRecycleLazy(
+  ...args: Parameters<typeof import('../shared/recycle-bin.js').deleteBookmarkToRecycle>
+): ReturnType<typeof import('../shared/recycle-bin.js').deleteBookmarkToRecycle> {
+  const { deleteBookmarkToRecycle } = await import('../shared/recycle-bin.js')
+  return deleteBookmarkToRecycle(...args)
+}
+
+async function removeRecycleEntryLazy(
+  ...args: Parameters<typeof import('../shared/recycle-bin.js').removeRecycleEntry>
+): ReturnType<typeof import('../shared/recycle-bin.js').removeRecycleEntry> {
+  const { removeRecycleEntry } = await import('../shared/recycle-bin.js')
+  return removeRecycleEntry(...args)
+}
+
 const BOOKMARK_TILE_INITIAL_RENDER_LIMIT = 160
 const BOOKMARK_TILE_RENDER_CHUNK_SIZE = 80
+const BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS = 120
 const QUICK_ACCESS_ITEM_LIMIT = 8
 const ACTIVITY_RECORD_LIMIT = 160
+const DASHBOARD_FRAME_READY_TIMEOUT_MS = 12000
 const DEFAULT_GENERAL_SETTINGS = {
   hideSettingsTrigger: false,
   showPortalOverview: true,
@@ -191,10 +318,23 @@ const FOCUSABLE_SELECTOR = [
 
 interface NewTabFolderSection {
   id: string
+  sourceId: string
   title: string
   path: string
   node: chrome.bookmarks.BookmarkTreeNode
   bookmarks: chrome.bookmarks.BookmarkTreeNode[]
+  directBookmarkCount: number
+  totalBookmarkCount: number
+}
+
+interface NewTabFolderCandidate {
+  id: string
+  title: string
+  path: string
+  normalizedTitle: string
+  normalizedPath: string
+  directBookmarkCount: number
+  totalBookmarkCount: number
 }
 
 interface NewTabActivityRecord {
@@ -238,7 +378,7 @@ const state = {
   rootNode: null as chrome.bookmarks.BookmarkTreeNode | null,
   folderData: null as ExtractedBookmarkData | null,
   bookmarkTagIndex: null as BookmarkTagIndex | null,
-  searchSnapshotState: null as PopupSearchIndexSnapshotState | null,
+  searchSnapshotIndex: null as ContentSnapshotIndex | null,
   folderNodeMap: new Map<string, chrome.bookmarks.BookmarkTreeNode>(),
   folderNode: null as chrome.bookmarks.BookmarkTreeNode | null,
   folderSections: [] as NewTabFolderSection[],
@@ -312,12 +452,14 @@ const state = {
   } as NewTabActivityState,
   folderCandidatesExpanded: false,
   folderCandidateQuery: '',
+  folderCandidateActiveId: '',
   timeSettings: { ...DEFAULT_TIME_SETTINGS } as NewTabTimeSettings,
   settingsSaveState: 'idle' as SettingsSaveState,
   settingsSaveMessage: '',
   dashboardOpen: false,
   dashboardFrameLoaded: false,
   dashboardFrameReady: false,
+  dashboardFrameError: '',
   searchOffsetBounds: { ...SEARCH_OFFSET_BOUNDS_FALLBACK } as AdaptiveSearchOffsetBounds,
   searchWidthBounds: { ...SEARCH_WIDTH_BOUNDS_FALLBACK },
   faviconRefreshTokens: new Map<string, number>()
@@ -326,7 +468,10 @@ const state = {
 const root = document.getElementById('newtab-root')
 const dashboardTrigger = document.getElementById('newtab-dashboard-trigger')
 const dashboardOverlay = document.getElementById('newtab-dashboard-overlay')
+const dashboardClose = document.getElementById('newtab-dashboard-close')
 const dashboardFrame = document.getElementById('newtab-dashboard-frame') as HTMLIFrameElement | null
+const dashboardFallback = document.getElementById('newtab-dashboard-fallback')
+const dashboardFallbackCopy = document.getElementById('newtab-dashboard-fallback-copy')
 const settingsTrigger = document.getElementById('newtab-settings-trigger')
 const settingsDrawer = document.getElementById('newtab-settings-drawer')
 const settingsBackdrop = document.getElementById('newtab-settings-backdrop')
@@ -351,6 +496,10 @@ let iconSettingsSaveTimer = 0
 let faviconAccentSaveTimer = 0
 let timeSettingsSaveTimer = 0
 let settingsSaveStatusTimer = 0
+let bookmarkChangeRefreshTimer = 0
+let bookmarkChangeRefreshInFlight = false
+let bookmarkChangeRefreshQueued = false
+let dashboardFrameReadyTimeout = 0
 let bookmarkDragSlotRects = new Map<string, DOMRect>()
 let bookmarkDragSlotOrderIds: string[] = []
 let dashboardReturnFocusTarget: HTMLElement | null = null
@@ -374,6 +523,26 @@ function bindEvents(): void {
   dashboardTrigger?.addEventListener('click', (event) => {
     event.preventDefault()
     openDashboardRoute()
+  })
+  dashboardClose?.addEventListener('click', closeDashboardRoute)
+  dashboardFrame?.addEventListener('error', () => {
+    setDashboardFrameError('书签仪表盘加载失败。你可以返回新标签页，或重试打开仪表盘。')
+  })
+  dashboardFallback?.addEventListener('click', (event) => {
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+
+    const actionButton = target.closest<HTMLElement>('[data-dashboard-fallback-action]')
+    const action = actionButton?.getAttribute('data-dashboard-fallback-action')
+    if (action === 'return') {
+      closeDashboardRoute()
+      return
+    }
+    if (action === 'retry') {
+      retryDashboardFrame()
+    }
   })
   window.addEventListener('hashchange', syncDashboardRoute)
   window.addEventListener('message', handleDashboardMessage)
@@ -725,8 +894,17 @@ function bindFolderSettingsEvents(): void {
     .getElementById('folder-candidate-search')
     ?.addEventListener('input', handleFolderCandidateSearch)
   document
+    .getElementById('folder-candidate-search')
+    ?.addEventListener('keydown', handleFolderCandidateSearchKeydown)
+  document
     .getElementById('folder-candidate-list')
     ?.addEventListener('click', handleFolderCandidateClick)
+  document
+    .getElementById('folder-candidate-list')
+    ?.addEventListener('keydown', handleFolderCandidateListKeydown)
+  document
+    .getElementById('folder-candidate-list')
+    ?.addEventListener('focusin', handleFolderCandidateFocus)
   document
     .getElementById('folder-selected-list')
     ?.addEventListener('click', handleSelectedFolderClick)
@@ -762,7 +940,22 @@ function toggleFolderCandidates(): void {
 function handleFolderCandidateSearch(event: Event): void {
   const target = event.target
   state.folderCandidateQuery = target instanceof HTMLInputElement ? target.value : ''
+  state.folderCandidateActiveId = ''
   syncFolderSettingsControls()
+}
+
+function handleFolderCandidateSearchKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  const candidates = getFilteredFolderCandidates()
+  if (!candidates.length) {
+    return
+  }
+
+  event.preventDefault()
+  focusFolderCandidateOption(event.key === 'ArrowDown' ? 'first' : 'last')
 }
 
 function handleFolderCandidateClick(event: Event): void {
@@ -781,7 +974,123 @@ function handleFolderCandidateClick(event: Event): void {
     return
   }
 
-  void toggleSelectedFolder(folderId, { preserveCandidateScroll: true })
+  state.folderCandidateActiveId = folderId
+  void toggleSelectedFolder(folderId, {
+    preserveCandidateScroll: true,
+    restoreCandidateFocus: true,
+    focusCandidateId: folderId
+  })
+}
+
+function handleFolderCandidateListKeydown(event: KeyboardEvent): void {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    document.getElementById('folder-candidate-search')?.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusFolderCandidateOption('first')
+  } else if (event.key === 'End') {
+    focusFolderCandidateOption('last')
+  } else {
+    focusFolderCandidateOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function getFolderCandidateOptionButtons(): HTMLButtonElement[] {
+  const candidateList = document.getElementById('folder-candidate-list')
+  if (!(candidateList instanceof HTMLElement)) {
+    return []
+  }
+
+  return [...candidateList.querySelectorAll<HTMLButtonElement>('[data-folder-candidate-id]')]
+}
+
+function focusFolderCandidateOptionById(folderId: string): boolean {
+  let targetButton: HTMLButtonElement | null = null
+  for (const candidateButton of getFolderCandidateOptionButtons()) {
+    const isTarget = candidateButton.dataset.folderCandidateId === folderId
+    candidateButton.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = candidateButton
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  state.folderCandidateActiveId = folderId
+  targetButton.focus()
+  return true
+}
+
+function resolveFolderCandidateActiveId(candidates: NewTabFolderCandidate[]): string {
+  if (!candidates.length) {
+    state.folderCandidateActiveId = ''
+    return ''
+  }
+
+  const activeId = candidates.some((folder) => folder.id === state.folderCandidateActiveId)
+    ? state.folderCandidateActiveId
+    : candidates[0]?.id || ''
+  state.folderCandidateActiveId = activeId
+  return activeId
+}
+
+function syncFolderCandidateOptionTabStops(activeId: string): void {
+  for (const candidateButton of getFolderCandidateOptionButtons()) {
+    candidateButton.tabIndex = candidateButton.dataset.folderCandidateId === activeId ? 0 : -1
+  }
+}
+
+function focusFolderCandidateOption(direction: 1 | -1 | 'first' | 'last'): void {
+  const buttons = getFolderCandidateOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  let nextIndex = state.folderCandidateActiveId
+    ? buttons.findIndex((button) => button.dataset.folderCandidateId === state.folderCandidateActiveId)
+    : -1
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  const folderId = String(button?.dataset.folderCandidateId || '')
+  if (folderId) {
+    focusFolderCandidateOptionById(folderId)
+  }
+}
+
+function handleFolderCandidateFocus(event: FocusEvent): void {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.dataset.folderCandidateId) {
+    return
+  }
+
+  state.folderCandidateActiveId = target.dataset.folderCandidateId
+  syncFolderCandidateOptionTabStops(state.folderCandidateActiveId)
 }
 
 function handleSelectedFolderClick(event: Event): void {
@@ -805,13 +1114,21 @@ function handleSelectedFolderClick(event: Event): void {
 
 async function toggleSelectedFolder(
   folderId: string,
-  { preserveCandidateScroll = false } = {}
+  {
+    preserveCandidateScroll = false,
+    restoreCandidateFocus = false,
+    focusCandidateId = ''
+  } = {}
 ): Promise<void> {
   const currentIds = state.folderSettings.selectedFolderIds
   const nextIds = currentIds.includes(folderId)
     ? currentIds.filter((id) => id !== folderId)
     : [...currentIds, folderId]
-  await updateSelectedFolders(nextIds, { preserveCandidateScroll })
+  await updateSelectedFolders(nextIds, {
+    preserveCandidateScroll,
+    restoreCandidateFocus,
+    focusCandidateId
+  })
 }
 
 async function removeSelectedFolder(folderId: string): Promise<void> {
@@ -822,7 +1139,11 @@ async function removeSelectedFolder(folderId: string): Promise<void> {
 
 async function updateSelectedFolders(
   folderIds: string[],
-  { preserveCandidateScroll = false } = {}
+  {
+    preserveCandidateScroll = false,
+    restoreCandidateFocus = false,
+    focusCandidateId = ''
+  } = {}
 ): Promise<void> {
   const candidateList = document.getElementById('folder-candidate-list')
   const previousScrollTop = preserveCandidateScroll && candidateList instanceof HTMLElement
@@ -842,11 +1163,14 @@ async function updateSelectedFolders(
   applyFolderSettings()
   updateClockText()
 
-  if (preserveCandidateScroll) {
+  if (preserveCandidateScroll || restoreCandidateFocus) {
     window.requestAnimationFrame(() => {
       const nextList = document.getElementById('folder-candidate-list')
       if (nextList instanceof HTMLElement) {
         nextList.scrollTop = previousScrollTop
+      }
+      if (restoreCandidateFocus) {
+        focusFolderCandidateOptionById(focusCandidateId || state.folderCandidateActiveId)
       }
     })
   }
@@ -1849,7 +2173,7 @@ async function persistBookmarkOrder(
   syncBookmarkReorderBusyState()
   try {
     for (const operation of operations) {
-      await moveBookmark(operation.id, operation.parentId, operation.index)
+      await moveBookmarkLazy(operation.id, operation.parentId, operation.index)
     }
 
     if (!syncPersistedBookmarkOrderInState(folderId, operations, finalBookmarkIds)) {
@@ -2244,7 +2568,7 @@ function handleBookmarksChanged(): void {
     return
   }
 
-  void refreshNewTab()
+  scheduleBookmarkChangeRefresh()
 }
 
 function handleBookmarkMoved(bookmarkId: string): void {
@@ -2253,6 +2577,35 @@ function handleBookmarkMoved(bookmarkId: string): void {
   }
 
   handleBookmarksChanged()
+}
+
+function scheduleBookmarkChangeRefresh(): void {
+  bookmarkChangeRefreshQueued = true
+  if (bookmarkChangeRefreshTimer || bookmarkChangeRefreshInFlight) {
+    return
+  }
+
+  bookmarkChangeRefreshTimer = window.setTimeout(() => {
+    bookmarkChangeRefreshTimer = 0
+    void flushBookmarkChangeRefresh()
+  }, BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS)
+}
+
+async function flushBookmarkChangeRefresh(): Promise<void> {
+  if (bookmarkChangeRefreshInFlight || !bookmarkChangeRefreshQueued) {
+    return
+  }
+
+  bookmarkChangeRefreshQueued = false
+  bookmarkChangeRefreshInFlight = true
+  try {
+    await refreshNewTab()
+  } finally {
+    bookmarkChangeRefreshInFlight = false
+    if (bookmarkChangeRefreshQueued) {
+      scheduleBookmarkChangeRefresh()
+    }
+  }
 }
 
 function isSelfBookmarkMoveEvent(bookmarkId: string): boolean {
@@ -2326,7 +2679,7 @@ async function saveBookmarkMenuChanges(): Promise<void> {
     state.menuStatus = ''
     renderBookmarkMenu()
 
-    await updateBookmark(bookmark.id, { title, url })
+    await updateBookmarkLazy(bookmark.id, { title, url })
     await persistCustomIconChoice(bookmark.id)
     if (previousUrl !== url) {
       await deleteFaviconAccentCacheEntry(bookmark.id)
@@ -2412,7 +2765,7 @@ async function deleteActiveMenuBookmark(): Promise<void> {
     renderBookmarkMenu({ focusFirst: false, focusAction: 'delete-bookmark' })
 
     const recycleId = `recycle-${bookmark.id}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-    await deleteBookmarkToRecycle(bookmark.id, {
+    await deleteBookmarkToRecycleLazy(bookmark.id, {
       recycleId,
       bookmarkId: String(bookmark.id),
       title: bookmark.title || '未命名书签',
@@ -2476,13 +2829,13 @@ async function undoLastDeletedBookmark(): Promise<void> {
   try {
     const bookmark = deleted.bookmark
     const parentId = await getRestorableParentId(bookmark.parentId)
-    const createdBookmark = await createBookmark({
+    const createdBookmark = await createBookmarkLazy({
       parentId,
       index: Number.isFinite(Number(bookmark.index)) ? Number(bookmark.index) : undefined,
       title: bookmark.title || '未命名书签',
       url: bookmark.url
     })
-    await removeRecycleEntry(deleted.recycleId).catch((error) => {
+    await removeRecycleEntryLazy(deleted.recycleId).catch((error) => {
       console.warn('新标签页撤销删除时清理回收站记录失败。', error)
     })
     if (deleted.customIcon) {
@@ -2528,6 +2881,11 @@ function getBookmarkDisplayTitle(bookmark: chrome.bookmarks.BookmarkTreeNode): s
   return String(bookmark.title || '').trim() || String(bookmark.url || '').trim() || '未命名书签'
 }
 
+function getBookmarkActionLabelContext(bookmark: chrome.bookmarks.BookmarkTreeNode): string {
+  const title = getBookmarkDisplayTitle(bookmark)
+  return title.length > 48 ? `${title.slice(0, 47).trim()}…` : title
+}
+
 function refreshActiveMenuIcon(): void {
   const bookmark = getActiveMenuBookmark()
   if (!bookmark) {
@@ -2560,7 +2918,7 @@ async function saveAddedBookmark(): Promise<void> {
     renderAddBookmarkMenu({ focusFirst: false })
 
     const folderId = state.addFolderId || await ensureNewTabFolder()
-    await createBookmark({
+    await createBookmarkLazy({
       parentId: folderId,
       title,
       url
@@ -2582,7 +2940,7 @@ async function refreshNewTab(): Promise<void> {
   render()
 
   try {
-    const [tree, stored, tagIndex, snapshotState] = await Promise.all([
+    const [tree, stored] = await Promise.all([
       getBookmarkTree(),
       getLocalStorage([
         STORAGE_KEYS.newTabCustomIcons,
@@ -2593,10 +2951,10 @@ async function refreshNewTab(): Promise<void> {
         STORAGE_KEYS.newTabGeneralSettings,
         STORAGE_KEYS.newTabFolderSettings,
         STORAGE_KEYS.newTabTimeSettings,
-        STORAGE_KEYS.newTabActivity
-      ]),
-      loadBookmarkTagIndex().catch(() => null),
-      loadPopupSearchIndexSnapshotState().catch(() => null)
+        STORAGE_KEYS.newTabActivity,
+        STORAGE_KEYS.bookmarkTagIndex,
+        STORAGE_KEYS.contentSnapshotIndex
+      ])
     ])
     const rootNode = tree[0] || null
     const folderData = extractBookmarkData(rootNode)
@@ -2609,8 +2967,8 @@ async function refreshNewTab(): Promise<void> {
 
     state.rootNode = rootNode
     state.folderData = folderData
-    state.bookmarkTagIndex = tagIndex
-    state.searchSnapshotState = snapshotState
+    state.bookmarkTagIndex = normalizeNewTabBookmarkTagIndex(stored[STORAGE_KEYS.bookmarkTagIndex])
+    state.searchSnapshotIndex = normalizeNewTabContentSnapshotIndex(stored[STORAGE_KEYS.contentSnapshotIndex])
     state.folderNodeMap = folderNodeMap
     state.folderSettings = folderSettings
     state.folderSections = folderSections
@@ -2669,7 +3027,7 @@ async function createNewTabFolder(): Promise<void> {
   try {
     const rootNode = state.rootNode || (await getBookmarkTree())[0] || null
     const bookmarksBar = findBookmarksBar(rootNode)
-    const createdFolder = await createBookmark({
+    const createdFolder = await createBookmarkLazy({
       parentId: bookmarksBar?.id || BOOKMARKS_BAR_ID,
       title: DEFAULT_NEW_TAB_FOLDER_TITLE
     })
@@ -2708,7 +3066,7 @@ async function ensureNewTabFolder(): Promise<string> {
   }
 
   const bookmarksBar = findBookmarksBar(rootNode)
-  const createdFolder = await createBookmark({
+  const createdFolder = await createBookmarkLazy({
     parentId: bookmarksBar?.id || BOOKMARKS_BAR_ID,
     title: DEFAULT_NEW_TAB_FOLDER_TITLE
   })
@@ -2791,6 +3149,9 @@ function openDashboardRoute(): void {
       : null
 
   if (window.location.hash === '#dashboard') {
+    if (state.dashboardFrameError) {
+      retryDashboardFrame()
+    }
     syncDashboardRoute()
     return
   }
@@ -2799,6 +3160,8 @@ function openDashboardRoute(): void {
 }
 
 function closeDashboardRoute(): void {
+  window.clearTimeout(dashboardFrameReadyTimeout)
+  dashboardFrameReadyTimeout = 0
   if (window.location.hash !== '#dashboard') {
     state.dashboardOpen = false
     renderDashboard()
@@ -2812,13 +3175,61 @@ function closeDashboardRoute(): void {
 }
 
 function ensureDashboardFrameLoaded(): void {
-  if (state.dashboardFrameLoaded || !dashboardFrame) {
+  if (!dashboardFrame) {
+    return
+  }
+
+  if (state.dashboardFrameLoaded) {
+    if (
+      state.dashboardOpen &&
+      !state.dashboardFrameReady &&
+      !state.dashboardFrameError &&
+      !dashboardFrameReadyTimeout
+    ) {
+      scheduleDashboardFrameReadyTimeout()
+    }
     return
   }
 
   state.dashboardFrameReady = false
+  state.dashboardFrameError = ''
   dashboardFrame.src = chrome.runtime.getURL('src/options/options.html?embed=newtab-dashboard#dashboard')
   state.dashboardFrameLoaded = true
+  scheduleDashboardFrameReadyTimeout()
+}
+
+function retryDashboardFrame(): void {
+  if (!dashboardFrame) {
+    setDashboardFrameError('书签仪表盘加载失败。请返回新标签页后再试。')
+    return
+  }
+
+  window.clearTimeout(dashboardFrameReadyTimeout)
+  dashboardFrameReadyTimeout = 0
+  state.dashboardFrameLoaded = false
+  state.dashboardFrameReady = false
+  state.dashboardFrameError = ''
+  dashboardFrame.removeAttribute('src')
+  renderDashboard()
+}
+
+function scheduleDashboardFrameReadyTimeout(): void {
+  window.clearTimeout(dashboardFrameReadyTimeout)
+  dashboardFrameReadyTimeout = window.setTimeout(() => {
+    if (!state.dashboardOpen || state.dashboardFrameReady) {
+      return
+    }
+
+    setDashboardFrameError('书签仪表盘加载耗时过长。你可以返回新标签页，或重试打开仪表盘。')
+  }, DASHBOARD_FRAME_READY_TIMEOUT_MS)
+}
+
+function setDashboardFrameError(message: string): void {
+  window.clearTimeout(dashboardFrameReadyTimeout)
+  dashboardFrameReadyTimeout = 0
+  state.dashboardFrameReady = false
+  state.dashboardFrameError = message
+  renderDashboard()
 }
 
 function renderDashboard(): void {
@@ -2826,10 +3237,18 @@ function renderDashboard(): void {
     return
   }
 
+  const hasDashboardError = Boolean(state.dashboardFrameError)
   dashboardOverlay.hidden = !state.dashboardOpen
   dashboardOverlay.setAttribute('aria-hidden', state.dashboardOpen ? 'false' : 'true')
-  dashboardOverlay.dataset.dashboardReady = state.dashboardFrameReady ? 'true' : 'false'
+  dashboardOverlay.dataset.dashboardReady = state.dashboardFrameReady && !hasDashboardError ? 'true' : 'false'
+  dashboardOverlay.dataset.dashboardError = hasDashboardError ? 'true' : 'false'
   dashboardTrigger?.setAttribute('aria-expanded', state.dashboardOpen ? 'true' : 'false')
+  if (dashboardFallback) {
+    dashboardFallback.hidden = !hasDashboardError
+  }
+  if (dashboardFallbackCopy) {
+    dashboardFallbackCopy.textContent = state.dashboardFrameError || ''
+  }
 
   if (state.dashboardOpen) {
     ensureDashboardFrameLoaded()
@@ -2877,6 +3296,9 @@ function handleDashboardMessage(event: MessageEvent): void {
   }
 
   if (event.data?.type === 'curator:newtab-dashboard-ready') {
+    window.clearTimeout(dashboardFrameReadyTimeout)
+    dashboardFrameReadyTimeout = 0
+    state.dashboardFrameError = ''
     state.dashboardFrameReady = true
     renderDashboard()
   }
@@ -2888,6 +3310,7 @@ function renderDeleteToast(): void {
   if (!deleted) {
     return
   }
+  const bookmarkLabel = getBookmarkActionLabelContext(deleted.bookmark)
 
   const toast = document.createElement('section')
   toast.className = 'newtab-delete-toast'
@@ -2913,11 +3336,13 @@ function renderDeleteToast(): void {
   undo.dataset.undoDelete = 'true'
   undo.disabled = state.deleteToastBusy
   undo.textContent = state.deleteToastBusy ? '恢复中' : '撤销'
+  undo.setAttribute('aria-label', `撤销删除：${bookmarkLabel}`)
 
   const recycle = document.createElement('button')
   recycle.type = 'button'
   recycle.dataset.openRecycle = 'true'
   recycle.textContent = '回收站'
+  recycle.setAttribute('aria-label', `打开回收站查看：${bookmarkLabel}`)
 
   actions.append(undo, recycle)
   toast.append(copy, actions)
@@ -3106,6 +3531,7 @@ function createSearchWidget(): HTMLElement | null {
   input.enterKeyHint = 'search'
   input.placeholder = searchPlaceholder
   input.spellcheck = false
+  input.setAttribute('role', 'combobox')
   input.setAttribute('aria-label', '输入关键词搜索书签，或按 Enter 搜索网页')
   input.setAttribute('aria-autocomplete', 'list')
   input.setAttribute('aria-controls', 'newtab-search-suggestions')
@@ -3131,13 +3557,38 @@ function createSearchWidget(): HTMLElement | null {
     engineButton.setAttribute('aria-label', `选择搜索引擎，当前为 ${engine?.name || label}`)
   }
 
-  const closeEngineMenu = () => {
+  const closeEngineMenu = ({ restoreFocus = false } = {}) => {
     const existingMenu = slot.querySelector<HTMLElement>('.newtab-search-engine-menu')
     existingMenu?.remove()
     engineButton.setAttribute('aria-expanded', 'false')
+    if (restoreFocus) {
+      engineButton.focus()
+    }
   }
 
-  const renderEngineMenu = () => {
+  const focusEngineMenuItem = (menu: HTMLElement, direction: 1 | -1 | 'first' | 'last') => {
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('.newtab-search-engine-item')]
+    if (!items.length) {
+      return
+    }
+
+    const activeElement = document.activeElement
+    const currentIndex = items.findIndex((item) => item === activeElement)
+    let nextIndex = items.findIndex((item) => item.classList.contains('active'))
+    if (direction === 'first') {
+      nextIndex = 0
+    } else if (direction === 'last') {
+      nextIndex = items.length - 1
+    } else if (currentIndex >= 0) {
+      nextIndex = (currentIndex + direction + items.length) % items.length
+    } else if (nextIndex < 0) {
+      nextIndex = direction > 0 ? 0 : items.length - 1
+    }
+
+    items[Math.max(0, nextIndex)]?.focus()
+  }
+
+  const renderEngineMenu = (initialFocus: 'active' | 'first' | 'last' | 'none' = 'none') => {
     closeEngineMenu()
     const menu = document.createElement('div')
     menu.className = 'newtab-search-engine-menu'
@@ -3155,6 +3606,7 @@ function createSearchWidget(): HTMLElement | null {
       item.type = 'button'
       item.setAttribute('role', 'menuitemradio')
       item.setAttribute('aria-checked', String(engineId === state.searchSettings.engine))
+      item.tabIndex = -1
       item.textContent = engine.name
       item.addEventListener('click', () => {
         state.searchSettings = normalizeSearchSettings({
@@ -3165,10 +3617,36 @@ function createSearchWidget(): HTMLElement | null {
         updateEngineButton()
         closeEngineMenu()
         input.focus()
-        renderSuggestions({ preserveActive: true })
+        scheduleSuggestionsRender({ preserveActive: true, immediate: true })
       })
       menu.appendChild(item)
     }
+
+    menu.addEventListener('keydown', (event) => {
+      if (
+        event.key !== 'ArrowDown' &&
+        event.key !== 'ArrowUp' &&
+        event.key !== 'Home' &&
+        event.key !== 'End' &&
+        event.key !== 'Escape'
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      if (event.key === 'Escape') {
+        closeEngineMenu({ restoreFocus: true })
+        return
+      }
+
+      if (event.key === 'Home') {
+        focusEngineMenuItem(menu, 'first')
+      } else if (event.key === 'End') {
+        focusEngineMenuItem(menu, 'last')
+      } else {
+        focusEngineMenuItem(menu, event.key === 'ArrowDown' ? 1 : -1)
+      }
+    })
 
     const hint = document.createElement('div')
     hint.className = 'newtab-search-engine-menu-hint'
@@ -3176,6 +3654,10 @@ function createSearchWidget(): HTMLElement | null {
     menu.appendChild(hint)
     slot.appendChild(menu)
     engineButton.setAttribute('aria-expanded', 'true')
+
+    if (initialFocus !== 'none') {
+      focusEngineMenuItem(menu, initialFocus === 'last' ? 'last' : initialFocus === 'first' ? 'first' : 1)
+    }
   }
 
   const separator = document.createElement('span')
@@ -3208,7 +3690,11 @@ function createSearchWidget(): HTMLElement | null {
   suggestionsHeading.className = 'newtab-search-section-label'
   suggestionsHeading.textContent = '书签匹配'
 
-  suggestionsPanel.append(suggestionsHeading, suggestions)
+  const suggestionsHint = document.createElement('div')
+  suggestionsHint.className = 'newtab-search-hint'
+  suggestionsHint.hidden = true
+
+  suggestionsPanel.append(suggestionsHeading, suggestions, suggestionsHint)
 
   let searchSuggestions: SearchBookmarkSuggestion[] = []
   let activeSuggestionIndex = -1
@@ -3221,29 +3707,47 @@ function createSearchWidget(): HTMLElement | null {
     searchSuggestions = []
     activeSuggestionIndex = -1
     suggestions.replaceChildren()
+    suggestions.hidden = false
+    suggestionsHeading.textContent = '书签匹配'
+    suggestionsHeading.hidden = false
+    suggestionsHint.replaceChildren()
+    suggestionsHint.hidden = true
     suggestionsPanel.classList.add('hidden')
     input.setAttribute('aria-expanded', 'false')
     input.removeAttribute('aria-activedescendant')
   }
 
-  const renderSuggestions = ({ preserveActive = false, queryOverride = input.value } = {}) => {
-    const query = input.value.trim()
+  const renderSuggestions = (suggestionList: SearchBookmarkSuggestion[], {
+    preserveActive = false,
+    query = input.value
+  }: {
+    preserveActive?: boolean
+    query?: string
+  } = {}) => {
+    const trimmedQuery = String(query || '').trim()
     const previousActiveIndex = activeSuggestionIndex
-    searchSuggestions = getSearchBookmarkSuggestions(queryOverride)
+    searchSuggestions = suggestionList
     if (!searchSuggestions.length) {
       activeSuggestionIndex = -1
       suggestions.replaceChildren()
+      suggestions.hidden = true
       input.removeAttribute('aria-activedescendant')
-      input.setAttribute('aria-expanded', 'false')
-      if (!query) {
+      if (!trimmedQuery) {
         hideSuggestions()
         return
       }
 
-      hideSuggestions()
+      suggestionsHeading.textContent = '网页搜索'
+      suggestionsHeading.hidden = false
+      suggestionsHint.replaceChildren(createSearchWebFallbackButton(trimmedQuery))
+      suggestionsHint.hidden = false
+      suggestionsPanel.classList.remove('hidden')
+      input.setAttribute('aria-expanded', 'true')
       return
     }
 
+    suggestions.hidden = false
+    suggestionsHeading.textContent = '书签匹配'
     activeSuggestionIndex = preserveActive
       ? Math.max(0, Math.min(previousActiveIndex, searchSuggestions.length - 1))
       : 0
@@ -3263,6 +3767,8 @@ function createSearchWidget(): HTMLElement | null {
     ))
     suggestionsPanel.classList.remove('hidden')
     suggestionsHeading.hidden = false
+    suggestionsHint.textContent = `按 Enter 打开选中的书签；Cmd/Ctrl+Enter 用 ${getSearchEngineDisplayName()} 搜索网页`
+    suggestionsHint.hidden = false
     input.setAttribute('aria-expanded', 'true')
 
     if (activeSuggestionIndex >= 0) {
@@ -3278,9 +3784,31 @@ function createSearchWidget(): HTMLElement | null {
     suggestionRequestId = requestId
     window.clearTimeout(suggestionDebounceTimer)
 
+    const renderCurrentSuggestions = () => {
+      const directSuggestions = getSearchBookmarkSuggestions(query)
+      if (requestId !== suggestionRequestId) {
+        return
+      }
+
+      renderSuggestions(directSuggestions, { preserveActive, query })
+      if (!shouldLoadNaturalSearchSuggestions(query, directSuggestions)) {
+        return
+      }
+
+      void getNaturalSearchBookmarkSuggestions(query).then((naturalSuggestions) => {
+        if (requestId !== suggestionRequestId) {
+          return
+        }
+
+        renderSuggestions(naturalSuggestions, { preserveActive: true, query })
+      }).catch(() => {
+        // Keep the direct suggestions visible if the optional natural-search chunk fails to load.
+      })
+    }
+
     if (!query.trim() || immediate) {
       suggestionDebounceTimer = 0
-      renderSuggestions({ preserveActive, queryOverride: query })
+      renderCurrentSuggestions()
       return
     }
 
@@ -3289,7 +3817,7 @@ function createSearchWidget(): HTMLElement | null {
       if (requestId !== suggestionRequestId) {
         return
       }
-      renderSuggestions({ preserveActive, queryOverride: query })
+      renderCurrentSuggestions()
     }, SEARCH_SUGGESTION_DEBOUNCE_MS)
   }
 
@@ -3304,7 +3832,7 @@ function createSearchWidget(): HTMLElement | null {
     activeSuggestionIndex = activeSuggestionIndex < 0
       ? (direction > 0 ? 0 : searchSuggestions.length - 1)
       : (activeSuggestionIndex + direction + searchSuggestions.length) % searchSuggestions.length
-    renderSuggestions({ preserveActive: true })
+    renderSuggestions(searchSuggestions, { preserveActive: true, query: input.value })
   }
 
   input.addEventListener('input', () => {
@@ -3338,7 +3866,7 @@ function createSearchWidget(): HTMLElement | null {
     }
 
     event.preventDefault()
-    if (searchSuggestions.length) {
+    if (searchSuggestions.length || !suggestionsPanel.classList.contains('hidden')) {
       hideSuggestions()
       return
     }
@@ -3362,7 +3890,15 @@ function createSearchWidget(): HTMLElement | null {
       closeEngineMenu()
       return
     }
-    renderEngineMenu()
+    renderEngineMenu('active')
+  })
+  engineButton.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return
+    }
+
+    event.preventDefault()
+    renderEngineMenu(event.key === 'ArrowDown' ? 'first' : 'last')
   })
   form.addEventListener('submit', (event) => {
     event.preventDefault()
@@ -3392,6 +3928,28 @@ function createSearchWidget(): HTMLElement | null {
   syncSearchInputActions(input, clearButton, separator, submitButton)
   slot.append(form, suggestionsPanel)
   return slot
+
+  function createSearchWebFallbackButton(query: string): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.className = 'newtab-search-web-hint'
+    button.type = 'button'
+    button.textContent = `未找到书签，按 Enter 用 ${getSearchEngineDisplayName()} 搜索`
+    button.title = `用 ${getSearchEngineDisplayName()} 搜索「${query}」`
+    button.setAttribute('aria-label', button.textContent)
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault()
+    })
+    button.addEventListener('click', () => {
+      closeEngineMenu()
+      hideSuggestions()
+      submitSearch(query)
+    })
+    return button
+  }
+
+  function getSearchEngineDisplayName(): string {
+    return SEARCH_ENGINE_CONFIG_BY_ID.get(state.searchSettings.engine)?.name || 'Google'
+  }
 }
 
 function syncSearchInputActions(
@@ -3408,6 +3966,7 @@ function syncSearchInputActions(
 }
 
 const searchSuggestionCache = new Map<string, SearchBookmarkSuggestion[]>()
+const naturalSearchSuggestionCache = new Map<string, Promise<SearchBookmarkSuggestion[]>>()
 
 function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[] {
   const cacheKey = getSearchSuggestionCacheKey(query)
@@ -3434,11 +3993,259 @@ function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[]
   return suggestions
 }
 
+function getNaturalSearchBookmarkSuggestions(query: string): Promise<SearchBookmarkSuggestion[]> {
+  const cacheKey = getSearchSuggestionCacheKey(query)
+  const cached = naturalSearchSuggestionCache.get(cacheKey)
+  if (cached) {
+    naturalSearchSuggestionCache.delete(cacheKey)
+    naturalSearchSuggestionCache.set(cacheKey, cached)
+    return cached
+  }
+
+  const suggestionsPromise = getNaturalSearchBookmarkSuggestionsFromIndex(
+    query,
+    state.preparedSearchIndex,
+    SEARCH_SUGGESTION_LIMIT
+  )
+  naturalSearchSuggestionCache.set(cacheKey, suggestionsPromise)
+  while (naturalSearchSuggestionCache.size > SEARCH_SUGGESTION_CACHE_LIMIT) {
+    const oldestKey = naturalSearchSuggestionCache.keys().next().value
+    if (!oldestKey) {
+      break
+    }
+    naturalSearchSuggestionCache.delete(oldestKey)
+  }
+  return suggestionsPromise
+}
+
+function shouldLoadNaturalSearchSuggestions(
+  query: string,
+  directSuggestions: SearchBookmarkSuggestion[]
+): boolean {
+  const normalizedQuery = normalizeNewTabSearchText(query)
+  if (!normalizedQuery) {
+    return false
+  }
+  if (!directSuggestions.length) {
+    return true
+  }
+  return /帮我|帮忙|麻烦|请|找|搜索|查找|收藏|书签|不要|不看|排除|过滤|剔除|去掉|最近|近期|过去|上周|本周|今天|昨天/
+    .test(normalizedQuery) ||
+    /\b(?:last|this|recent|recently|saved|bookmark|bookmarks|without|exclude|excluding|not|no|find|show)\b/i
+      .test(normalizedQuery)
+}
+
+function normalizeNewTabBookmarkTagIndex(raw: unknown): BookmarkTagIndex {
+  const source = raw && typeof raw === 'object'
+    ? raw as { updatedAt?: unknown; records?: unknown }
+    : {}
+  const rawRecords = source.records && typeof source.records === 'object'
+    ? source.records as Record<string, unknown>
+    : {}
+  const records: BookmarkTagIndex['records'] = {}
+
+  for (const [fallbackBookmarkId, rawRecord] of Object.entries(rawRecords)) {
+    const record = normalizeNewTabBookmarkTagRecord(rawRecord, fallbackBookmarkId)
+    if (record) {
+      records[record.bookmarkId] = record
+    }
+  }
+
+  return {
+    version: 1,
+    updatedAt: normalizeNewTabTimestamp(source.updatedAt) || getLatestNewTabBookmarkTagUpdatedAt(records),
+    records
+  }
+}
+
+function normalizeNewTabBookmarkTagRecord(raw: unknown, fallbackBookmarkId: string): BookmarkTagRecord | null {
+  const source = raw && typeof raw === 'object'
+    ? raw as Record<string, unknown>
+    : {}
+  const bookmarkId = normalizeNewTabTagText(source.bookmarkId || fallbackBookmarkId)
+  const url = normalizeNewTabTagText(source.url)
+  if (!bookmarkId || !url) {
+    return null
+  }
+
+  const generatedAt = normalizeNewTabTimestamp(source.generatedAt) || Date.now()
+  const updatedAt = normalizeNewTabTimestamp(source.updatedAt) || generatedAt
+  const manualTags = normalizeNewTabBookmarkTagList(source.manualTags, 12)
+  const record: BookmarkTagRecord = {
+    schemaVersion: 1,
+    bookmarkId,
+    url,
+    normalizedUrl: normalizeNewTabTagText(source.normalizedUrl || url),
+    duplicateKey: normalizeNewTabTagText(source.duplicateKey || source.normalizedUrl || url),
+    title: normalizeNewTabTagText(source.title, 180),
+    path: normalizeNewTabTagText(source.path, 240),
+    summary: normalizeNewTabTagText(source.summary, 500),
+    contentType: normalizeNewTabTagText(source.contentType || source.content_type, 40),
+    topics: normalizeNewTabTagTextList(source.topics, 8, 40),
+    tags: normalizeNewTabBookmarkTagList(source.tags, 12),
+    aliases: normalizeNewTabTagTextList(source.aliases, 20, 40),
+    confidence: normalizeNewTabTagConfidence(source.confidence),
+    source: normalizeNewTabBookmarkTagSource(source.source),
+    model: normalizeNewTabTagText(source.model, 120),
+    extraction: normalizeNewTabBookmarkTagExtraction(source.extraction),
+    generatedAt,
+    updatedAt
+  }
+
+  if (manualTags.length) {
+    record.manualTags = manualTags
+    record.manualUpdatedAt = normalizeNewTabTimestamp(source.manualUpdatedAt) || updatedAt
+  }
+
+  return record
+}
+
+function normalizeNewTabBookmarkTagExtraction(raw: unknown): BookmarkTagExtraction {
+  const source = raw && typeof raw === 'object'
+    ? raw as { status?: unknown; source?: unknown; warnings?: unknown }
+    : {}
+
+  return {
+    status: normalizeNewTabTagText(source.status, 40),
+    source: normalizeNewTabTagText(source.source, 80),
+    warnings: normalizeNewTabTagTextList(source.warnings, 4, 40)
+  }
+}
+
+function normalizeNewTabBookmarkTagSource(value: unknown): BookmarkTagSource {
+  const source = String(value || '').trim()
+  return source === 'ai_naming' ||
+    source === 'auto_analyze' ||
+    source === 'popup_smart' ||
+    source === 'imported' ||
+    source === 'manual'
+    ? source
+    : 'imported'
+}
+
+function normalizeNewTabBookmarkTagList(value: unknown, limit: number): string[] {
+  return normalizeNewTabTagTextList(value, limit, 24)
+}
+
+function normalizeNewTabTagTextList(value: unknown, limit: number, itemLimit: number): string[] {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,，、\n]/)
+      : []
+  const seen = new Set<string>()
+  const output: string[] = []
+
+  for (const item of values) {
+    const text = normalizeNewTabTagText(item, itemLimit)
+    const key = text.toLowerCase()
+    if (!text || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    output.push(text)
+    if (output.length >= limit) {
+      break
+    }
+  }
+
+  return output
+}
+
+function normalizeNewTabTagText(value: unknown, limit = 1000): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function normalizeNewTabTagConfidence(value: unknown): number {
+  const rawNumber = typeof value === 'number'
+    ? value
+    : Number(String(value ?? '').replace(/%$/, ''))
+  if (!Number.isFinite(rawNumber)) {
+    return 0
+  }
+  const normalized = rawNumber > 1 && rawNumber <= 100 ? rawNumber / 100 : rawNumber
+  return Math.max(0, Math.min(normalized, 1))
+}
+
+function normalizeNewTabTimestamp(value: unknown): number {
+  const timestamp = Number(value)
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0
+}
+
+function getLatestNewTabBookmarkTagUpdatedAt(records: BookmarkTagIndex['records']): number {
+  return Object.values(records).reduce((latest, record) => Math.max(latest, Number(record.updatedAt) || 0), 0)
+}
+
+function normalizeNewTabContentSnapshotIndex(raw: unknown): ContentSnapshotIndex {
+  const source = raw && typeof raw === 'object'
+    ? raw as { updatedAt?: unknown; records?: unknown }
+    : {}
+  const rawRecords = source.records && typeof source.records === 'object'
+    ? source.records as Record<string, unknown>
+    : {}
+  const records: ContentSnapshotIndex['records'] = {}
+
+  for (const [fallbackBookmarkId, rawRecord] of Object.entries(rawRecords)) {
+    const record = normalizeNewTabContentSnapshotRecord(rawRecord, fallbackBookmarkId)
+    if (record.bookmarkId && record.snapshotId) {
+      records[record.bookmarkId] = record
+    }
+  }
+
+  return {
+    version: 1,
+    updatedAt: Number(source.updatedAt) || 0,
+    records
+  }
+}
+
+function normalizeNewTabContentSnapshotRecord(raw: unknown, fallbackBookmarkId: string): ContentSnapshotIndex['records'][string] {
+  const source = raw && typeof raw === 'object'
+    ? raw as Record<string, unknown>
+    : {}
+  const bookmarkId = String(source.bookmarkId || fallbackBookmarkId || '').trim()
+  const snapshotId = String(source.snapshotId || bookmarkId || '').trim()
+  const fullTextStorage = ['local', 'idb'].includes(String(source.fullTextStorage))
+    ? String(source.fullTextStorage) as ContentSnapshotIndex['records'][string]['fullTextStorage']
+    : 'none'
+
+  return {
+    snapshotId,
+    bookmarkId,
+    url: String(source.url || '').trim(),
+    title: normalizeNewTabSnapshotText(source.title),
+    summary: normalizeNewTabSnapshotText(source.summary),
+    headings: normalizeNewTabSnapshotTextList(source.headings, 28),
+    canonicalUrl: String(source.canonicalUrl || '').trim(),
+    finalUrl: String(source.finalUrl || '').trim(),
+    contentType: normalizeNewTabSnapshotText(source.contentType),
+    source: normalizeNewTabSnapshotText(source.source),
+    extractionStatus: normalizeNewTabSnapshotText(source.extractionStatus),
+    extractedAt: Number(source.extractedAt) || 0,
+    hasFullText: source.hasFullText === true,
+    fullTextBytes: Number(source.fullTextBytes) || 0,
+    fullTextStorage,
+    fullText: fullTextStorage === 'local' ? normalizeNewTabSnapshotText(source.fullText) : undefined,
+    fullTextRef: fullTextStorage === 'idb' ? String(source.fullTextRef || snapshotId || '').trim() : undefined,
+    warnings: normalizeNewTabSnapshotTextList(source.warnings, 8)
+  }
+}
+
+function normalizeNewTabSnapshotText(value: unknown, limit = 500): string {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function normalizeNewTabSnapshotTextList(value: unknown, limit: number): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => normalizeNewTabSnapshotText(item, 120)).filter(Boolean).slice(0, limit)
+    : []
+}
+
 function getSearchSuggestionCacheKey(query: string): string {
   return [
     state.preparedSearchIndex.entries.length,
     state.bookmarkTagIndex?.updatedAt || 0,
-    state.searchSnapshotState?.index?.updatedAt || 0,
+    state.searchSnapshotIndex?.updatedAt || 0,
     normalizeNewTabSearchText(query)
   ].join(':')
 }
@@ -4303,6 +5110,7 @@ function buildNewTabFolderSections(
   const resolvedFolderNodeMap = folderNodeMap.size ? folderNodeMap : buildFolderNodeMap(rootNode)
   const selectedIds = normalizeFolderIds(settings.selectedFolderIds)
   const sections: NewTabFolderSection[] = []
+  const seenSectionIds = new Set<string>()
 
   for (const folderId of selectedIds) {
     const node = resolvedFolderNodeMap.get(folderId) || null
@@ -4310,8 +5118,16 @@ function buildNewTabFolderSections(
       continue
     }
 
-    const folder = resolvedFolderData.folderMap.get(folderId)
-    sections.push(createFolderSection(node, folder))
+    for (const displayNode of getDisplayableNewTabSourceFolders(node)) {
+      const sectionId = String(displayNode.id || '').trim()
+      if (!sectionId || seenSectionIds.has(sectionId)) {
+        continue
+      }
+
+      const folder = resolvedFolderData.folderMap.get(sectionId)
+      sections.push(createFolderSection(displayNode, folder, folderId))
+      seenSectionIds.add(sectionId)
+    }
   }
 
   return sections
@@ -4319,15 +5135,20 @@ function buildNewTabFolderSections(
 
 function createFolderSection(
   node: chrome.bookmarks.BookmarkTreeNode,
-  folder?: FolderRecord
+  folder?: FolderRecord,
+  sourceId = String(node.id)
 ): NewTabFolderSection {
   const title = String(folder?.title || node.title || '未命名文件夹').trim() || '未命名文件夹'
+  const counts = getFolderBookmarkCounts(node)
   return {
     id: String(node.id),
+    sourceId,
     title,
     path: String(folder?.path || title),
     node,
-    bookmarks: getDirectBookmarks(node)
+    bookmarks: getDirectBookmarks(node),
+    directBookmarkCount: counts.directBookmarkCount,
+    totalBookmarkCount: counts.totalBookmarkCount
   }
 }
 
@@ -4350,10 +5171,11 @@ function refreshDerivedBookmarkState(): void {
   state.searchIndex = buildNewTabSearchIndex({
     bookmarks: state.folderData?.bookmarks || extractBookmarkData(state.rootNode).bookmarks,
     tagIndex: state.bookmarkTagIndex,
-    snapshotIndex: state.searchSnapshotState?.index || null
+    snapshotIndex: state.searchSnapshotIndex
   })
   state.preparedSearchIndex = prepareNewTabSearchIndex(state.searchIndex)
   searchSuggestionCache.clear()
+  naturalSearchSuggestionCache.clear()
 }
 
 function getBookmarkById(bookmarkId: string): chrome.bookmarks.BookmarkTreeNode | null {
@@ -4545,22 +5367,34 @@ function renderBookmarkMenu({ focusFirst = true, focusAction = '' } = {}): void 
   actionList.setAttribute('role', 'menu')
   actionList.setAttribute('aria-label', '书签操作')
   actionList.addEventListener('keydown', handleMenuActionsKeydown)
+  const bookmarkLabel = getBookmarkActionLabelContext(bookmark)
+  const pinLabel = isActiveMenuBookmarkPinned() ? '取消固定书签' : '固定书签到常用'
+  const deleteLabel = state.pendingDeleteBookmarkId === String(bookmark.id) ? '确认删除书签' : '删除书签'
   actionList.append(
     createMenuAction(
       isActiveMenuBookmarkPinned() ? '取消固定' : '固定到常用',
       'pin',
       toggleActiveMenuBookmarkPin,
-      { actionId: 'toggle-pin' }
+      { actionId: 'toggle-pin', ariaLabel: `${pinLabel}：${bookmarkLabel}` }
     ),
-    createMenuAction('复制链接', 'copy', copyActiveMenuBookmarkUrl, { actionId: 'copy-url' }),
+    createMenuAction('复制链接', 'copy', copyActiveMenuBookmarkUrl, {
+      actionId: 'copy-url',
+      ariaLabel: `复制书签链接：${bookmarkLabel}`
+    }),
     createMenuAction(
       state.pendingDeleteBookmarkId === String(bookmark.id) ? '确认删除 1 个' : '删除链接',
       'trash',
       deleteActiveMenuBookmark,
-      { actionId: 'delete-bookmark', variant: 'danger' }
+      { actionId: 'delete-bookmark', variant: 'danger', ariaLabel: `${deleteLabel}：${bookmarkLabel}` }
     ),
-    createMenuAction('刷新图标', 'refresh', refreshActiveMenuIcon, { actionId: 'refresh-icon' }),
-    createMenuAction('保存更改', 'save', saveBookmarkMenuChanges, { actionId: 'save-bookmark' })
+    createMenuAction('刷新图标', 'refresh', refreshActiveMenuIcon, {
+      actionId: 'refresh-icon',
+      ariaLabel: `刷新书签图标：${bookmarkLabel}`
+    }),
+    createMenuAction('保存更改', 'save', saveBookmarkMenuChanges, {
+      actionId: 'save-bookmark',
+      ariaLabel: `保存书签更改：${bookmarkLabel}`
+    })
   )
 
   menu.append(titleField, urlField, iconRow, separator, actionList)
@@ -4761,11 +5595,13 @@ function createMenuAction(
   {
     disabled = state.menuBusy,
     actionId = '',
-    variant = ''
+    variant = '',
+    ariaLabel = label
   }: {
     disabled?: boolean
     actionId?: string
     variant?: 'danger' | ''
+    ariaLabel?: string
   } = {}
 ): HTMLButtonElement {
   const button = document.createElement('button')
@@ -4773,7 +5609,7 @@ function createMenuAction(
   button.type = 'button'
   button.disabled = disabled
   button.setAttribute('role', 'menuitem')
-  button.setAttribute('aria-label', label)
+  button.setAttribute('aria-label', ariaLabel)
   if (actionId) {
     button.dataset.menuAction = actionId
   }
@@ -6212,14 +7048,19 @@ function createSelectedFolderControls(): HTMLElement[] {
     const path = document.createElement('span')
     path.textContent = folder?.path || folderId
 
-    copy.append(title, path)
+    const stats = document.createElement('span')
+    stats.textContent = folder
+      ? formatFolderCandidateCountSummary(folder)
+      : '来源不可用'
+
+    copy.append(title, path, stats)
 
     const remove = document.createElement('button')
     remove.className = 'folder-source-remove'
     remove.type = 'button'
     remove.dataset.folderRemoveId = folderId
     const folderTitle = folder?.title || '文件夹'
-    const affectedCount = folder?.bookmarkCount || 0
+    const affectedCount = folder?.totalBookmarkCount || 0
     const removeLabel = `从新标签页移除「${folderTitle}」，将隐藏 ${affectedCount} 个书签，不会删除书签`
     remove.setAttribute('aria-label', removeLabel)
     remove.title = removeLabel
@@ -6240,12 +7081,14 @@ function createFolderCandidateControls(): HTMLElement[] {
   }
 
   const selectedIds = new Set(state.folderSettings.selectedFolderIds)
+  const activeId = resolveFolderCandidateActiveId(candidates)
   return candidates.map((folder) => {
     const selected = selectedIds.has(folder.id)
     const button = document.createElement('button')
     button.className = `folder-candidate-card ${selected ? 'selected' : ''}`
     button.type = 'button'
     button.dataset.folderCandidateId = folder.id
+    button.tabIndex = folder.id === activeId ? 0 : -1
     button.title = folder.path || folder.title
     button.setAttribute('role', 'option')
     button.setAttribute('aria-selected', String(selected))
@@ -6259,18 +7102,21 @@ function createFolderCandidateControls(): HTMLElement[] {
     const path = document.createElement('span')
     path.textContent = folder.path || folder.title || '未命名文件夹'
 
-    copy.append(title, path)
+    const stats = document.createElement('span')
+    stats.textContent = formatFolderCandidateCountSummary(folder)
+
+    copy.append(title, path, stats)
 
     const badge = document.createElement('span')
     badge.className = 'folder-candidate-badge'
-    badge.textContent = selected ? '已选' : `${folder.bookmarkCount}`
+    badge.textContent = selected ? '已选' : String(folder.totalBookmarkCount)
 
     button.append(copy, badge)
     return button
   })
 }
 
-function getFilteredFolderCandidates(): FolderRecord[] {
+function getFilteredFolderCandidates(): NewTabFolderCandidate[] {
   const query = normalizeSettingSearchText(state.folderCandidateQuery)
   return getFolderCandidates().filter((folder) => {
     if (!query) {
@@ -6281,16 +7127,33 @@ function getFilteredFolderCandidates(): FolderRecord[] {
   })
 }
 
-function getFolderCandidates(): FolderRecord[] {
+function getFolderCandidates(): NewTabFolderCandidate[] {
   if (!state.rootNode) {
     return []
   }
 
-  return state.folderData?.folders || extractBookmarkData(state.rootNode).folders
+  const folderData = state.folderData || extractBookmarkData(state.rootNode)
+  const folderNodeMap = state.folderNodeMap.size ? state.folderNodeMap : buildFolderNodeMap(state.rootNode)
+  return folderData.folders.map((folder) => {
+    const counts = getFolderBookmarkCounts(folderNodeMap.get(folder.id) || null)
+    return {
+      id: folder.id,
+      title: folder.title,
+      path: folder.path,
+      normalizedTitle: folder.normalizedTitle,
+      normalizedPath: folder.normalizedPath,
+      directBookmarkCount: counts.directBookmarkCount,
+      totalBookmarkCount: counts.totalBookmarkCount
+    }
+  })
 }
 
-function getFolderCandidateMap(): Map<string, FolderRecord> {
-  return state.folderData?.folderMap || new Map(getFolderCandidates().map((folder) => [folder.id, folder]))
+function getFolderCandidateMap(): Map<string, NewTabFolderCandidate> {
+  return new Map(getFolderCandidates().map((folder) => [folder.id, folder]))
+}
+
+function formatFolderCandidateCountSummary(folder: NewTabFolderCandidate): string {
+  return `直属 ${folder.directBookmarkCount} / 合计 ${folder.totalBookmarkCount}`
 }
 
 function normalizeSettingSearchText(value: string): string {

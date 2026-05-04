@@ -42,13 +42,81 @@ function getFunctionBody(source, functionName) {
   assert.fail(`${functionName} body should close`)
 }
 
+test('shortcut and AI provider action buttons expose settings-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['open-shortcuts-settings', '打开 Chrome 扩展快捷键设置'],
+    ['copy-shortcuts-url', '复制 Chrome 扩展快捷键设置地址'],
+    ['refresh-shortcuts', '刷新扩展快捷键绑定状态'],
+    ['ai-fetch-models', '从自定义 AI 渠道获取模型列表'],
+    ['ai-manage-models', '打开自定义模型列表设置'],
+    ['ai-test-connection', '测试自定义 AI 渠道连接'],
+    ['ai-save-settings', '保存自定义 AI 渠道设置']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('options folder listbox options expose role and aria-selected state', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const optionsSource = readProjectFile('src/options/options.ts')
+  const scopeSearchInput = optionsHtml.match(/<input[\s\S]*?id="scope-search-input"[\s\S]*?>/)?.[0] || ''
 
+  assert.match(scopeSearchInput, /aria-label="搜索筛选文件夹"/)
+  assert.match(scopeSearchInput, /aria-controls="scope-folder-results"/)
   assert.match(optionsHtml, /id="scope-folder-results"[^>]+role="listbox"[^>]+aria-label="筛选文件夹"/)
   assert.match(optionsSource, /class="scope-folder-card \$\{allSelected \? 'current' : ''\}"[\s\S]*?role="option"[\s\S]*?aria-selected="\$\{allSelected \? 'true' : 'false'\}"/)
   assert.match(optionsSource, /class="scope-folder-card \$\{isCurrent \? 'current' : ''\}"[\s\S]*?role="option"[\s\S]*?aria-selected="\$\{isCurrent \? 'true' : 'false'\}"/)
+  assert.match(optionsSource, /dom\.scopeSearchInput\?\.addEventListener\('keydown', handleScopeSearchKeydown\)/)
+  assert.match(optionsSource, /dom\.scopeFolderResults\?\.addEventListener\('keydown', handleScopeFolderResultsKeydown\)/)
+  assert.match(optionsSource, /dom\.scopeFolderResults\?\.addEventListener\('focusin', handleScopeFolderResultsFocus\)/)
+  assert.match(optionsSource, /function handleScopeFolderResultsKeydown\(event\)/)
+  assert.match(optionsSource, /event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(optionsSource, /dom\.scopeSearchInput\?\.focus\(\)/)
+  assert.match(optionsSource, /tabindex="\$\{allActive \? '0' : '-1'\}"/)
+  assert.match(optionsSource, /tabindex="\$\{isActive \? '0' : '-1'\}"/)
+})
+
+test('AI model picker listbox supports keyboard navigation', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const optionsSource = readProjectFile('src/options/options.ts')
+  const modelSearchInput = optionsHtml.match(/<input[\s\S]*?id="ai-model-picker-search-input"[\s\S]*?>/)?.[0] || ''
+
+  assert.match(modelSearchInput, /aria-label="搜索 AI 模型"/)
+  assert.match(modelSearchInput, /aria-controls="ai-model-picker-results"/)
+  assert.match(optionsHtml, /id="ai-model-picker-results"[^>]+role="listbox"[^>]+aria-label="AI 模型候选列表"/)
+  assert.match(optionsSource, /class="scope-folder-card ai-model-card \$\{isCurrent \? 'current' : ''\}"[\s\S]*?role="option"[\s\S]*?aria-selected="\$\{isCurrent \? 'true' : 'false'\}"/)
+  assert.match(optionsSource, /aiModelPickerActiveId/)
+  assert.match(optionsSource, /dom\.aiModelPickerSearchInput\?\.addEventListener\('keydown', handleAiModelPickerSearchKeydown\)/)
+  assert.match(optionsSource, /dom\.aiModelPickerResults\?\.addEventListener\('keydown', handleAiModelPickerResultsKeydown\)/)
+  assert.match(optionsSource, /dom\.aiModelPickerResults\?\.addEventListener\('focusin', handleAiModelPickerResultsFocus\)/)
+  assert.match(optionsSource, /function handleAiModelPickerResultsKeydown\(event\)/)
+  assert.match(optionsSource, /event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(optionsSource, /dom\.aiModelPickerSearchInput\?\.focus\(\)/)
+  assert.match(optionsSource, /tabindex="\$\{isActive \? '0' : '-1'\}"/)
+})
+
+test('move folder picker exposes listbox semantics and keyboard navigation', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const optionsSource = readProjectFile('src/options/options.ts')
+  const moveSearchInput = optionsHtml.match(/<input[\s\S]*?id="move-search-input"[\s\S]*?>/)?.[0] || ''
+
+  assert.match(moveSearchInput, /aria-label="搜索移动目标文件夹"/)
+  assert.match(moveSearchInput, /aria-controls="move-folder-results"/)
+  assert.match(optionsHtml, /id="move-folder-results"[^>]+role="listbox"[^>]+aria-label="移动目标文件夹"/)
+  assert.match(optionsSource, /class="move-folder-card"[\s\S]*?role="option"[\s\S]*?aria-selected="false"[\s\S]*?data-move-target-folder="\$\{escapeAttr\(folder\.id\)\}"/)
+  assert.match(optionsSource, /moveFolderActiveId/)
+  assert.match(optionsSource, /dom\.moveSearchInput\?\.addEventListener\('keydown', handleMoveSearchKeydown\)/)
+  assert.match(optionsSource, /dom\.moveFolderResults\?\.addEventListener\('keydown', handleMoveFolderResultsKeydown\)/)
+  assert.match(optionsSource, /dom\.moveFolderResults\?\.addEventListener\('focusin', handleMoveFolderResultsFocus\)/)
+  assert.match(optionsSource, /function handleMoveFolderResultsKeydown\(event\)/)
+  assert.match(optionsSource, /event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(optionsSource, /dom\.moveSearchInput\?\.focus\(\)/)
+  assert.match(optionsSource, /tabindex="\$\{isActive \? '0' : '-1'\}"/)
 })
 
 test('dashboard exposes a persistent folder sidebar with cached DOM refs', () => {
@@ -89,6 +157,64 @@ test('dashboard renders a clickable folder sidebar filter with bookmark counts',
   assert.doesNotMatch(dashboardSource, /title:\s*'全部书签'/)
 })
 
+test('dashboard bulk selection buttons expose dashboard-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['dashboard-select-visible-top', '选择当前可见的 Dashboard 书签'],
+    ['dashboard-clear-selection', '清空 Dashboard 已选书签'],
+    ['dashboard-move-selection', '批量移动 Dashboard 已选书签'],
+    ['dashboard-delete-selection', '批量删除 Dashboard 已选书签']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
+test('dashboard tag editor action buttons expose bookmark tag context', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['dashboard-tag-editor-clear-ai', '清除当前 Dashboard 书签的 AI 标签'],
+    ['dashboard-tag-editor-regenerate-ai', '重新生成当前 Dashboard 书签的 AI 标签'],
+    ['dashboard-tag-editor-save', '保存当前 Dashboard 书签标签']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+
+  const closeButton = optionsHtml.match(/<button[^>]+data-dashboard-action="close-tag-editor"[^>]*>/)?.[0] || ''
+  assert.ok(closeButton, 'missing close tag editor button')
+  assert.match(closeButton, /aria-label="取消编辑当前 Dashboard 书签标签"/)
+})
+
+test('options modal footer buttons expose dialog-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['cancel-delete-modal', '取消批量删除高置信异常书签'],
+    ['confirm-delete-modal', '确认批量删除高置信异常书签'],
+    ['cancel-confirm-modal', '取消当前确认操作'],
+    ['confirm-modal-confirm', '确认当前操作'],
+    ['cancel-move-modal', '取消批量移动书签'],
+    ['cancel-scope-modal', '关闭筛选文件夹弹窗'],
+    ['cancel-ai-model-modal', '取消编辑自定义模型列表'],
+    ['save-ai-model-modal', '保存自定义模型列表'],
+    ['ai-model-picker-fetch', '从 API 获取 AI 模型列表'],
+    ['ai-model-picker-manage', '打开自定义模型列表设置'],
+    ['cancel-ai-model-picker-modal', '关闭 AI 模型选择弹窗']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('content snapshot full text search map is not awaited during initial options hydration', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
   const hydrateBody = optionsSource.match(/async function hydratePersistentState\(\) \{([\s\S]*?)async function saveAiNamingSettings/)?.[1] || ''
@@ -104,6 +230,28 @@ test('content snapshot full text search map is not awaited during initial option
   assert.match(optionsSource, /function resetContentSnapshotFullTextSearchMapRetry/)
   assert.match(optionsSource, /hydrateContentSnapshotFullTextSearchMap/)
   assert.match(readProjectFile('src/options/sections/dashboard.ts'), /ensureDashboardFullTextSearchMapForQuery/)
+})
+
+test('AI snapshot saves update only the changed search text entry', () => {
+  const optionsSource = readProjectFile('src/options/options.ts')
+  const saveBody = getFunctionBody(optionsSource, 'saveContentSnapshotForAiPreparedItem')
+  const updateBody = getFunctionBody(optionsSource, 'updateContentSnapshotSearchTextForRecord')
+
+  assert.match(saveBody, /updateContentSnapshotSearchTextForRecord\(record\)/)
+  assert.doesNotMatch(saveBody, /buildContentSnapshotSearchMapWithFullText/)
+  assert.match(updateBody, /buildContentSnapshotSearchText\(record/)
+  assert.match(updateBody, /new Map\(contentSnapshotState\.searchTextMap\)/)
+  assert.match(updateBody, /scheduleContentSnapshotFullTextSearchMapHydration\(\)/)
+})
+
+test('popup and options brand use small extension icon assets', () => {
+  const popupHtml = readProjectFile('src/popup/popup.html')
+  const optionsHtml = readProjectFile('src/options/options.html')
+
+  assert.match(popupHtml, /src="\.\.\/assets\/icon128\.png"/)
+  assert.match(optionsHtml, /src="\.\.\/assets\/icon128\.png"/)
+  assert.doesNotMatch(popupHtml, /icon4096\.jpg/)
+  assert.doesNotMatch(optionsHtml, /icon4096\.jpg/)
 })
 
 test('dashboard virtual grid computes bounded windows for large card lists', async () => {
@@ -345,19 +493,50 @@ test('availability, redirect and AI result lists render paginated controls', () 
 test('duplicate decisions expose explicit keep strategies and recycle wording', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const duplicateSource = readProjectFile('src/options/sections/duplicates.ts')
+  const labelledStrategies = [
+    ['recommended', '按推荐选择重复书签当前结果'],
+    ['newest', '保留重复书签中的最新项'],
+    ['oldest', '保留重复书签中的最早项'],
+    ['shorter-path', '保留重复书签中路径最短的项'],
+    ['tagged', '保留重复书签中已有标签的项'],
+    ['newtab-source', '保留重复书签中的新标签页来源项'],
+    ['recent', '保留重复书签中的最近访问项']
+  ]
 
-  assert.match(optionsHtml, /data-duplicate-strategy="recommended"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="newest"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="oldest"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="shorter-path"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="tagged"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="newtab-source"/)
-  assert.match(optionsHtml, /data-duplicate-strategy="recent"/)
+  for (const [strategy, label] of labelledStrategies) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+data-duplicate-strategy="${strategy}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing strategy button ${strategy}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
   assert.match(duplicateSource, /duplicate-recommendation-signals/)
   assert.match(duplicateSource, /有手动标签/)
   assert.match(duplicateSource, /新标签页来源/)
   assert.match(duplicateSource, /最近访问/)
   assert.doesNotMatch(duplicateSource, />\\s*删除所选\\s*</)
+})
+
+test('duplicate item recycle checkboxes expose bookmark-specific labels', () => {
+  const duplicateSource = readProjectFile('src/options/sections/duplicates.ts')
+
+  assert.match(duplicateSource, /function getDuplicateItemSelectionLabel\(item\)/)
+  assert.match(duplicateSource, /const selectionLabel = getDuplicateItemSelectionLabel\(item\)/)
+  assert.match(duplicateSource, /data-duplicate-select="true"[\s\S]*?data-bookmark-id="\$\{escapeAttr\(item\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(selectionLabel\)\}"/)
+  assert.match(duplicateSource, /移入回收站：\$\{safeTitle \|\| '未命名书签'\}/)
+  assert.match(duplicateSource, /位置：\$\{path\}/)
+})
+
+test('duplicate bulk selection buttons expose duplicate-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['duplicate-clear-selection', '清空重复书签已选项'],
+    ['duplicate-delete-selection', '将重复书签已选项移入回收站']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
 })
 
 test('broken-link guidance explains confidence levels and redirect handling', () => {
@@ -404,6 +583,55 @@ test('availability results expose decision filters and single-item ignore action
   assert.match(optionsSource, /以后不再检测/)
   assert.match(optionsSource, /getAvailabilityEvidenceSummary/)
   assert.match(optionsSource, /连续异常/)
+})
+
+test('availability bulk selection buttons expose availability-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['availability-clear-selection', '清空可用性检测已选书签'],
+    ['availability-selection-retest', '重新测试可用性检测已选书签'],
+    ['availability-selection-promote', '将可用性检测已选书签移入高置信异常'],
+    ['availability-selection-demote', '将可用性检测已选书签移入低置信异常'],
+    ['availability-selection-move', '批量移动可用性检测已选书签到文件夹'],
+    ['availability-selection-ignore-bookmark', '忽略可用性检测所选书签'],
+    ['availability-selection-ignore-domain', '忽略可用性检测所选域名'],
+    ['availability-selection-ignore-folder', '忽略可用性检测所选文件夹'],
+    ['availability-selection-delete', '批量删除可用性检测已选书签']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
+test('availability section action buttons expose availability-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['availability-select-all-review', '全选低置信异常书签'],
+    ['availability-select-all-failed', '全选高置信异常书签'],
+    ['delete-failed-bookmarks', '批量删除高置信异常书签'],
+    ['availability-clear-history', '清空可用性检测历史日志']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
+test('availability result controls expose bookmark-specific labels', () => {
+  const optionsSource = readProjectFile('src/options/options.ts')
+
+  assert.match(optionsSource, /function getAvailabilityResultActionLabel\(action, result\)/)
+  assert.match(optionsSource, /const selectionLabel = getAvailabilityResultActionLabel\('选择异常书签', result\)/)
+  assert.match(optionsSource, /const openLabel = getAvailabilityResultActionLabel\('打开异常书签链接', result\)/)
+  assert.match(optionsSource, /data-availability-select="true"[\s\S]*?aria-label="\$\{escapeAttr\(selectionLabel\)\}"/)
+  assert.match(optionsSource, /class="detect-result-open"[\s\S]*?aria-label="\$\{escapeAttr\(openLabel\)\}"/)
+  assert.match(optionsSource, /const actionLabel = getAvailabilityResultActionLabel\('移入高置信异常', result\)[\s\S]*?data-review-action="promote-failed"[\s\S]*?aria-label="\$\{escapeAttr\(actionLabel\)\}"/)
+  assert.match(optionsSource, /const actionLabel = getAvailabilityResultActionLabel\('移回低置信异常', result\)[\s\S]*?data-failed-action="demote-review"[\s\S]*?aria-label="\$\{escapeAttr\(actionLabel\)\}"/)
 })
 
 test('availability decision panel replaces duplicate summary metric cards', () => {
@@ -469,9 +697,11 @@ test('smart bookmark analysis uses the decision panel summary layout', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
   const domSource = readProjectFile('src/options/shared-options/dom.ts')
   const optionsCss = readProjectFile('src/options/options.css')
+  const queryInput = optionsHtml.match(/<input[\s\S]*?id="ai-filter-query"[\s\S]*?>/)?.[0] || ''
 
   assert.match(optionsHtml, /class="availability-decision-panel ai-decision-panel"[^>]+aria-label="书签智能分析决策概览"/)
   assert.match(optionsHtml, /id="ai-decision-status"[^>]*>未开始/)
+  assert.match(queryInput, /aria-label="筛选书签智能分析结果"/)
   assert.match(optionsHtml, /class="availability-decision-panel ai-decision-panel"[\s\S]*?class="decision-progress-row"[\s\S]*?id="ai-progress-text"[\s\S]*?id="ai-progress-bar"[\s\S]*?id="ai-progress-copy"/)
   assert.match(optionsHtml, /class="availability-decision-grid ai-decision-grid"[\s\S]*?id="ai-eligible"[\s\S]*?id="ai-suggested"[\s\S]*?id="ai-manual-review"[\s\S]*?id="ai-unchanged"[\s\S]*?id="ai-high-confidence"[\s\S]*?id="ai-medium-confidence"[\s\S]*?id="ai-low-confidence"[\s\S]*?id="ai-failed"/)
   assert.doesNotMatch(optionsHtml, /<article class="summary-card metric-card[\s\S]*?id="ai-eligible"/)
@@ -484,6 +714,71 @@ test('smart bookmark analysis uses the decision panel summary layout', () => {
   assert.match(optionsSource, /syncAiNamingDurationTimer\(\)/)
   assert.match(optionsSource, /clearAiNamingDurationTimer\(\)/)
   assert.match(optionsCss, /\.ai-decision-grid/)
+})
+
+test('history and tag cleanup buttons expose specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['bookmark-add-history-clear', '清空自动分析添加历史记录'],
+    ['ai-clear-filters', '清空书签智能分析筛选条件'],
+    ['ai-tag-clear', '清空全部书签标签数据']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
+test('tag and backup data buttons expose data-scope labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['ai-tag-export', '导出书签标签数据'],
+    ['ai-tag-import', '导入书签标签数据'],
+    ['backup-export', '导出完整书签备份'],
+    ['backup-import', '导入完整备份并预览'],
+    ['backup-restore-tags', '从备份预览只恢复书签标签数据'],
+    ['backup-restore-newtab', '从备份预览只恢复新标签页设置'],
+    ['backup-restore-safe-full', '从备份预览恢复全部可安全恢复的数据']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
+test('smart bookmark analysis bulk selection buttons expose analysis-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['ai-select-all', '全选书签智能分析结果'],
+    ['ai-select-high-confidence', '全选书签智能分析高置信结果'],
+    ['ai-clear-selection', '清空书签智能分析已选建议'],
+    ['ai-move-selection-to-suggested', '将书签智能分析已选建议移动至推荐文件夹'],
+    ['ai-apply-selection', '应用书签智能分析已选建议']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
+test('smart bookmark analysis result actions expose bookmark-specific labels', () => {
+  const optionsSource = readProjectFile('src/options/options.ts')
+
+  assert.match(optionsSource, /function getAiNamingResultActionLabel\(action, result\)/)
+  assert.match(optionsSource, /const selectionLabel = getAiNamingResultActionLabel\([\s\S]*?选择书签智能分析建议/)
+  assert.match(optionsSource, /const openLabel = getAiNamingResultActionLabel\('打开书签页面', result\)/)
+  assert.match(optionsSource, /const applyLabel = getAiNamingResultActionLabel\('应用书签智能分析建议', result\)/)
+  assert.match(optionsSource, /const moveLabel = getAiNamingResultActionLabel\('移动至推荐文件夹', result\)/)
+  assert.match(optionsSource, /data-ai-select="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(selectionLabel\)\}"/)
+  assert.match(optionsSource, /data-ai-move-recommended="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(moveLabel\)\}"/)
+  assert.match(optionsSource, /<a class="detect-result-open"[\s\S]*?aria-label="\$\{escapeAttr\(openLabel\)\}"/)
+  assert.match(optionsSource, /data-ai-apply="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(applyLabel\)\}"/)
 })
 
 test('availability checks use adaptive runner with user settings', () => {
@@ -509,4 +804,33 @@ test('redirect update rereads current bookmarks and skips stale source URLs', ()
   assert.match(redirectsSource, /latestBookmarkMap\.get\(String\(result\.id\)\)/)
   assert.match(redirectsSource, /String\(latestBookmark\.url\) !== String\(result\.url \|\| ''\)/)
   assert.match(redirectsSource, /await updateBookmark\(result\.id, \{ url: finalUrl \}\)/)
+})
+
+test('redirect bulk selection buttons expose redirect-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['redirect-clear-selection', '清空重定向更新已选书签'],
+    ['redirect-batch-update', '批量更新重定向已选书签为最终 URL'],
+    ['redirect-delete-selection', '删除重定向更新已选书签'],
+    ['redirect-select-all', '全选待更新重定向书签'],
+    ['redirect-delete-all', '批量删除待更新重定向书签']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
+test('redirect result actions expose bookmark-specific labels', () => {
+  const redirectsSource = readProjectFile('src/options/sections/redirects.ts')
+
+  assert.match(redirectsSource, /function getRedirectResultActionLabel\(action, result\)/)
+  assert.match(redirectsSource, /const selectionLabel = getRedirectResultActionLabel\('选择重定向书签', result\)/)
+  assert.match(redirectsSource, /const updateLabel = getRedirectResultActionLabel\('更新为最终 URL', result\)/)
+  assert.match(redirectsSource, /const openFinalLabel = getRedirectResultActionLabel\('打开最终链接', result\)/)
+  assert.match(redirectsSource, /data-bookmark-id="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(selectionLabel\)\}"/)
+  assert.match(redirectsSource, /data-redirect-update="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(updateLabel\)\}"/)
+  assert.match(redirectsSource, /<a class="detect-result-open"[\s\S]*?aria-label="\$\{escapeAttr\(openFinalLabel\)\}"/)
 })

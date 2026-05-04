@@ -487,6 +487,7 @@ function buildDuplicateItemCard(item, group) {
   const itemId = String(item.id)
   const selected = managerState.selectedDuplicateIds.has(itemId)
   const recommended = itemId === String(group.recommendedKeepId)
+  const selectionLabel = getDuplicateItemSelectionLabel(item)
   const classes = [
     'duplicate-item-row',
     selected ? 'selected pending-delete' : '',
@@ -500,6 +501,7 @@ function buildDuplicateItemCard(item, group) {
           type="checkbox"
           data-duplicate-select="true"
           data-bookmark-id="${escapeAttr(item.id)}"
+          aria-label="${escapeAttr(selectionLabel)}"
           ${selected ? 'checked' : ''}
           ${isInteractionLocked() ? 'disabled' : ''}
         >
@@ -518,6 +520,18 @@ function buildDuplicateItemCard(item, group) {
       </div>
     </div>
   `
+}
+
+function getDuplicateItemSelectionLabel(item) {
+  const title = String(item?.title || displayUrl(item?.url) || '未命名书签')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const safeTitle = title.length > 48 ? `${title.slice(0, 47).trim()}…` : title
+  const path = String(item?.path || '').replace(/\s+/g, ' ').trim()
+
+  return path
+    ? `移入回收站：${safeTitle || '未命名书签'}，位置：${path}`
+    : `移入回收站：${safeTitle || '未命名书签'}`
 }
 
 function buildDuplicateItemBadges(item, group) {

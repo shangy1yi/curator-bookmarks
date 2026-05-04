@@ -4,7 +4,7 @@ import type { BookmarkTagIndex } from '../src/shared/bookmark-tags.js'
 import type {
   ContentSnapshotIndex,
   ContentSnapshotSettings
-} from '../src/shared/content-snapshots.js'
+} from '../src/shared/content-snapshot-search.js'
 import type { BookmarkRecord } from '../src/shared/types.js'
 import {
   buildLightPopupSearchIndex,

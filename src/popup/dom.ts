@@ -18,6 +18,7 @@ function byId(id: string): PopupDomElement {
 }
 
 export function cacheDom(): void {
+  dom.appShell = byId('popup-app-shell')
   dom.heroSubtitle = byId('hero-subtitle')
   dom.openSettings = byId('open-settings')
   dom.autoAnalyzeStatus = byId('auto-analyze-status')

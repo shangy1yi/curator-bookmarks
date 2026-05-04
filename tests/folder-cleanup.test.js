@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import test from 'node:test'
 
 import {
   analyzeFolderCleanup,
   createFolderCleanupSplitUndo
 } from '../src/shared/folder-cleanup.js'
+import {
+  getFolderCleanupSplitUndoActionLabel,
+  getFolderCleanupSuggestionActionLabel
+} from '../src/options/sections/folder-cleanup.js'
+
+function readProjectFile(path) {
+  return readFileSync(resolve(process.cwd(), path), 'utf8')
+}
 
 function folder(id, title, children = []) {
   return {
@@ -175,4 +185,46 @@ test('folder cleanup rescan refreshes the bookmark tree before analyzing', async
   assert.equal(folderCleanupState.suggestions.some((item) => item.primaryFolderId === 'old-empty'), false)
   assert.equal(folderCleanupState.suggestions.some((item) => item.primaryFolderId === 'fresh-empty'), true)
   assert.equal(storageWrites.length > 0, true)
+})
+
+test('folder cleanup action labels include suggestion context', () => {
+  const previewLabel = getFolderCleanupSuggestionActionLabel('查看文件夹清理预览', {
+    title: '删除空文件夹：旧资料',
+    summary: '该文件夹没有书签和子文件夹。'
+  })
+  const executeLabel = getFolderCleanupSuggestionActionLabel('确认拆分', {
+    title: '拆分超大文件夹：资料库',
+    summary: '共有 42 个书签。'
+  })
+  const longLabel = getFolderCleanupSuggestionActionLabel('确认合并', {
+    title: '合并同名文件夹：'.repeat(12),
+    summary: ''
+  })
+
+  assert.equal(previewLabel, '查看文件夹清理预览：删除空文件夹：旧资料')
+  assert.equal(executeLabel, '确认拆分：拆分超大文件夹：资料库')
+  assert.match(longLabel, /…$/)
+})
+
+test('folder cleanup split undo labels include title and move count', () => {
+  const label = getFolderCleanupSplitUndoActionLabel('撤销本次拆分', {
+    title: '拆分超大文件夹：资料库',
+    moves: [
+      { bookmarkId: 'one', fromParentId: '40', toFolderId: 'new-1' },
+      { bookmarkId: 'two', fromParentId: '40', toFolderId: 'new-2' }
+    ]
+  })
+
+  assert.equal(label, '撤销本次拆分：拆分超大文件夹：资料库，2 个书签')
+})
+
+test('folder cleanup controls render context-specific action labels', () => {
+  const source = readProjectFile('src/options/sections/folder-cleanup.ts')
+
+  assert.match(source, /const undoLabel = getFolderCleanupSplitUndoActionLabel\('撤销本次拆分', splitUndo\)/)
+  assert.match(source, /data-folder-cleanup-undo-split="\$\{escapeAttr\(splitUndo\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(undoLabel\)\}"/)
+  assert.match(source, /const previewLabel = getFolderCleanupSuggestionActionLabel\([\s\S]*?查看文件夹清理预览/)
+  assert.match(source, /const operationLabel = getFolderCleanupSuggestionActionLabel\(operationCopy, suggestion\)/)
+  assert.match(source, /data-folder-cleanup-preview="\$\{escapeAttr\(suggestion\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(previewLabel\)\}"/)
+  assert.match(source, /data-folder-cleanup-action="\$\{escapeAttr\(suggestion\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(operationLabel\)\}"/)
 })

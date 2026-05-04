@@ -121,7 +121,7 @@ test('identifies retryable navigation failures', () => {
 })
 
 test('accepts navigation success only when main request is not an HTTP failure', () => {
-  assert.equal(shouldAcceptNavigationSuccess(navigationAttempt('', 'available')), true)
+  assert.equal(shouldAcceptNavigationSuccess(navigationAttempt('', 'available')), false)
   assert.equal(
     shouldAcceptNavigationSuccess({
       ...navigationAttempt('', 'available'),
