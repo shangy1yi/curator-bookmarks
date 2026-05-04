@@ -1064,8 +1064,8 @@ async function runAutoAnalysisForBookmark(
     if (moved) {
       await recordInboxUndoMove({
         bookmarkId,
-        fromFolderId: folderId,
-        toFolderId: originalParentId,
+        fromFolderId: originalParentId,
+        toFolderId: folderId,
         movedAt: Date.now()
       }).catch((error) => {
         console.warn('[Curator] Inbox 撤销状态写入失败', error)
@@ -1308,7 +1308,7 @@ async function undoLastInboxAutoMove(): Promise<InboxUndoLastMoveResult> {
     throw new Error('原书签已不存在，无法撤销。')
   }
 
-  const movedNode = await moveBookmarkNode(undoMove.bookmarkId, undoMove.toFolderId)
+  const movedNode = await moveBookmarkNode(undoMove.bookmarkId, undoMove.fromFolderId)
   await updateInboxItem(undoMove.bookmarkId, {
     status: 'undone',
     lastError: ''
@@ -1324,7 +1324,7 @@ async function undoLastInboxAutoMove(): Promise<InboxUndoLastMoveResult> {
 
   return {
     bookmarkId: String(movedNode.id),
-    parentId: String(movedNode.parentId || undoMove.toFolderId),
+    parentId: String(movedNode.parentId || undoMove.fromFolderId),
     title: String(movedNode.title || bookmark.title || '未命名网页')
   }
 }

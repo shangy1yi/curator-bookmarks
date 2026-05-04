@@ -51,6 +51,7 @@ import {
   getAdaptiveSearchOffsetBounds,
   getAdaptiveSearchWidthBounds,
   getVerticalCenterCollisionOffset,
+  normalizeNewTabSearchText,
   resolvePortalPanelLayout,
   type AdaptiveSearchOffsetBounds,
   type PortalOverview,
@@ -166,6 +167,10 @@ const SEARCH_OFFSET_ABSOLUTE_MAX = 240
 const SEARCH_WIDTH_BOUNDS_FALLBACK = { min: 16, max: 72 }
 const NEWTAB_LAYOUT_SAFE_GAP = 12
 const SEARCH_SUGGESTION_LIMIT = 6
+const SEARCH_SUGGESTION_DEBOUNCE_MS = 80
+const SEARCH_SUGGESTION_CACHE_LIMIT = 24
+const BOOKMARK_TILE_INITIAL_RENDER_LIMIT = 160
+const BOOKMARK_TILE_RENDER_CHUNK_SIZE = 80
 const QUICK_ACCESS_ITEM_LIMIT = 8
 const ACTIVITY_RECORD_LIMIT = 160
 const DEFAULT_GENERAL_SETTINGS = {
@@ -337,6 +342,7 @@ let folderDragGhostFrame = 0
 let resizeLayoutFrame = 0
 let verticalCenterCollisionFrame = 0
 let deferredRenderFrame = 0
+let bookmarkTileRenderVersion = 0
 let settingsDrawerReturnFocusElement: HTMLElement | null = null
 let deferredRenderClockUpdate = false
 let searchSettingsSaveTimer = 0
@@ -1095,6 +1101,7 @@ function openSettingsDrawer(options?: { focusFirstControl?: boolean }): void {
   settingsDrawer?.classList.add('open')
   settingsBackdrop?.classList.add('open')
   settingsDrawer?.setAttribute('aria-hidden', 'false')
+  settingsDrawer?.removeAttribute('inert')
   settingsTrigger?.setAttribute('aria-expanded', 'true')
   document.body.classList.add('settings-open')
   if (focusFirstControl) {
@@ -1130,6 +1137,7 @@ function closeSettingsDrawer(): void {
   settingsDrawer?.classList.add('is-closing')
   settingsBackdrop?.classList.add('is-closing')
   settingsDrawer?.setAttribute('aria-hidden', 'true')
+  settingsDrawer?.setAttribute('inert', '')
   settingsTrigger?.setAttribute('aria-expanded', 'false')
   document.body.classList.remove('settings-open')
   window.setTimeout(() => {
@@ -2719,6 +2727,7 @@ function render(): void {
     return
   }
 
+  bookmarkTileRenderVersion += 1
   cancelScheduledAdaptiveNewTabLayoutUpdate()
   root.replaceChildren()
   const contentState = resolveNewTabContentState({
@@ -3203,8 +3212,12 @@ function createSearchWidget(): HTMLElement | null {
 
   let searchSuggestions: SearchBookmarkSuggestion[] = []
   let activeSuggestionIndex = -1
+  let suggestionDebounceTimer = 0
+  let suggestionRequestId = 0
 
   const hideSuggestions = () => {
+    window.clearTimeout(suggestionDebounceTimer)
+    suggestionDebounceTimer = 0
     searchSuggestions = []
     activeSuggestionIndex = -1
     suggestions.replaceChildren()
@@ -3213,10 +3226,10 @@ function createSearchWidget(): HTMLElement | null {
     input.removeAttribute('aria-activedescendant')
   }
 
-  const renderSuggestions = ({ preserveActive = false } = {}) => {
+  const renderSuggestions = ({ preserveActive = false, queryOverride = input.value } = {}) => {
     const query = input.value.trim()
     const previousActiveIndex = activeSuggestionIndex
-    searchSuggestions = getSearchBookmarkSuggestions(input.value)
+    searchSuggestions = getSearchBookmarkSuggestions(queryOverride)
     if (!searchSuggestions.length) {
       activeSuggestionIndex = -1
       suggestions.replaceChildren()
@@ -3259,9 +3272,30 @@ function createSearchWidget(): HTMLElement | null {
     }
   }
 
+  const scheduleSuggestionsRender = ({ preserveActive = false, immediate = false } = {}) => {
+    const query = input.value
+    const requestId = suggestionRequestId + 1
+    suggestionRequestId = requestId
+    window.clearTimeout(suggestionDebounceTimer)
+
+    if (!query.trim() || immediate) {
+      suggestionDebounceTimer = 0
+      renderSuggestions({ preserveActive, queryOverride: query })
+      return
+    }
+
+    suggestionDebounceTimer = window.setTimeout(() => {
+      suggestionDebounceTimer = 0
+      if (requestId !== suggestionRequestId) {
+        return
+      }
+      renderSuggestions({ preserveActive, queryOverride: query })
+    }, SEARCH_SUGGESTION_DEBOUNCE_MS)
+  }
+
   const moveActiveSuggestion = (direction: 1 | -1) => {
     if (!searchSuggestions.length) {
-      renderSuggestions({ preserveActive: true })
+      scheduleSuggestionsRender({ preserveActive: true, immediate: true })
     }
     if (!searchSuggestions.length) {
       return
@@ -3275,10 +3309,10 @@ function createSearchWidget(): HTMLElement | null {
 
   input.addEventListener('input', () => {
     syncSearchInputActions(input, clearButton, separator, submitButton)
-    renderSuggestions()
+    scheduleSuggestionsRender()
   })
   input.addEventListener('focus', () => {
-    renderSuggestions()
+    scheduleSuggestionsRender({ immediate: true })
   })
   input.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -3373,12 +3407,40 @@ function syncSearchInputActions(
   submitButton.setAttribute('aria-disabled', String(!hasValue))
 }
 
+const searchSuggestionCache = new Map<string, SearchBookmarkSuggestion[]>()
+
 function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[] {
-  return getSearchBookmarkSuggestionsFromIndex(
+  const cacheKey = getSearchSuggestionCacheKey(query)
+  const cached = searchSuggestionCache.get(cacheKey)
+  if (cached) {
+    searchSuggestionCache.delete(cacheKey)
+    searchSuggestionCache.set(cacheKey, cached)
+    return cached
+  }
+
+  const suggestions = getSearchBookmarkSuggestionsFromIndex(
     query,
     state.preparedSearchIndex,
     SEARCH_SUGGESTION_LIMIT
   )
+  searchSuggestionCache.set(cacheKey, suggestions)
+  while (searchSuggestionCache.size > SEARCH_SUGGESTION_CACHE_LIMIT) {
+    const oldestKey = searchSuggestionCache.keys().next().value
+    if (!oldestKey) {
+      break
+    }
+    searchSuggestionCache.delete(oldestKey)
+  }
+  return suggestions
+}
+
+function getSearchSuggestionCacheKey(query: string): string {
+  return [
+    state.preparedSearchIndex.entries.length,
+    state.bookmarkTagIndex?.updatedAt || 0,
+    state.searchSnapshotState?.index?.updatedAt || 0,
+    normalizeNewTabSearchText(query)
+  ].join(':')
 }
 
 function createSearchSuggestionButton(
@@ -3581,18 +3643,16 @@ function createBookmarkSections(sections: NewTabFolderSection[]): HTMLElement {
       list.dataset.bookmarkGridFolderId = section.id
       list.setAttribute('aria-label', `${section.title || '文件夹'}书签`)
       list.setAttribute('aria-busy', state.reorderingBookmarks ? 'true' : 'false')
-
-      for (const bookmark of section.bookmarks) {
-        list.appendChild(createBookmarkTile(bookmark, section.id, renderedBookmarkIndex))
-        renderedBookmarkIndex += 1
-      }
+      renderedBookmarkIndex = appendBookmarkTilesInChunks(
+        list,
+        section,
+        renderedBookmarkIndex,
+        bookmarkTileRenderVersion
+      )
 
       sectionNode.appendChild(list)
     } else {
-      const empty = document.createElement('p')
-      empty.className = 'bookmark-folder-empty'
-      empty.textContent = '此文件夹还没有书签'
-      sectionNode.appendChild(empty)
+      sectionNode.appendChild(createEmptyFolderState(section))
     }
 
     groupList.appendChild(sectionNode)
@@ -3608,6 +3668,90 @@ function createBookmarkSections(sections: NewTabFolderSection[]): HTMLElement {
 
   view.appendChild(groupList)
   return view
+}
+
+function appendBookmarkTilesInChunks(
+  list: HTMLElement,
+  section: NewTabFolderSection,
+  renderedBookmarkIndex: number,
+  renderVersion: number
+): number {
+  const initialCount = Math.min(section.bookmarks.length, BOOKMARK_TILE_INITIAL_RENDER_LIMIT)
+  for (let index = 0; index < initialCount; index += 1) {
+    list.appendChild(createBookmarkTile(section.bookmarks[index], section.id, renderedBookmarkIndex + index))
+  }
+
+  if (initialCount < section.bookmarks.length) {
+    list.dataset.incrementalRender = 'true'
+    list.setAttribute('aria-busy', 'true')
+    scheduleBookmarkTileChunkRender(list, section, initialCount, renderedBookmarkIndex + initialCount, renderVersion)
+  }
+
+  return renderedBookmarkIndex + section.bookmarks.length
+}
+
+function scheduleBookmarkTileChunkRender(
+  list: HTMLElement,
+  section: NewTabFolderSection,
+  nextIndex: number,
+  renderedBookmarkIndex: number,
+  renderVersion: number
+): void {
+  window.requestAnimationFrame(() => {
+    if (renderVersion !== bookmarkTileRenderVersion || !list.isConnected) {
+      return
+    }
+
+    const fragment = document.createDocumentFragment()
+    const endIndex = Math.min(section.bookmarks.length, nextIndex + BOOKMARK_TILE_RENDER_CHUNK_SIZE)
+    for (let index = nextIndex; index < endIndex; index += 1) {
+      fragment.appendChild(createBookmarkTile(section.bookmarks[index], section.id, renderedBookmarkIndex + (index - nextIndex)))
+    }
+    list.appendChild(fragment)
+
+    if (endIndex < section.bookmarks.length) {
+      scheduleBookmarkTileChunkRender(
+        list,
+        section,
+        endIndex,
+        renderedBookmarkIndex + (endIndex - nextIndex),
+        renderVersion
+      )
+      return
+    }
+
+    delete list.dataset.incrementalRender
+    list.setAttribute('aria-busy', state.reorderingBookmarks ? 'true' : 'false')
+  })
+}
+
+function createEmptyFolderState(section: NewTabFolderSection): HTMLElement {
+  const empty = document.createElement('div')
+  empty.className = 'bookmark-folder-empty-state'
+
+  const copy = document.createElement('p')
+  copy.className = 'bookmark-folder-empty'
+  copy.textContent = '此文件夹还没有书签。你可以先添加一个书签，或改用已有的非空来源。'
+
+  const actions = document.createElement('div')
+  actions.className = 'bookmark-folder-empty-actions'
+
+  const addButton = document.createElement('button')
+  addButton.className = 'newtab-button secondary'
+  addButton.type = 'button'
+  addButton.dataset.addBookmarkFolderId = section.id
+  addButton.textContent = '添加书签到这里'
+
+  const sourceButton = document.createElement('button')
+  sourceButton.className = 'newtab-button secondary'
+  sourceButton.type = 'button'
+  sourceButton.textContent = '选择现有来源'
+  sourceButton.title = '打开来源设置并选择已有文件夹'
+  sourceButton.addEventListener('click', openFolderSourceSettings)
+
+  actions.append(addButton, sourceButton)
+  empty.append(copy, actions)
+  return empty
 }
 
 function createSourceNavigation(sections: NewTabFolderSection[]): HTMLElement | null {
@@ -4209,6 +4353,7 @@ function refreshDerivedBookmarkState(): void {
     snapshotIndex: state.searchSnapshotState?.index || null
   })
   state.preparedSearchIndex = prepareNewTabSearchIndex(state.searchIndex)
+  searchSuggestionCache.clear()
 }
 
 function getBookmarkById(bookmarkId: string): chrome.bookmarks.BookmarkTreeNode | null {

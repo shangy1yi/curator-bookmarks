@@ -424,9 +424,13 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
 
 test('newtab explains empty folder source selection without changing bookmarks', () => {
   const html = readProjectFile('src/newtab/newtab.html')
+  const contentState = readProjectFile('src/newtab/content-state.ts')
   const script = readProjectFile('src/newtab/newtab.ts')
 
   assert.match(html, /id="folder-selected-list"/)
+  assert.match(contentState, /当前没有显示来源/)
+  assert.match(contentState, /没有找到可直接展示的非空文件夹。你可以选择已有来源，或新建专用文件夹后添加书签。/)
+  assert.match(contentState, /选择现有来源/)
   assert.match(script, /未选择来源文件夹。选择来源只会决定新标签页显示哪些书签，不会移动、删除或重排原有书签。/)
   assert.match(script, /removeLabel = `从新标签页移除/)
   assert.match(script, /不会删除书签/)
@@ -524,6 +528,20 @@ test('newtab folder headers expose scoped quick-add controls', () => {
   assert.match(css, /\.folder-section-add/)
 })
 
+test('newtab empty folder state offers actionable next steps', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+
+  assert.match(script, /function createEmptyFolderState\(section: NewTabFolderSection\): HTMLElement/)
+  assert.match(script, /此文件夹还没有书签。你可以先添加一个书签，或改用已有的非空来源。/)
+  assert.match(script, /addButton\.dataset\.addBookmarkFolderId = section\.id/)
+  assert.match(script, /添加书签到这里/)
+  assert.match(script, /选择现有来源/)
+  assert.match(script, /sourceButton\.addEventListener\('click', openFolderSourceSettings\)/)
+  assert.match(css, /\.bookmark-folder-empty-state/)
+  assert.match(css, /\.bookmark-folder-empty-actions/)
+})
+
 test('builds compact source navigation data with stable anchors and bookmark counts', () => {
   assert.deepEqual(
     buildNewTabSourceNavigationItems([
@@ -584,9 +602,13 @@ test('newtab exposes source navigation anchors and a folder source setting switc
 })
 
 test('newtab settings drawer layout responds to drawer width', () => {
+  const html = readProjectFile('src/newtab/newtab.html')
   const css = readProjectFile('src/newtab/newtab.css')
   const script = readProjectFile('src/newtab/newtab.ts')
+  const drawer = html.match(/<aside[\s\S]*?id="newtab-settings-drawer"[\s\S]*?>/)?.[0] || ''
 
+  assert.match(drawer, /aria-hidden="true"/)
+  assert.match(drawer, /\sinert(?:\s|>)/)
   assert.match(css, /container:\s*settings-drawer\s*\/\s*inline-size/)
   assert.match(css, /@container settings-drawer \(max-width: 380px\)/)
   assert.match(css, /\.search-engine-setting-row\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
@@ -596,6 +618,15 @@ test('newtab settings drawer layout responds to drawer width', () => {
   assert.match(script, /--preview-grid-max-width/)
   assert.match(script, /grid\.style\.gridTemplateColumns = `repeat\(\$\{previewColumns\}, minmax\(0, 1fr\)\)`/)
   assert.doesNotMatch(script, /grid\.style\.gridTemplateColumns = `repeat\(\$\{previewColumns\}, minmax\(0, var\(--preview-tile-width\)\)\)`/)
+})
+
+test('newtab settings drawer is inert while closed', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /settingsDrawer\?\.removeAttribute\('inert'\)/)
+  assert.match(script, /settingsDrawer\?\.setAttribute\('inert', ''\)/)
+  assert.match(script, /settingsDrawer\?\.setAttribute\('aria-hidden', 'false'\)[\s\S]*?settingsDrawer\?\.removeAttribute\('inert'\)/)
+  assert.match(script, /settingsDrawer\?\.setAttribute\('aria-hidden', 'true'\)[\s\S]*?settingsDrawer\?\.setAttribute\('inert', ''\)/)
 })
 
 test('newtab advanced icon layout exposes a default reset control', () => {
@@ -646,6 +677,23 @@ test('newtab settings section titles are visually prominent', () => {
   assert.match(sectionTitleRule, /font-size:\s*13px/)
   assert.match(sectionTitleRule, /font-weight:\s*760/)
   assert.match(sectionTitleRule, /color:\s*rgba\(245,\s*245,\s*247,\s*0\.78\)/)
+})
+
+test('newtab settings drawer labels avoid truncating explanatory copy', () => {
+  const css = readProjectFile('src/newtab/newtab.css')
+  const sectionTitleRule = getCssRuleBody(css, '.settings-section h2')
+  const labelRule = getCssRuleBody(css, '.setting-label-stack > span')
+  const descriptionRules = getCssRuleBodies(css, '.setting-label-stack small')
+  const descriptionRule = descriptionRules.find((rule) => /white-space:\s*normal/.test(rule)) || ''
+
+  assert.match(sectionTitleRule, /-webkit-line-clamp:\s*2/)
+  assert.match(sectionTitleRule, /overflow-wrap:\s*anywhere/)
+  assert.match(labelRule, /-webkit-line-clamp:\s*2/)
+  assert.doesNotMatch(labelRule, /white-space:\s*nowrap/)
+  assert.match(descriptionRule, /white-space:\s*normal/)
+  assert.match(descriptionRule, /display:\s*block/)
+  assert.doesNotMatch(descriptionRule, /text-overflow:\s*ellipsis/)
+  assert.doesNotMatch(descriptionRule, /white-space:\s*nowrap/)
 })
 
 test('newtab dashboard glass layer only styles the iframe shell', () => {
@@ -711,4 +759,32 @@ test('newtab bookmark tiles match the frosted overview card surface', () => {
   assert.doesNotMatch(tileRule, /linear-gradient/)
   assert.match(hoverRule, /background:\s*rgba\(8,\s*8,\s*9,\s*var\(--bookmark-card-hover-alpha\)\)/)
   assert.doesNotMatch(hoverRule, /box-shadow:\s*0\s+10px/)
+})
+
+test('newtab large bookmark lists render tiles incrementally', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /const BOOKMARK_TILE_INITIAL_RENDER_LIMIT = 160/)
+  assert.match(script, /const BOOKMARK_TILE_RENDER_CHUNK_SIZE = 80/)
+  assert.match(script, /let bookmarkTileRenderVersion = 0/)
+  assert.match(script, /function appendBookmarkTilesInChunks/)
+  assert.match(script, /function scheduleBookmarkTileChunkRender/)
+  assert.match(script, /window\.requestAnimationFrame\(\(\) =>/)
+  assert.match(script, /renderVersion !== bookmarkTileRenderVersion \|\| !list\.isConnected/)
+  assert.match(script, /list\.dataset\.incrementalRender = 'true'/)
+  assert.doesNotMatch(script, /for \(const bookmark of section\.bookmarks\) \{[\s\S]*?list\.appendChild\(createBookmarkTile/)
+})
+
+test('newtab bookmark suggestions are debounced and cached', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /const SEARCH_SUGGESTION_DEBOUNCE_MS = 80/)
+  assert.match(script, /const SEARCH_SUGGESTION_CACHE_LIMIT = 24/)
+  assert.match(script, /const scheduleSuggestionsRender = \(\{ preserveActive = false, immediate = false \} = \{\}\) =>/)
+  assert.match(script, /window\.setTimeout\(\(\) => \{[\s\S]*?renderSuggestions\(\{ preserveActive, queryOverride: query \}\)/)
+  assert.match(script, /const searchSuggestionCache = new Map<string, SearchBookmarkSuggestion\[\]>\(\)/)
+  assert.match(script, /function getSearchSuggestionCacheKey/)
+  assert.match(script, /normalizeNewTabSearchText\(query\)/)
+  assert.match(script, /searchSuggestionCache\.clear\(\)/)
+  assert.doesNotMatch(script, /input\.addEventListener\('input', \(\) => \{[\s\S]*?renderSuggestions\(\)/)
 })

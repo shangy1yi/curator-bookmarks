@@ -1497,6 +1497,24 @@ body.folder-names-hidden.folder-order-dragging .folder-section-header-row {
   justify-self: start;
 }
 
+.bookmark-folder-empty-state {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.bookmark-folder-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bookmark-folder-empty-actions .newtab-button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
 .bookmark-grid {
   display: grid;
   width: 100%;
@@ -1992,16 +2010,18 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 }
 
 .settings-section h2 {
-  display: flex;
+  display: -webkit-box;
   min-height: 24px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
   margin: 0 0 10px;
+  overflow: hidden;
   color: rgba(245, 245, 247, 0.78);
   font-size: 13px;
   font-weight: 760;
   letter-spacing: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .settings-card {
@@ -2080,21 +2100,27 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 
 .setting-label-stack > span,
 .setting-label-stack small {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .setting-label-stack > span {
+  display: -webkit-box;
+  overflow: hidden;
   color: rgba(245, 245, 247, 0.9);
   font: inherit;
-  white-space: nowrap;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .setting-label-stack small {
+  display: block;
   color: rgba(245, 245, 247, 0.42);
   font-size: 10px;
   font-weight: 500;
   line-height: 1.35;
+  white-space: normal;
 }
 
 .folder-source-panel {

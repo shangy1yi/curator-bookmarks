@@ -9,9 +9,17 @@ export const CONTENT_FULL_TEXT_STORE = 'contentFullText'
 export const AUTO_BACKUP_STORE = 'autoBackups'
 
 let contentSnapshotIndexWriteQueue: Promise<unknown> = Promise.resolve()
-let contentFullTextOperations = {
+interface ContentFullTextOperations {
+  put: (record: ContentFullTextRecord) => Promise<void>
+  get: (snapshotId: string) => Promise<string>
+  getMany: (snapshotIds: string[]) => Promise<Map<string, string>>
+  delete: (snapshotId: string) => Promise<void>
+}
+
+let contentFullTextOperations: ContentFullTextOperations = {
   put: putContentFullText,
   get: getContentFullText,
+  getMany: getContentFullTexts,
   delete: deleteContentFullText
 }
 
@@ -333,12 +341,21 @@ export async function buildContentSnapshotSearchMapWithFullText(
     return searchMap
   }
 
+  const maxRecords = Math.max(0, options.maxRecords ?? 600)
   const idbRecords = Object.values(index.records)
     .filter((record) => record.fullTextStorage === 'idb' && record.fullTextRef)
-    .slice(0, Math.max(0, options.maxRecords || 600))
+    .slice(0, maxRecords)
+
+  if (!idbRecords.length) {
+    return searchMap
+  }
+
+  const fullTexts = await contentFullTextOperations.getMany(
+    idbRecords.map((record) => record.fullTextRef || '')
+  )
 
   for (const record of idbRecords) {
-    const fullText = await contentFullTextOperations.get(record.fullTextRef || '')
+    const fullText = fullTexts.get(record.fullTextRef || '')
     if (!fullText) {
       continue
     }
@@ -370,6 +387,37 @@ export async function getContentFullText(snapshotId: string): Promise<string> {
   return cleanText(record?.text || '')
 }
 
+export async function getContentFullTexts(snapshotIds: string[]): Promise<Map<string, string>> {
+  const uniqueSnapshotIds = Array.from(new Set(
+    snapshotIds
+      .map((snapshotId) => String(snapshotId || '').trim())
+      .filter(Boolean)
+  ))
+  const fullTexts = new Map<string, string>()
+  if (!uniqueSnapshotIds.length) {
+    return fullTexts
+  }
+
+  const db = await openHeavyUserDb()
+  try {
+    await runStoreValueBatchRequest<ContentFullTextRecord | undefined>(
+      db,
+      CONTENT_FULL_TEXT_STORE,
+      uniqueSnapshotIds,
+      (store, snapshotId) => store.get(snapshotId),
+      (snapshotId, record) => {
+        const text = cleanText(record?.text || '')
+        if (text) {
+          fullTexts.set(snapshotId, text)
+        }
+      }
+    )
+    return fullTexts
+  } finally {
+    db.close()
+  }
+}
+
 export async function deleteContentFullText(snapshotId: string): Promise<void> {
   if (!snapshotId) {
     return
@@ -383,10 +431,14 @@ export function setContentFullTextOperationsForTest(
   operations: Partial<typeof contentFullTextOperations>
 ): () => void {
   const previous = contentFullTextOperations
-  contentFullTextOperations = {
+  const nextOperations = {
     ...contentFullTextOperations,
     ...operations
   }
+  if (operations.get && !operations.getMany) {
+    nextOperations.getMany = (snapshotIds: string[]) => getContentFullTextsWithSingleReads(snapshotIds, nextOperations.get)
+  }
+  contentFullTextOperations = nextOperations
   return () => {
     contentFullTextOperations = previous
   }
@@ -398,6 +450,20 @@ export function estimateTextBytes(value: unknown): number {
     return new TextEncoder().encode(text).length
   }
   return text.length
+}
+
+async function getContentFullTextsWithSingleReads(
+  snapshotIds: string[],
+  getFullText: (snapshotId: string) => Promise<string>
+): Promise<Map<string, string>> {
+  const fullTexts = new Map<string, string>()
+  for (const snapshotId of snapshotIds) {
+    const fullText = await getFullText(snapshotId).catch(() => '')
+    if (fullText) {
+      fullTexts.set(snapshotId, fullText)
+    }
+  }
+  return fullTexts
 }
 
 function normalizeContentSnapshotRecord(raw: unknown): ContentSnapshotRecord {
@@ -533,6 +599,40 @@ function runStoreValueRequest<T>(
     const store = transaction.objectStore(storeName)
     const request = createRequest(store)
     transaction.addEventListener('complete', () => resolve(request.result as T))
+    transaction.addEventListener('error', () => reject(transaction.error || new Error('全文索引读取失败。')))
+    transaction.addEventListener('abort', () => reject(transaction.error || new Error('全文索引读取中断。')))
+  })
+}
+
+function runStoreValueBatchRequest<T>(
+  db: IDBDatabase,
+  storeName: string,
+  snapshotIds: string[],
+  createRequest: (store: IDBObjectStore, snapshotId: string) => IDBRequest,
+  handleValue: (snapshotId: string, value: T) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, 'readonly')
+    const store = transaction.objectStore(storeName)
+
+    for (const snapshotId of snapshotIds) {
+      let request: IDBRequest
+      try {
+        request = createRequest(store, snapshotId)
+      } catch {
+        continue
+      }
+      request.addEventListener('success', () => {
+        handleValue(snapshotId, request.result as T)
+      })
+      request.addEventListener('error', (event) => {
+        // Skip a bad record without letting one request abort the whole readonly batch.
+        event.preventDefault()
+        event.stopPropagation()
+      })
+    }
+
+    transaction.addEventListener('complete', () => resolve())
     transaction.addEventListener('error', () => reject(transaction.error || new Error('全文索引读取失败。')))
     transaction.addEventListener('abort', () => reject(transaction.error || new Error('全文索引读取中断。')))
   })

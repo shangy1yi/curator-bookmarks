@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { test } from 'node:test'
 
 import {
@@ -123,6 +125,25 @@ test('serializes concurrent inbox undo recording with item updates', async () =>
   })
 })
 
+test('service worker records and undoes inbox auto moves in the correct direction', () => {
+  const source = readProjectFile('src/service-worker/service-worker.ts')
+
+  assert.match(
+    source,
+    /recordInboxUndoMove\(\{\s*bookmarkId,\s*fromFolderId: originalParentId,\s*toFolderId: folderId,\s*movedAt: Date\.now\(\)\s*\}/
+  )
+  assert.match(
+    source,
+    /const movedNode = await moveBookmarkNode\(undoMove\.bookmarkId, undoMove\.fromFolderId\)/
+  )
+  assert.match(
+    source,
+    /parentId: String\(movedNode\.parentId \|\| undoMove\.fromFolderId\)/
+  )
+  assert.doesNotMatch(source, /fromFolderId: folderId,\s*toFolderId: originalParentId/)
+  assert.doesNotMatch(source, /moveBookmarkNode\(undoMove\.bookmarkId, undoMove\.toFolderId\)/)
+})
+
 function createInboxItem(overrides: Partial<InboxItem> = {}): InboxItem {
   const bookmarkId = overrides.bookmarkId || 'bookmark-1'
   const createdAt = overrides.createdAt || 100
@@ -141,6 +162,10 @@ function createInboxItem(overrides: Partial<InboxItem> = {}): InboxItem {
     confidence: overrides.confidence,
     lastError: overrides.lastError
   }
+}
+
+function readProjectFile(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 function createChromeStorageMock(options: {
