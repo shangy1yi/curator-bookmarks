@@ -28,6 +28,21 @@ test('newtab keeps local polite status regions for short feedback', () => {
   assert.match(newtabSource, /recycle\.setAttribute\('aria-label', `打开回收站查看：\$\{bookmarkLabel\}`\)/)
 })
 
+test('newtab bookmark edit menu actions expose bookmark-specific labels', () => {
+  const newtabSource = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(newtabSource, /const bookmarkLabel = getBookmarkActionLabelContext\(bookmark\)/)
+  assert.match(newtabSource, /const pinLabel = isActiveMenuBookmarkPinned\(\) \? '取消固定书签' : '固定书签到常用'/)
+  assert.match(newtabSource, /const deleteLabel = state\.pendingDeleteBookmarkId === String\(bookmark\.id\) \? '确认删除书签' : '删除书签'/)
+  assert.match(newtabSource, /actionId: 'toggle-pin', ariaLabel: `\$\{pinLabel\}：\$\{bookmarkLabel\}`/)
+  assert.match(newtabSource, /actionId: 'copy-url',[\s\S]*?ariaLabel: `复制书签链接：\$\{bookmarkLabel\}`/)
+  assert.match(newtabSource, /actionId: 'delete-bookmark', variant: 'danger', ariaLabel: `\$\{deleteLabel\}：\$\{bookmarkLabel\}`/)
+  assert.match(newtabSource, /actionId: 'refresh-icon',[\s\S]*?ariaLabel: `刷新书签图标：\$\{bookmarkLabel\}`/)
+  assert.match(newtabSource, /actionId: 'save-bookmark',[\s\S]*?ariaLabel: `保存书签更改：\$\{bookmarkLabel\}`/)
+  assert.match(newtabSource, /ariaLabel = label/)
+  assert.match(newtabSource, /button\.setAttribute\('aria-label', ariaLabel\)/)
+})
+
 test('newtab folder candidate picker exposes named listbox semantics', () => {
   const newtabHtml = readProjectFile('src/newtab/newtab.html')
   const searchInput = newtabHtml.match(/<input[\s\S]*?id="folder-candidate-search"[\s\S]*?>/)?.[0] || ''

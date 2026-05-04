@@ -7,7 +7,7 @@
 - 集成分支：`integration/goal-final-polish-20260504`
 - 集成 worktree：`/mnt/g/coding/worktrees/goal-final-polish-20260504`
 - 基线：`main@11582da` / `v1.4.23`
-- 当前集成代码状态：在 `dba5aba` 基础上继续补齐 popup 书签操作菜单项上下文；报告最新提交以 `git log -1 --oneline` 为准。
+- 当前集成代码状态：在 `d01d8b3` 基础上继续补齐 newtab 书签编辑菜单项上下文；报告最新提交以 `git log -1 --oneline` 为准。
 
 本轮采用多 agent 分支审查与修复流程，覆盖性能、UI、功能、人性化体验、构建安全五个可合并改动方向。主工作区 `/mnt/g/coding/chromebookmark` 保持在 `main@11582da`，未合并到 `main`。
 
@@ -210,6 +210,12 @@
   - 影响：删除书签后的 toast 中“撤销”和“回收站”按钮依赖邻近文本表达对象；辅助技术用户按按钮浏览时难以确认操作针对哪条刚删除的书签。
   - 建议：为 toast 动作按钮生成包含书签标题的 `aria-label`，长标题截断。
   - 处理：已完成，删除提示动作按钮使用 `撤销删除：${title}` 和 `打开回收站查看：${title}`。
+
+- [低] UI/可访问性：newtab 书签编辑菜单项名称缺少书签上下文
+  - 位置：`src/newtab/newtab.ts` / `renderBookmarkMenu`、`createMenuAction`
+  - 影响：书签设置弹窗里的“固定到常用、复制链接、删除链接、刷新图标、保存更改”等 menuitem 只暴露通用动作名，辅助技术用户难以确认动作作用于哪条书签。
+  - 建议：编辑现有书签时为菜单项生成“动作 + 书签标题”的 `aria-label`，新增书签菜单保持原有简短名称。
+  - 处理：已完成，newtab 书签编辑菜单项现在使用 `复制书签链接：${title}`、`删除书签：${title}`、`保存书签更改：${title}` 等上下文化名称。
 
 - [低] UI/可访问性：newtab 主搜索输入缺少 combobox 角色
   - 位置：`src/newtab/newtab.ts` / `createSearchWidget`
@@ -527,7 +533,15 @@
    - 推荐改进方案：为 toast 动作按钮生成“动作 + 书签标题”的可访问名称，并截断过长标题。
    - 处理状态：已修复。
 
-25. newtab 主搜索输入缺少 combobox 角色
+25. newtab 书签编辑菜单项可访问名称重复
+   - 页面/组件位置：newtab 书签设置弹窗
+   - 现象描述：现有书签编辑菜单中的“固定到常用、复制链接、删除链接、刷新图标、保存更改”等动作只暴露通用菜单项名称。
+   - 对用户的影响：辅助技术用户按菜单项浏览时，难以确认当前动作作用于哪条书签，删除和保存类动作尤其容易混淆对象。
+   - 严重程度：低
+   - 推荐改进方案：为现有书签编辑菜单项生成“动作 + 书签标题”的可访问名称，新增书签菜单保留简短名称。
+   - 处理状态：已修复。
+
+26. newtab 主搜索输入缺少 combobox 角色
    - 页面/组件位置：newtab 主搜索框
    - 现象描述：搜索输入已有自动补全和候选列表状态，但没有显式 `role="combobox"`。
    - 对用户的影响：辅助技术可能只把它当作普通搜索输入，无法稳定感知候选列表语义。
@@ -535,7 +549,7 @@
    - 推荐改进方案：补充 combobox 角色，并静态约束它继续控制 `newtab-search-suggestions` listbox。
    - 处理状态：已修复。
 
-26. newtab 搜索引擎菜单缺少完整键盘导航
+27. newtab 搜索引擎菜单缺少完整键盘导航
    - 页面/组件位置：newtab 主搜索框 / 搜索引擎切换菜单
    - 现象描述：菜单已有 `role="menu"` 和 `menuitemradio`，但打开后不会把焦点送入菜单项，也没有方向键、Home/End 和 Escape 的菜单行为。
    - 对用户的影响：键盘用户需要额外 Tab 才能进入菜单，切换搜索引擎的路径不符合常见菜单控件预期。
@@ -543,7 +557,7 @@
    - 推荐改进方案：触发按钮支持 ArrowDown/ArrowUp 打开菜单并聚焦首尾项；菜单内支持 ArrowUp/ArrowDown/Home/End 移动焦点，Escape 关闭并回焦按钮。
    - 处理状态：已修复。
 
-27. newtab 候选文件夹 listbox 缺少方向键导航
+28. newtab 候选文件夹 listbox 缺少方向键导航
    - 页面/组件位置：newtab 设置抽屉 / 文件夹来源候选列表
    - 现象描述：候选文件夹列表声明为多选 listbox，但选项缺少 roving focus 和方向键/Home/End/Escape 行为。
    - 对用户的影响：键盘用户筛选和选择来源文件夹时，需要在多个候选项之间连续 Tab，选择后也可能丢失当前候选项上下文。
@@ -641,8 +655,8 @@
   - 影响范围：newtab/options/popup UI 与可访问性。
   - 测试方式：`npm test`、`npm run typecheck`
 
-- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、`b185052`、`87f4f3c`、`d4cb535`、`e33821c`、`71770a7`、`3e1e935`、`77b58d9`、`f43c79b`、`53c771d`、`66bbf0d`、`c634fcb`、`1ac5063`、`15fc795`、`a83c2a8`、`33b2a3a`、`0903ab3`、`500624a`、`a9cbde5`、`77ac5c6`、`3cf2451`、`1a48e09`、`a21eac8`、`29e6a18`、`7ac0f64`、`b7dffb8`、`f971cbe`、`719dffc`、`5a4a21b`、`879af2b`、`dba5aba`、本提交
-  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化、AI 响应解析、Inbox 状态模块、回收站事务 helper 和完整内容快照存储模块改为触发对应功能后再加载或通过轻量常量/搜索入口解耦；自动分析失败后按剩余队列重新计算下一次唤醒，移除首屏和后台队列的非必要运行成本；popup 书签树和搜索结果的操作菜单按钮及菜单项使用书签标题生成可访问名称；popup 书签操作菜单支持触发按钮方向键入口和关闭回焦；popup 文件夹候选容器和搜索框补齐稳定名称，搜索框关联对应结果列表，筛选文件夹 listbox 补齐 roving focus 和方向键导航；popup 书签树、移动目标树和保存目标树的展开/折叠按钮加入文件夹路径上下文；options 范围筛选、AI 模型 picker、移动目标文件夹 picker 搜索框补齐稳定名称和结果列表关联；options 范围筛选文件夹 listbox 补齐 roving focus 和方向键导航；options AI 模型 picker listbox 补齐可访问名称、roving focus 和方向键导航；options 移动目标文件夹 picker 补齐 listbox/option 语义与方向键导航；Dashboard 卡片打开、复制、改标签、移动、删除动作加入书签标题上下文；回收站选择、恢复和清除控件加入书签标题上下文；重定向结果选择、更新和打开最终链接控件加入书签标题上下文；书签智能分析结果筛选输入补齐稳定名称，选择、打开、应用和移动控件加入书签标题上下文；重复书签逐条移入回收站勾选项加入标题和路径上下文；忽略规则删除按钮加入规则名称、路径或域名上下文，忽略规则清空按钮加入类别上下文；文件夹清理预览、执行和拆分撤销按钮加入建议标题和移动数量上下文；可用性检测结果选择、打开和置信分区移动控件加入书签标题与路径上下文；newtab 候选文件夹搜索框加入稳定名称和候选列表关联；newtab 设置抽屉背景、书签卡片、时间、搜索栏原生控件与 range 滑块补齐稳定名称；newtab 删除提示的撤销和回收站按钮加入刚删除书签标题上下文；newtab 主搜索输入补充 combobox 语义；newtab 搜索引擎菜单补齐键盘焦点与方向键导航；newtab 候选文件夹 listbox 补齐 roving focus 和方向键导航，避免重复或无上下文控件名称。
+- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、`b185052`、`87f4f3c`、`d4cb535`、`e33821c`、`71770a7`、`3e1e935`、`77b58d9`、`f43c79b`、`53c771d`、`66bbf0d`、`c634fcb`、`1ac5063`、`15fc795`、`a83c2a8`、`33b2a3a`、`0903ab3`、`500624a`、`a9cbde5`、`77ac5c6`、`3cf2451`、`1a48e09`、`a21eac8`、`29e6a18`、`7ac0f64`、`b7dffb8`、`f971cbe`、`719dffc`、`5a4a21b`、`879af2b`、`dba5aba`、`d01d8b3`、本提交
+  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化、AI 响应解析、Inbox 状态模块、回收站事务 helper 和完整内容快照存储模块改为触发对应功能后再加载或通过轻量常量/搜索入口解耦；自动分析失败后按剩余队列重新计算下一次唤醒，移除首屏和后台队列的非必要运行成本；popup 书签树和搜索结果的操作菜单按钮及菜单项使用书签标题生成可访问名称；popup 书签操作菜单支持触发按钮方向键入口和关闭回焦；popup 文件夹候选容器和搜索框补齐稳定名称，搜索框关联对应结果列表，筛选文件夹 listbox 补齐 roving focus 和方向键导航；popup 书签树、移动目标树和保存目标树的展开/折叠按钮加入文件夹路径上下文；options 范围筛选、AI 模型 picker、移动目标文件夹 picker 搜索框补齐稳定名称和结果列表关联；options 范围筛选文件夹 listbox 补齐 roving focus 和方向键导航；options AI 模型 picker listbox 补齐可访问名称、roving focus 和方向键导航；options 移动目标文件夹 picker 补齐 listbox/option 语义与方向键导航；Dashboard 卡片打开、复制、改标签、移动、删除动作加入书签标题上下文；回收站选择、恢复和清除控件加入书签标题上下文；重定向结果选择、更新和打开最终链接控件加入书签标题上下文；书签智能分析结果筛选输入补齐稳定名称，选择、打开、应用和移动控件加入书签标题上下文；重复书签逐条移入回收站勾选项加入标题和路径上下文；忽略规则删除按钮加入规则名称、路径或域名上下文，忽略规则清空按钮加入类别上下文；文件夹清理预览、执行和拆分撤销按钮加入建议标题和移动数量上下文；可用性检测结果选择、打开和置信分区移动控件加入书签标题与路径上下文；newtab 候选文件夹搜索框加入稳定名称和候选列表关联；newtab 设置抽屉背景、书签卡片、时间、搜索栏原生控件与 range 滑块补齐稳定名称；newtab 删除提示的撤销和回收站按钮、书签编辑菜单项加入书签标题上下文；newtab 主搜索输入补充 combobox 语义；newtab 搜索引擎菜单补齐键盘焦点与方向键导航；newtab 候选文件夹 listbox 补齐 roving focus 和方向键导航，避免重复或无上下文控件名称。
   - 影响范围：`src/popup/popup.css`、`src/popup/popup.ts`、`src/newtab/content-state.ts`、`src/newtab/newtab.ts`、`src/newtab/newtab.html`、`src/options/options.ts`、`src/options/sections/dashboard.ts`、`src/options/sections/recycle.ts`、`src/options/sections/redirects.ts`、`src/options/sections/duplicates.ts`、`src/options/sections/ignore.ts`、`src/options/sections/folder-cleanup.ts`、相关测试。
   - 测试方式：focused tests、`npm test`、`npm run validate`、Playwright 产物/搜索冒烟。
 
@@ -658,7 +672,7 @@
 - `npm audit --json`：0 vulnerabilities。
 - `npm run typecheck`：通过。
 - `npm run lint`：通过；当前脚本等价于 `npm run typecheck`。
-- `npm test`：338/338 通过。
+- `npm test`：340/340 通过。
 - `npm run check:version`：通过，版本 `1.4.23`。
 - `npm run build`：通过。
 - `npm run validate`：通过，覆盖 typecheck、test、check:version、build。
@@ -669,8 +683,8 @@
   - `node --test .tmp-test/tests/newtab-search-index.test.js .tmp-test/tests/newtab-content-state.test.js`：55/55 通过。
   - 覆盖轻量同步建议缓存、自然语言搜索动态 import、pinyin 动态搜索、无匹配网页搜索 fallback、候选文件夹搜索框和 listbox 稳定可访问名称、候选文件夹 listbox 键盘导航、主搜索 combobox 语义和搜索引擎菜单键盘导航。
 - focused newtab 可访问性测试：通过。
-  - `npm run test:build && node --test .tmp-test/tests/newtab-a11y.test.js`：6/6 通过。
-  - 覆盖 newtab 设置抽屉 select、文本输入和 range 滑块稳定可访问名称、删除提示动作按钮的书签特定可访问名称、候选文件夹 picker 命名、局部状态区域、启动动效减弱偏好和 Dashboard overlay 焦点管理。
+  - `npm run test:build && node --test .tmp-test/tests/newtab-a11y.test.js`：7/7 通过。
+  - 覆盖 newtab 设置抽屉 select、文本输入和 range 滑块稳定可访问名称、删除提示动作按钮和书签编辑菜单项的书签特定可访问名称、候选文件夹 picker 命名、局部状态区域、启动动效减弱偏好和 Dashboard overlay 焦点管理。
 - focused service worker 队列测试：通过。
   - `npm run test:build && node --test .tmp-test/tests/service-worker-save-guards.test.js .tmp-test/tests/ai-settings.test.js`：9/9 通过。
   - 覆盖自动分析队列复用树快照、失败后按剩余队列状态重新安排唤醒、AI 设置序列化。
@@ -767,6 +781,7 @@
 - newtab 候选文件夹 listbox 加入稳定可访问名称，改善辅助技术用户从搜索框进入候选列表后的上下文识别。
 - newtab 设置抽屉的背景、书签卡片、时间和搜索栏原生控件及 range 滑块加入稳定可访问名称，降低辅助技术用户调整设置时的上下文丢失风险。
 - newtab 删除提示中的撤销和回收站按钮加入刚删除书签标题上下文，降低辅助技术用户撤销删除或打开回收站时的对象混淆风险。
+- newtab 书签编辑菜单项加入当前书签标题上下文，降低固定、复制、删除、刷新和保存时的对象混淆风险。
 - newtab 主搜索输入补充 combobox 语义，让书签建议 listbox 更容易被辅助技术识别。
 - newtab 搜索引擎菜单支持方向键打开、菜单项焦点循环、Home/End 跳转和 Escape 回焦，改善键盘切换搜索引擎体验。
 - newtab 候选文件夹 listbox 支持方向键进入、循环移动、Home/End 跳转、Escape 回搜索框和选择后回焦，改善键盘选择来源文件夹体验。

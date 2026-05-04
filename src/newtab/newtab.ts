@@ -5367,22 +5367,34 @@ function renderBookmarkMenu({ focusFirst = true, focusAction = '' } = {}): void 
   actionList.setAttribute('role', 'menu')
   actionList.setAttribute('aria-label', '书签操作')
   actionList.addEventListener('keydown', handleMenuActionsKeydown)
+  const bookmarkLabel = getBookmarkActionLabelContext(bookmark)
+  const pinLabel = isActiveMenuBookmarkPinned() ? '取消固定书签' : '固定书签到常用'
+  const deleteLabel = state.pendingDeleteBookmarkId === String(bookmark.id) ? '确认删除书签' : '删除书签'
   actionList.append(
     createMenuAction(
       isActiveMenuBookmarkPinned() ? '取消固定' : '固定到常用',
       'pin',
       toggleActiveMenuBookmarkPin,
-      { actionId: 'toggle-pin' }
+      { actionId: 'toggle-pin', ariaLabel: `${pinLabel}：${bookmarkLabel}` }
     ),
-    createMenuAction('复制链接', 'copy', copyActiveMenuBookmarkUrl, { actionId: 'copy-url' }),
+    createMenuAction('复制链接', 'copy', copyActiveMenuBookmarkUrl, {
+      actionId: 'copy-url',
+      ariaLabel: `复制书签链接：${bookmarkLabel}`
+    }),
     createMenuAction(
       state.pendingDeleteBookmarkId === String(bookmark.id) ? '确认删除 1 个' : '删除链接',
       'trash',
       deleteActiveMenuBookmark,
-      { actionId: 'delete-bookmark', variant: 'danger' }
+      { actionId: 'delete-bookmark', variant: 'danger', ariaLabel: `${deleteLabel}：${bookmarkLabel}` }
     ),
-    createMenuAction('刷新图标', 'refresh', refreshActiveMenuIcon, { actionId: 'refresh-icon' }),
-    createMenuAction('保存更改', 'save', saveBookmarkMenuChanges, { actionId: 'save-bookmark' })
+    createMenuAction('刷新图标', 'refresh', refreshActiveMenuIcon, {
+      actionId: 'refresh-icon',
+      ariaLabel: `刷新书签图标：${bookmarkLabel}`
+    }),
+    createMenuAction('保存更改', 'save', saveBookmarkMenuChanges, {
+      actionId: 'save-bookmark',
+      ariaLabel: `保存书签更改：${bookmarkLabel}`
+    })
   )
 
   menu.append(titleField, urlField, iconRow, separator, actionList)
@@ -5583,11 +5595,13 @@ function createMenuAction(
   {
     disabled = state.menuBusy,
     actionId = '',
-    variant = ''
+    variant = '',
+    ariaLabel = label
   }: {
     disabled?: boolean
     actionId?: string
     variant?: 'danger' | ''
+    ariaLabel?: string
   } = {}
 ): HTMLButtonElement {
   const button = document.createElement('button')
@@ -5595,7 +5609,7 @@ function createMenuAction(
   button.type = 'button'
   button.disabled = disabled
   button.setAttribute('role', 'menuitem')
-  button.setAttribute('aria-label', label)
+  button.setAttribute('aria-label', ariaLabel)
   if (actionId) {
     button.dataset.menuAction = actionId
   }
