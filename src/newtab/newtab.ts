@@ -12,7 +12,6 @@ import {
   extractBookmarkData,
   findBookmarksBar
 } from '../shared/bookmark-tree.js'
-import { deleteBookmarkToRecycle, removeRecycleEntry } from '../shared/recycle-bin.js'
 import { getLocalStorage, setLocalStorage } from '../shared/storage.js'
 import type { ExtractedBookmarkData, FolderRecord } from '../shared/types.js'
 import type {
@@ -22,7 +21,6 @@ import type {
   BookmarkTagSource
 } from '../shared/bookmark-tags.js'
 import type { ContentSnapshotIndex } from '../shared/content-snapshots.js'
-import { cancelExitMotion, closeWithExitMotion } from '../shared/motion.js'
 import {
   DEFAULT_ICON_SETTINGS,
   ICON_LAYOUT_PRESETS,
@@ -125,6 +123,7 @@ import {
   type NewTabTimeSettings
 } from './time-settings.js'
 const FAVICON_SIZE = 64
+const MOTION_CLOSE_TOKEN = 'motionCloseToken'
 const FAVICON_COLOR_SAMPLE_SIZE = 32
 const CUSTOM_ICON_MAX_BYTES = 2 * 1024 * 1024
 const BOOKMARK_DRAG_LONG_PRESS_MS = 320
@@ -168,9 +167,104 @@ const SEARCH_OFFSET_ABSOLUTE_MIN = -240
 const SEARCH_OFFSET_ABSOLUTE_MAX = 240
 const SEARCH_WIDTH_BOUNDS_FALLBACK = { min: 16, max: 72 }
 const NEWTAB_LAYOUT_SAFE_GAP = 12
+
+type MotionCleanup = () => void | Promise<void>
+
+function prefersReducedMotion(): boolean {
+  return Boolean(
+    typeof window !== 'undefined' &&
+      'matchMedia' in window &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+}
+
+function waitForMotionEnd(element: Element, timeoutMs = 260): Promise<void> {
+  if (prefersReducedMotion()) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false
+    let timeoutId = 0
+
+    let finishFromEvent: (event: Event) => void
+    const finish = () => {
+      if (resolved) {
+        return
+      }
+      resolved = true
+      window.clearTimeout(timeoutId)
+      element.removeEventListener('animationend', finishFromEvent)
+      element.removeEventListener('transitionend', finishFromEvent)
+      resolve()
+    }
+    finishFromEvent = (event: Event) => {
+      if (event.target === element) {
+        finish()
+      }
+    }
+
+    element.addEventListener('animationend', finishFromEvent)
+    element.addEventListener('transitionend', finishFromEvent)
+    timeoutId = window.setTimeout(finish, timeoutMs)
+  })
+}
+
+function cancelExitMotion(element: Element, closingClass = 'is-closing'): void {
+  if (element instanceof HTMLElement) {
+    delete element.dataset[MOTION_CLOSE_TOKEN]
+  }
+  element.classList.remove(closingClass)
+}
+
+async function closeWithExitMotion(
+  element: Element,
+  closingClass: string,
+  removeOrHide: MotionCleanup,
+  timeoutMs = 260
+): Promise<void> {
+  if (prefersReducedMotion()) {
+    cancelExitMotion(element, closingClass)
+    await removeOrHide()
+    return
+  }
+
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  if (element instanceof HTMLElement) {
+    element.dataset[MOTION_CLOSE_TOKEN] = token
+  }
+  element.classList.add(closingClass)
+
+  await waitForMotionEnd(element, timeoutMs)
+
+  if (
+    element instanceof HTMLElement &&
+    element.dataset[MOTION_CLOSE_TOKEN] !== token
+  ) {
+    return
+  }
+
+  cancelExitMotion(element, closingClass)
+  await removeOrHide()
+}
 const SEARCH_SUGGESTION_LIMIT = 6
 const SEARCH_SUGGESTION_DEBOUNCE_MS = 80
 const SEARCH_SUGGESTION_CACHE_LIMIT = 24
+
+async function deleteBookmarkToRecycleLazy(
+  ...args: Parameters<typeof import('../shared/recycle-bin.js').deleteBookmarkToRecycle>
+): ReturnType<typeof import('../shared/recycle-bin.js').deleteBookmarkToRecycle> {
+  const { deleteBookmarkToRecycle } = await import('../shared/recycle-bin.js')
+  return deleteBookmarkToRecycle(...args)
+}
+
+async function removeRecycleEntryLazy(
+  ...args: Parameters<typeof import('../shared/recycle-bin.js').removeRecycleEntry>
+): ReturnType<typeof import('../shared/recycle-bin.js').removeRecycleEntry> {
+  const { removeRecycleEntry } = await import('../shared/recycle-bin.js')
+  return removeRecycleEntry(...args)
+}
+
 const BOOKMARK_TILE_INITIAL_RENDER_LIMIT = 160
 const BOOKMARK_TILE_RENDER_CHUNK_SIZE = 80
 const BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS = 120
@@ -2486,7 +2580,7 @@ async function deleteActiveMenuBookmark(): Promise<void> {
     renderBookmarkMenu({ focusFirst: false, focusAction: 'delete-bookmark' })
 
     const recycleId = `recycle-${bookmark.id}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-    await deleteBookmarkToRecycle(bookmark.id, {
+    await deleteBookmarkToRecycleLazy(bookmark.id, {
       recycleId,
       bookmarkId: String(bookmark.id),
       title: bookmark.title || '未命名书签',
@@ -2556,7 +2650,7 @@ async function undoLastDeletedBookmark(): Promise<void> {
       title: bookmark.title || '未命名书签',
       url: bookmark.url
     })
-    await removeRecycleEntry(deleted.recycleId).catch((error) => {
+    await removeRecycleEntryLazy(deleted.recycleId).catch((error) => {
       console.warn('新标签页撤销删除时清理回收站记录失败。', error)
     })
     if (deleted.customIcon) {

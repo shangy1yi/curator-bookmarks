@@ -1,4 +1,3 @@
-import { renderDotMatrixLoader } from '../shared/dot-matrix-loader.js'
 import type { BookmarkTagIndex, BookmarkTagRecord } from '../shared/bookmark-tags.js'
 import type {
   ContentSnapshotIndex,
@@ -1033,9 +1032,44 @@ export function createLoadingStateView(label = '正在加载书签'): HTMLElemen
   view.className = 'newtab-state newtab-loading-state'
   view.setAttribute('role', 'status')
   view.setAttribute('aria-label', label)
-  view.innerHTML = renderDotMatrixLoader({
-    variant: 'spiral',
-    className: 'newtab-state-loader'
-  })
+  view.innerHTML = renderNewTabDotMatrixLoader('newtab-state-loader')
   return view
+}
+
+function renderNewTabDotMatrixLoader(className = ''): string {
+  const classes = ['dot-matrix-loader', 'dot-matrix-loader--spiral', className]
+    .filter(Boolean)
+    .join(' ')
+  const dots: Array<[string, number, number]> = [
+    ['00', 6, 6],
+    ['01', 17, 6],
+    ['02', 28, 6],
+    ['03', 39, 6],
+    ['04', 50, 6],
+    ['10', 6, 17],
+    ['11', 17, 17],
+    ['12', 28, 17],
+    ['13', 39, 17],
+    ['14', 50, 17],
+    ['20', 6, 28],
+    ['21', 17, 28],
+    ['22', 28, 28],
+    ['23', 39, 28],
+    ['24', 50, 28],
+    ['30', 6, 39],
+    ['31', 17, 39],
+    ['32', 28, 39],
+    ['33', 39, 39],
+    ['34', 50, 39],
+    ['40', 6, 50],
+    ['41', 17, 50],
+    ['42', 28, 50],
+    ['43', 39, 50],
+    ['44', 50, 50]
+  ]
+  const litDots = dots
+    .map(([key, x, y]) => `<circle class="dot-matrix-loader-lit dot-matrix-loader-d${key}" cx="${x}" cy="${y}" r="3.1"></circle>`)
+    .join('')
+
+  return `<svg class="${classes}" viewBox="0 0 56 56" aria-hidden="true" focusable="false">${litDots}</svg>`
 }

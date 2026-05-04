@@ -7,7 +7,7 @@
 - 集成分支：`integration/goal-final-polish-20260504`
 - 集成 worktree：`/mnt/g/coding/worktrees/goal-final-polish-20260504`
 - 基线：`main@11582da` / `v1.4.23`
-- 当前集成代码提交：`323898b`；报告最新提交以 `git log -1 --oneline` 为准。
+- 当前集成代码状态：在 `323898b` 基础上追加 newtab 首屏预加载瘦身；报告最新提交以 `git log -1 --oneline` 为准。
 
 本轮采用多 agent 分支审查与修复流程，覆盖性能、UI、功能、人性化体验、构建安全五个可合并改动方向。主工作区 `/mnt/g/coding/chromebookmark` 保持在 `main@11582da`，未合并到 `main`。
 
@@ -33,9 +33,9 @@
 
 - [中] 性能：newtab 首屏预加载 popup 搜索重 chunk
   - 位置：`src/newtab/content-state.ts`、`src/newtab/newtab.ts`
-  - 影响：newtab 初始 HTML 曾预加载 `natural-search`、`search`/`search-index`、`content-snapshots` 等搜索相关 chunk，其中搜索 chunk 约 312KB，普通打开新标签页也要承担成本。
-  - 建议：保留轻量同步书签建议，pinyin、自然语言、复杂 popup 搜索能力改为用户输入后按需动态加载。
-  - 处理：已完成，普通关键词命中不加载搜索重 chunk；无轻量命中或明显自然语言查询时再按需加载。
+  - 影响：newtab 初始 HTML 曾预加载 `natural-search`、`search`/`search-index`、`content-snapshots` 等搜索相关 chunk，其中搜索 chunk 约 312KB，普通打开新标签页也要承担成本；非首屏必要的 loader、动效、回收站模块也会扩大初始加载面。
+  - 建议：保留轻量同步书签建议，pinyin、自然语言、复杂 popup 搜索能力和低频操作模块改为用户触发后按需加载。
+  - 处理：已完成，普通关键词命中不加载搜索重 chunk；无轻量命中或明显自然语言查询时再按需加载；`dot-matrix-loader`、`motion`、`recycle-bin` 不再作为 newtab 首屏 `modulepreload`。
 
 - [高] 功能：标签索引并发写入可能覆盖字段
   - 位置：`src/shared/bookmark-tags.ts`
@@ -243,8 +243,8 @@
   - 影响范围：newtab/options/popup UI 与可访问性。
   - 测试方式：`npm test`、`npm run typecheck`
 
-- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`
-  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer，移除首屏 `bookmark-tags` 运行时预加载。
+- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、newtab 首屏预加载瘦身提交
+  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载，移除首屏非必要运行时预加载。
   - 影响范围：`src/popup/popup.css`、`src/newtab/content-state.ts`、`src/newtab/newtab.ts`、相关测试。
   - 测试方式：focused tests、`npm test`、`npm run validate`、Playwright 产物/搜索冒烟。
 
@@ -284,11 +284,11 @@
   - 修复后 popup 在 390px 窄视口下 `scrollWidth === clientWidth`，无横向溢出。
 - Playwright newtab 搜索加载策略检查：通过。
   - fresh profile 打开 newtab 无 pageerror/console error。
-  - 普通关键词命中本地书签时，搜索建议可见，且仅加载 `newtab` 主 chunk、`storage`、`dot-matrix-loader` 和 CSS，未加载 `bookmark-tags-*`、`search-*`、`natural-search-*`、`content-snapshots-*`。
+  - 普通关键词命中本地书签时，搜索建议可见，且仅加载 `newtab` 主 chunk、`bookmarks-api`、`storage`、CSS 和 favicon，未加载 `dot-matrix-loader-*`、`motion-*`、`recycle-bin-*`、`bookmark-tags-*`、`search-*`、`natural-search-*`、`content-snapshots-*`。
   - 无本地匹配时网页搜索 fallback 可见，无 pageerror/console error。
 - dist modulepreload 检查：通过。
-  - `dist/src/newtab/newtab.html` 只预加载 `storage-*` 和 `dot-matrix-loader-*`。
-  - 未发现 newtab 首屏 `modulepreload` 预加载 `bookmark-tags-*`、`search-*`、`natural-search-*` 或 `content-snapshots-*`。
+  - `dist/src/newtab/newtab.html` 只预加载启动必需的 `bookmarks-api-*` 和 `storage-*`。
+  - 未发现 newtab 首屏 `modulepreload` 预加载 `dot-matrix-loader-*`、`motion-*`、`recycle-bin-*`、`bookmark-tags-*`、`search-*`、`natural-search-*` 或 `content-snapshots-*`。
 - Playwright 可访问名称检查：通过。
   - newtab、options dashboard、popup 中可见交互控件均有可访问名称。
   - 未发现可见的无名 `button`、`a[href]`、`input`、`select`、`textarea` 或 `role="button"` 控件。
@@ -313,6 +313,7 @@
 - popup 根布局支持窄视口收缩，避免独立页面或窄屏容器横向溢出。
 - newtab 搜索保留轻量同步建议，将 pinyin、自然语言、复杂 popup 搜索 chunk 改为按需加载，降低普通打开新标签页和普通关键词搜索的初始资源成本。
 - newtab 标签索引读取改为本页轻量 normalizer，避免仅为读取标签数据而首屏加载完整 `bookmark-tags` 模块。
+- newtab loading SVG、关闭动效和回收站操作拆离首屏依赖，避免普通打开和普通搜索预加载 `dot-matrix-loader`、`motion`、`recycle-bin`。
 
 ## 十、创新了什么功能
 
