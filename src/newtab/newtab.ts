@@ -452,6 +452,7 @@ const state = {
   } as NewTabActivityState,
   folderCandidatesExpanded: false,
   folderCandidateQuery: '',
+  folderCandidateActiveId: '',
   timeSettings: { ...DEFAULT_TIME_SETTINGS } as NewTabTimeSettings,
   settingsSaveState: 'idle' as SettingsSaveState,
   settingsSaveMessage: '',
@@ -893,8 +894,17 @@ function bindFolderSettingsEvents(): void {
     .getElementById('folder-candidate-search')
     ?.addEventListener('input', handleFolderCandidateSearch)
   document
+    .getElementById('folder-candidate-search')
+    ?.addEventListener('keydown', handleFolderCandidateSearchKeydown)
+  document
     .getElementById('folder-candidate-list')
     ?.addEventListener('click', handleFolderCandidateClick)
+  document
+    .getElementById('folder-candidate-list')
+    ?.addEventListener('keydown', handleFolderCandidateListKeydown)
+  document
+    .getElementById('folder-candidate-list')
+    ?.addEventListener('focusin', handleFolderCandidateFocus)
   document
     .getElementById('folder-selected-list')
     ?.addEventListener('click', handleSelectedFolderClick)
@@ -930,7 +940,22 @@ function toggleFolderCandidates(): void {
 function handleFolderCandidateSearch(event: Event): void {
   const target = event.target
   state.folderCandidateQuery = target instanceof HTMLInputElement ? target.value : ''
+  state.folderCandidateActiveId = ''
   syncFolderSettingsControls()
+}
+
+function handleFolderCandidateSearchKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  const candidates = getFilteredFolderCandidates()
+  if (!candidates.length) {
+    return
+  }
+
+  event.preventDefault()
+  focusFolderCandidateOption(event.key === 'ArrowDown' ? 'first' : 'last')
 }
 
 function handleFolderCandidateClick(event: Event): void {
@@ -949,7 +974,123 @@ function handleFolderCandidateClick(event: Event): void {
     return
   }
 
-  void toggleSelectedFolder(folderId, { preserveCandidateScroll: true })
+  state.folderCandidateActiveId = folderId
+  void toggleSelectedFolder(folderId, {
+    preserveCandidateScroll: true,
+    restoreCandidateFocus: true,
+    focusCandidateId: folderId
+  })
+}
+
+function handleFolderCandidateListKeydown(event: KeyboardEvent): void {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    document.getElementById('folder-candidate-search')?.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusFolderCandidateOption('first')
+  } else if (event.key === 'End') {
+    focusFolderCandidateOption('last')
+  } else {
+    focusFolderCandidateOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function getFolderCandidateOptionButtons(): HTMLButtonElement[] {
+  const candidateList = document.getElementById('folder-candidate-list')
+  if (!(candidateList instanceof HTMLElement)) {
+    return []
+  }
+
+  return [...candidateList.querySelectorAll<HTMLButtonElement>('[data-folder-candidate-id]')]
+}
+
+function focusFolderCandidateOptionById(folderId: string): boolean {
+  let targetButton: HTMLButtonElement | null = null
+  for (const candidateButton of getFolderCandidateOptionButtons()) {
+    const isTarget = candidateButton.dataset.folderCandidateId === folderId
+    candidateButton.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = candidateButton
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  state.folderCandidateActiveId = folderId
+  targetButton.focus()
+  return true
+}
+
+function resolveFolderCandidateActiveId(candidates: NewTabFolderCandidate[]): string {
+  if (!candidates.length) {
+    state.folderCandidateActiveId = ''
+    return ''
+  }
+
+  const activeId = candidates.some((folder) => folder.id === state.folderCandidateActiveId)
+    ? state.folderCandidateActiveId
+    : candidates[0]?.id || ''
+  state.folderCandidateActiveId = activeId
+  return activeId
+}
+
+function syncFolderCandidateOptionTabStops(activeId: string): void {
+  for (const candidateButton of getFolderCandidateOptionButtons()) {
+    candidateButton.tabIndex = candidateButton.dataset.folderCandidateId === activeId ? 0 : -1
+  }
+}
+
+function focusFolderCandidateOption(direction: 1 | -1 | 'first' | 'last'): void {
+  const buttons = getFolderCandidateOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  let nextIndex = state.folderCandidateActiveId
+    ? buttons.findIndex((button) => button.dataset.folderCandidateId === state.folderCandidateActiveId)
+    : -1
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  const folderId = String(button?.dataset.folderCandidateId || '')
+  if (folderId) {
+    focusFolderCandidateOptionById(folderId)
+  }
+}
+
+function handleFolderCandidateFocus(event: FocusEvent): void {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.dataset.folderCandidateId) {
+    return
+  }
+
+  state.folderCandidateActiveId = target.dataset.folderCandidateId
+  syncFolderCandidateOptionTabStops(state.folderCandidateActiveId)
 }
 
 function handleSelectedFolderClick(event: Event): void {
@@ -973,13 +1114,21 @@ function handleSelectedFolderClick(event: Event): void {
 
 async function toggleSelectedFolder(
   folderId: string,
-  { preserveCandidateScroll = false } = {}
+  {
+    preserveCandidateScroll = false,
+    restoreCandidateFocus = false,
+    focusCandidateId = ''
+  } = {}
 ): Promise<void> {
   const currentIds = state.folderSettings.selectedFolderIds
   const nextIds = currentIds.includes(folderId)
     ? currentIds.filter((id) => id !== folderId)
     : [...currentIds, folderId]
-  await updateSelectedFolders(nextIds, { preserveCandidateScroll })
+  await updateSelectedFolders(nextIds, {
+    preserveCandidateScroll,
+    restoreCandidateFocus,
+    focusCandidateId
+  })
 }
 
 async function removeSelectedFolder(folderId: string): Promise<void> {
@@ -990,7 +1139,11 @@ async function removeSelectedFolder(folderId: string): Promise<void> {
 
 async function updateSelectedFolders(
   folderIds: string[],
-  { preserveCandidateScroll = false } = {}
+  {
+    preserveCandidateScroll = false,
+    restoreCandidateFocus = false,
+    focusCandidateId = ''
+  } = {}
 ): Promise<void> {
   const candidateList = document.getElementById('folder-candidate-list')
   const previousScrollTop = preserveCandidateScroll && candidateList instanceof HTMLElement
@@ -1010,11 +1163,14 @@ async function updateSelectedFolders(
   applyFolderSettings()
   updateClockText()
 
-  if (preserveCandidateScroll) {
+  if (preserveCandidateScroll || restoreCandidateFocus) {
     window.requestAnimationFrame(() => {
       const nextList = document.getElementById('folder-candidate-list')
       if (nextList instanceof HTMLElement) {
         nextList.scrollTop = previousScrollTop
+      }
+      if (restoreCandidateFocus) {
+        focusFolderCandidateOptionById(focusCandidateId || state.folderCandidateActiveId)
       }
     })
   }
@@ -6903,12 +7059,14 @@ function createFolderCandidateControls(): HTMLElement[] {
   }
 
   const selectedIds = new Set(state.folderSettings.selectedFolderIds)
+  const activeId = resolveFolderCandidateActiveId(candidates)
   return candidates.map((folder) => {
     const selected = selectedIds.has(folder.id)
     const button = document.createElement('button')
     button.className = `folder-candidate-card ${selected ? 'selected' : ''}`
     button.type = 'button'
     button.dataset.folderCandidateId = folder.id
+    button.tabIndex = folder.id === activeId ? 0 : -1
     button.title = folder.path || folder.title
     button.setAttribute('role', 'option')
     button.setAttribute('aria-selected', String(selected))

@@ -636,6 +636,7 @@ test('newtab exposes source navigation anchors and a folder source setting switc
 
 test('newtab folder candidate search exposes a stable accessible name', () => {
   const html = readProjectFile('src/newtab/newtab.html')
+  const script = readProjectFile('src/newtab/newtab.ts')
   const searchInput = html.match(/<input[\s\S]*?id="folder-candidate-search"[\s\S]*?>/)?.[0] || ''
   const candidateList = html.match(/<div[\s\S]*?id="folder-candidate-list"[\s\S]*?>/)?.[0] || ''
 
@@ -644,6 +645,15 @@ test('newtab folder candidate search exposes a stable accessible name', () => {
   assert.match(searchInput, /aria-controls="folder-candidate-list"/)
   assert.match(candidateList, /role="listbox"/)
   assert.match(candidateList, /aria-multiselectable="true"/)
+  assert.match(script, /folderCandidateActiveId: ''/)
+  assert.match(script, /handleFolderCandidateSearchKeydown/)
+  assert.match(script, /handleFolderCandidateListKeydown/)
+  assert.match(script, /addEventListener\('focusin', handleFolderCandidateFocus\)/)
+  assert.match(script, /function focusFolderCandidateOption\(direction: 1 \| -1 \| 'first' \| 'last'\)/)
+  assert.match(script, /event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(script, /document\.getElementById\('folder-candidate-search'\)\?\.focus\(\)/)
+  assert.match(script, /button\.tabIndex = folder\.id === activeId \? 0 : -1/)
+  assert.match(script, /focusFolderCandidateOptionById\(focusCandidateId \|\| state\.folderCandidateActiveId\)/)
 })
 
 test('newtab settings drawer layout responds to drawer width', () => {
