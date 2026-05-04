@@ -618,6 +618,23 @@ test('smart bookmark analysis uses the decision panel summary layout', () => {
   assert.match(optionsCss, /\.ai-decision-grid/)
 })
 
+test('smart bookmark analysis bulk selection buttons expose analysis-specific labels', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const labelledButtons = [
+    ['ai-select-all', '全选书签智能分析结果'],
+    ['ai-select-high-confidence', '全选书签智能分析高置信结果'],
+    ['ai-clear-selection', '清空书签智能分析已选建议'],
+    ['ai-move-selection-to-suggested', '将书签智能分析已选建议移动至推荐文件夹'],
+    ['ai-apply-selection', '应用书签智能分析已选建议']
+  ]
+
+  for (const [id, label] of labelledButtons) {
+    const button = optionsHtml.match(new RegExp(`<button[^>]+id="${id}"[^>]*>`))?.[0] || ''
+    assert.ok(button, `missing button ${id}`)
+    assert.match(button, new RegExp(`aria-label="${label}"`))
+  }
+})
+
 test('smart bookmark analysis result actions expose bookmark-specific labels', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
 
