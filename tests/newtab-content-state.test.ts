@@ -424,9 +424,13 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
 
 test('newtab explains empty folder source selection without changing bookmarks', () => {
   const html = readProjectFile('src/newtab/newtab.html')
+  const contentState = readProjectFile('src/newtab/content-state.ts')
   const script = readProjectFile('src/newtab/newtab.ts')
 
   assert.match(html, /id="folder-selected-list"/)
+  assert.match(contentState, /当前没有显示来源/)
+  assert.match(contentState, /没有找到可直接展示的非空文件夹。你可以选择已有来源，或新建专用文件夹后添加书签。/)
+  assert.match(contentState, /选择现有来源/)
   assert.match(script, /未选择来源文件夹。选择来源只会决定新标签页显示哪些书签，不会移动、删除或重排原有书签。/)
   assert.match(script, /removeLabel = `从新标签页移除/)
   assert.match(script, /不会删除书签/)
@@ -522,6 +526,20 @@ test('newtab folder headers expose scoped quick-add controls', () => {
   assert.match(script, /headerRow\.append\(header, createFolderAddButton\(section\)\)/)
   assert.match(css, /\.folder-section-header-row/)
   assert.match(css, /\.folder-section-add/)
+})
+
+test('newtab empty folder state offers actionable next steps', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+
+  assert.match(script, /function createEmptyFolderState\(section: NewTabFolderSection\): HTMLElement/)
+  assert.match(script, /此文件夹还没有书签。你可以先添加一个书签，或改用已有的非空来源。/)
+  assert.match(script, /addButton\.dataset\.addBookmarkFolderId = section\.id/)
+  assert.match(script, /添加书签到这里/)
+  assert.match(script, /选择现有来源/)
+  assert.match(script, /sourceButton\.addEventListener\('click', openFolderSourceSettings\)/)
+  assert.match(css, /\.bookmark-folder-empty-state/)
+  assert.match(css, /\.bookmark-folder-empty-actions/)
 })
 
 test('builds compact source navigation data with stable anchors and bookmark counts', () => {

@@ -887,12 +887,12 @@ export function createMissingFolderView({
   title.id = 'newtab-missing-folder-title'
   title.textContent = reason === 'selected-unavailable'
     ? '已选书签来源不可用'
-    : '请选择新标签页的书签来源'
+    : '当前没有显示来源'
 
   const copy = document.createElement('p')
   copy.textContent = reason === 'selected-unavailable'
     ? '之前选择的文件夹可能已被删除或移动。请打开设置里的“书签来源”，重新选择要显示的文件夹。'
-    : '新标签页还没有要显示的书签文件夹。请打开设置里的“书签来源”，选择一个或多个文件夹。'
+    : '没有找到可直接展示的非空文件夹。你可以选择已有来源，或新建专用文件夹后添加书签。'
 
   const actions = document.createElement('div')
   actions.className = 'newtab-state-actions'
@@ -900,7 +900,7 @@ export function createMissingFolderView({
   const settingsButton = document.createElement('button')
   settingsButton.className = 'newtab-button'
   settingsButton.type = 'button'
-  settingsButton.textContent = '选择书签来源'
+  settingsButton.textContent = '选择现有来源'
   settingsButton.addEventListener('click', onOpenFolderSettings)
 
   const createButton = document.createElement('button')

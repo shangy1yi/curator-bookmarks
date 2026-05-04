@@ -3589,10 +3589,7 @@ function createBookmarkSections(sections: NewTabFolderSection[]): HTMLElement {
 
       sectionNode.appendChild(list)
     } else {
-      const empty = document.createElement('p')
-      empty.className = 'bookmark-folder-empty'
-      empty.textContent = '此文件夹还没有书签'
-      sectionNode.appendChild(empty)
+      sectionNode.appendChild(createEmptyFolderState(section))
     }
 
     groupList.appendChild(sectionNode)
@@ -3608,6 +3605,35 @@ function createBookmarkSections(sections: NewTabFolderSection[]): HTMLElement {
 
   view.appendChild(groupList)
   return view
+}
+
+function createEmptyFolderState(section: NewTabFolderSection): HTMLElement {
+  const empty = document.createElement('div')
+  empty.className = 'bookmark-folder-empty-state'
+
+  const copy = document.createElement('p')
+  copy.className = 'bookmark-folder-empty'
+  copy.textContent = '此文件夹还没有书签。你可以先添加一个书签，或改用已有的非空来源。'
+
+  const actions = document.createElement('div')
+  actions.className = 'bookmark-folder-empty-actions'
+
+  const addButton = document.createElement('button')
+  addButton.className = 'newtab-button secondary'
+  addButton.type = 'button'
+  addButton.dataset.addBookmarkFolderId = section.id
+  addButton.textContent = '添加书签到这里'
+
+  const sourceButton = document.createElement('button')
+  sourceButton.className = 'newtab-button secondary'
+  sourceButton.type = 'button'
+  sourceButton.textContent = '选择现有来源'
+  sourceButton.title = '打开来源设置并选择已有文件夹'
+  sourceButton.addEventListener('click', openFolderSourceSettings)
+
+  actions.append(addButton, sourceButton)
+  empty.append(copy, actions)
+  return empty
 }
 
 function createSourceNavigation(sections: NewTabFolderSection[]): HTMLElement | null {
