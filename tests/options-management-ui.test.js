@@ -75,6 +75,22 @@ test('AI model picker listbox supports keyboard navigation', () => {
   assert.match(optionsSource, /tabindex="\$\{isActive \? '0' : '-1'\}"/)
 })
 
+test('move folder picker exposes listbox semantics and keyboard navigation', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const optionsSource = readProjectFile('src/options/options.ts')
+
+  assert.match(optionsHtml, /id="move-folder-results"[^>]+role="listbox"[^>]+aria-label="移动目标文件夹"/)
+  assert.match(optionsSource, /class="move-folder-card"[\s\S]*?role="option"[\s\S]*?aria-selected="false"[\s\S]*?data-move-target-folder="\$\{escapeAttr\(folder\.id\)\}"/)
+  assert.match(optionsSource, /moveFolderActiveId/)
+  assert.match(optionsSource, /dom\.moveSearchInput\?\.addEventListener\('keydown', handleMoveSearchKeydown\)/)
+  assert.match(optionsSource, /dom\.moveFolderResults\?\.addEventListener\('keydown', handleMoveFolderResultsKeydown\)/)
+  assert.match(optionsSource, /dom\.moveFolderResults\?\.addEventListener\('focusin', handleMoveFolderResultsFocus\)/)
+  assert.match(optionsSource, /function handleMoveFolderResultsKeydown\(event\)/)
+  assert.match(optionsSource, /event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(optionsSource, /dom\.moveSearchInput\?\.focus\(\)/)
+  assert.match(optionsSource, /tabindex="\$\{isActive \? '0' : '-1'\}"/)
+})
+
 test('dashboard exposes a persistent folder sidebar with cached DOM refs', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const domSource = readProjectFile('src/options/shared-options/dom.ts')

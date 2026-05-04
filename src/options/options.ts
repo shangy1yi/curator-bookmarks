@@ -942,9 +942,13 @@ function bindEvents() {
   dom.confirmModalConfirm?.addEventListener('click', () => resolveConfirmModal(true))
   dom.moveSearchInput?.addEventListener('input', () => {
     managerState.moveSearchQuery = dom.moveSearchInput.value
+    managerState.moveFolderActiveId = ''
     renderMoveModal()
   })
+  dom.moveSearchInput?.addEventListener('keydown', handleMoveSearchKeydown)
   dom.moveFolderResults?.addEventListener('click', handleMoveFolderResultsClick)
+  dom.moveFolderResults?.addEventListener('keydown', handleMoveFolderResultsKeydown)
+  dom.moveFolderResults?.addEventListener('focusin', handleMoveFolderResultsFocus)
   dom.cancelMoveModal?.addEventListener('click', closeMoveModal)
   dom.scopeSearchInput?.addEventListener('input', () => {
     managerState.scopeSearchQuery = dom.scopeSearchInput.value
@@ -7480,10 +7484,12 @@ function renderMoveModal() {
   dom.moveSearchInput.value = managerState.moveSearchQuery
 
   if (!folders.length) {
+    managerState.moveFolderActiveId = ''
     dom.moveFolderResults.innerHTML = '<div class="detect-empty">没有匹配的目标文件夹。</div>'
     return
   }
 
+  resolveMoveFolderActiveId(folders)
   dom.moveFolderResults.innerHTML = folders
     .map((folder) => buildMoveFolderCard(folder))
     .join('')
@@ -7793,11 +7799,15 @@ function getAvailabilityEvidenceSummary(result) {
 }
 
 function buildMoveFolderCard(folder) {
+  const isActive = String(folder.id) === String(managerState.moveFolderActiveId || '')
   return `
     <button
       class="move-folder-card"
       type="button"
+      role="option"
+      aria-selected="false"
       data-move-target-folder="${escapeAttr(folder.id)}"
+      tabindex="${isActive ? '0' : '-1'}"
       ${isInteractionLocked() ? 'disabled' : ''}
     >
       <strong>${escapeHtml(folder.title || '未命名文件夹')}</strong>
@@ -8371,6 +8381,7 @@ function openMoveModal(source) {
 
   managerState.moveSelectionSource = source
   managerState.moveSearchQuery = ''
+  managerState.moveFolderActiveId = ''
   managerState.moveModalOpen = true
   renderMoveModal()
 
@@ -8406,6 +8417,7 @@ function closeMoveModal() {
 
   managerState.moveModalOpen = false
   managerState.moveSearchQuery = ''
+  managerState.moveFolderActiveId = ''
   managerState.moveDashboardBookmarkId = ''
   renderMoveModal()
 }
@@ -8431,6 +8443,7 @@ async function handleMoveFolderResultsClick(event) {
   if (!folderId) {
     return
   }
+  managerState.moveFolderActiveId = folderId
 
   if (managerState.moveSelectionSource === 'dashboard') {
     await moveSelectedDashboardBookmarks(folderId, dashboardCallbacks)
@@ -8442,6 +8455,125 @@ async function handleMoveFolderResultsClick(event) {
   }
 
   await moveSelectedAvailabilityToFolder(folderId)
+}
+
+function handleMoveSearchKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  if (!getMoveFolderOptionButtons().length) {
+    return
+  }
+
+  event.preventDefault()
+  focusMoveFolderOption(event.key === 'ArrowDown' ? 'first' : 'last')
+}
+
+function handleMoveFolderResultsKeydown(event) {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    dom.moveSearchInput?.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusMoveFolderOption('first')
+  } else if (event.key === 'End') {
+    focusMoveFolderOption('last')
+  } else {
+    focusMoveFolderOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function handleMoveFolderResultsFocus(event) {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.dataset.moveTargetFolder) {
+    return
+  }
+
+  managerState.moveFolderActiveId = target.dataset.moveTargetFolder
+  syncMoveFolderTabStops(managerState.moveFolderActiveId)
+}
+
+function getMoveFolderOptionButtons() {
+  return [...dom.moveFolderResults.querySelectorAll<HTMLButtonElement>('[data-move-target-folder]')]
+}
+
+function resolveMoveFolderActiveId(folders) {
+  if (!folders.length) {
+    managerState.moveFolderActiveId = ''
+    return ''
+  }
+
+  const activeId = folders.some((folder) => folder.id === managerState.moveFolderActiveId)
+    ? managerState.moveFolderActiveId
+    : folders[0]?.id || ''
+  managerState.moveFolderActiveId = activeId
+  return activeId
+}
+
+function syncMoveFolderTabStops(activeId) {
+  for (const button of getMoveFolderOptionButtons()) {
+    button.tabIndex = button.dataset.moveTargetFolder === activeId ? 0 : -1
+  }
+}
+
+function focusMoveFolderOptionById(folderId) {
+  let targetButton = null
+  for (const button of getMoveFolderOptionButtons()) {
+    const isTarget = button.dataset.moveTargetFolder === folderId
+    button.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = button
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  managerState.moveFolderActiveId = folderId
+  targetButton.focus()
+  return true
+}
+
+function focusMoveFolderOption(direction) {
+  const buttons = getMoveFolderOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  let nextIndex = managerState.moveFolderActiveId
+    ? buttons.findIndex((button) => button.dataset.moveTargetFolder === managerState.moveFolderActiveId)
+    : -1
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  const folderId = String(button?.dataset.moveTargetFolder || '')
+  if (folderId) {
+    focusMoveFolderOptionById(folderId)
+  }
 }
 
 async function handleScopeFolderResultsClick(event) {

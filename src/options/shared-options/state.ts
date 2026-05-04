@@ -157,6 +157,7 @@ export const managerState = {
   scopeFolderActiveId: null as string | null,
   moveModalOpen: false,
   moveSearchQuery: '',
+  moveFolderActiveId: '',
   moveSelectionSource: 'availability',
   moveDashboardBookmarkId: '',
   aiModelModalOpen: false,

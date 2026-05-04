@@ -7,7 +7,7 @@
 - 集成分支：`integration/goal-final-polish-20260504`
 - 集成 worktree：`/mnt/g/coding/worktrees/goal-final-polish-20260504`
 - 基线：`main@11582da` / `v1.4.23`
-- 当前集成代码状态：在 `1a48e09` 基础上继续追加 options AI 模型 picker listbox 键盘导航修正；报告最新提交以 `git log -1 --oneline` 为准。
+- 当前集成代码状态：在 `a21eac8` 基础上继续追加 options 移动目标文件夹 picker listbox 语义与键盘导航修正；报告最新提交以 `git log -1 --oneline` 为准。
 
 本轮采用多 agent 分支审查与修复流程，覆盖性能、UI、功能、人性化体验、构建安全五个可合并改动方向。主工作区 `/mnt/g/coding/chromebookmark` 保持在 `main@11582da`，未合并到 `main`。
 
@@ -126,6 +126,12 @@
   - 影响：AI 模型选择弹窗已有 listbox/option 语义，但键盘用户需要连续 Tab 浏览模型卡片，搜索后当前候选模型焦点不稳定。
   - 建议：搜索框支持 ArrowDown/ArrowUp 进入首尾候选模型；列表内支持 ArrowUp/ArrowDown/Home/End/Escape，候选项使用 roving `tabIndex`。
   - 处理：已完成，AI 模型 picker 支持方向键进入、循环移动、Home/End 跳转和 Escape 回到搜索框。
+
+- [低] UI/可访问性：options 移动目标文件夹 picker 缺少 listbox 语义与方向键导航
+  - 位置：`src/options/options.html` / `move-folder-results`、`src/options/options.ts` / `renderMoveModal`、`handleMoveFolderResultsClick`
+  - 影响：批量移动和 Dashboard 单条移动共用的目标文件夹列表只是一组按钮，辅助技术无法稳定识别为候选列表，键盘用户也需要连续 Tab 浏览目标文件夹。
+  - 建议：结果容器声明为 listbox，目标文件夹按钮声明为 option；搜索框支持 ArrowDown/ArrowUp 进入首尾候选项，列表内支持 ArrowUp/ArrowDown/Home/End/Escape 和 roving `tabIndex`。
+  - 处理：已完成，移动目标文件夹 picker 支持 listbox/option 语义、方向键进入、循环移动、Home/End 跳转和 Escape 回到搜索框。
 
 - [低] UI/可访问性：Dashboard 卡片动作按钮名称缺少书签上下文
   - 位置：`src/options/sections/dashboard.ts` / `buildDashboardCard`
@@ -385,7 +391,15 @@
    - 推荐改进方案：搜索框支持方向键进入首尾候选模型；列表支持方向键循环、Home/End 跳转、Escape 回到搜索框。
    - 处理状态：已修复。
 
-11. Dashboard 卡片动作按钮可访问名称重复
+11. options 移动目标文件夹 picker 缺少 listbox 语义与方向键导航
+   - 页面/组件位置：options 批量移动/Dashboard 单条移动目标文件夹弹窗
+   - 现象描述：目标文件夹结果列表是视觉候选列表，但容器缺少 listbox 语义，候选按钮缺少 option 语义、roving focus 和方向键/Home/End/Escape 行为。
+   - 对用户的影响：辅助技术用户难以识别当前区域是“选择目标文件夹”的候选列表；键盘用户需要连续 Tab 浏览目标文件夹。
+   - 严重程度：低
+   - 推荐改进方案：结果容器声明为 listbox，目标文件夹按钮声明为 option；搜索框支持方向键进入列表，列表内支持方向键循环、Home/End 跳转和 Escape 回搜索框。
+   - 处理状态：已修复。
+
+12. Dashboard 卡片动作按钮可访问名称重复
    - 页面/组件位置：options dashboard 书签卡片
    - 现象描述：每张卡片底部都重复显示“打开、复制、修改标签、移动、删除”等动作按钮，按钮名称本身没有书签标题上下文。
    - 对用户的影响：辅助技术用户按按钮维度浏览时，需要额外回读卡片内容才能确认操作对象，删除和移动类动作尤其容易误操作。
@@ -393,7 +407,7 @@
    - 推荐改进方案：为卡片动作按钮生成“动作 + 书签标题”的可访问名称，长标题截断，保留原有视觉文案。
    - 处理状态：已修复。
 
-12. 回收站条目操作按钮可访问名称重复
+13. 回收站条目操作按钮可访问名称重复
    - 页面/组件位置：options 回收站条目列表
    - 现象描述：每条回收站记录都重复暴露“选择、恢复书签、清除”控件名称。
    - 对用户的影响：辅助技术用户在恢复或清除前需要额外回读条目内容确认对象，批量清理时更容易误操作。
@@ -401,7 +415,7 @@
    - 推荐改进方案：为选择、恢复、清除控件生成“动作 + 书签标题”的可访问名称，长标题截断。
    - 处理状态：已修复。
 
-13. 重定向结果动作按钮可访问名称重复
+14. 重定向结果动作按钮可访问名称重复
    - 页面/组件位置：options 重定向结果列表
    - 现象描述：每条重定向结果都重复暴露“选择、更新为最终 URL、打开最终链接”控件名称。
    - 对用户的影响：辅助技术用户在批量更新或单条写入前需要额外回读条目内容确认对象，容易把重定向 URL 写到非预期书签。
@@ -409,7 +423,7 @@
    - 推荐改进方案：为选择、更新和打开最终链接控件生成“动作 + 书签标题”的可访问名称，长标题截断。
    - 处理状态：已修复。
 
-14. 书签智能分析结果动作按钮可访问名称重复
+15. 书签智能分析结果动作按钮可访问名称重复
    - 页面/组件位置：options 书签智能分析结果列表
    - 现象描述：每条 AI 建议都重复暴露“选择、打开页面、应用建议、移动至推荐文件夹”等控件名称。
    - 对用户的影响：辅助技术用户在批量应用或单条移动前需要额外回读条目内容确认对象，容易把建议应用到非预期书签。
@@ -417,7 +431,7 @@
    - 推荐改进方案：为选择、打开、应用和移动控件生成“动作 + 书签标题”的可访问名称，长标题截断。
    - 处理状态：已修复。
 
-15. 重复书签逐条勾选可访问名称重复
+16. 重复书签逐条勾选可访问名称重复
    - 页面/组件位置：options 重复书签检测结果
    - 现象描述：每条重复副本都重复暴露“移入回收站”勾选项。
    - 对用户的影响：辅助技术用户逐条调整保留/移入回收站策略时，需要额外回读标题和路径确认对象。
@@ -425,7 +439,7 @@
    - 推荐改进方案：为勾选项生成包含书签标题和路径的可访问名称，长标题截断。
    - 处理状态：已修复。
 
-16. 忽略规则删除按钮可访问名称重复
+17. 忽略规则删除按钮可访问名称重复
    - 页面/组件位置：options 忽略规则列表
    - 现象描述：书签、域名、文件夹三类规则里的删除按钮都重复暴露“删除规则”。
    - 对用户的影响：辅助技术用户在清理多条忽略规则时，需要额外回读卡片内容确认删除对象。
@@ -433,7 +447,7 @@
    - 推荐改进方案：为删除按钮生成“删除忽略规则 + 规则名称/路径/域名”的可访问名称，长文本截断。
    - 处理状态：已修复。
 
-17. 文件夹清理建议动作按钮可访问名称重复
+18. 文件夹清理建议动作按钮可访问名称重复
    - 页面/组件位置：options 文件夹清理建议列表
    - 现象描述：每张建议卡重复暴露“查看预览、确认删除/合并/拆分/移动”，拆分撤销卡也只暴露“撤销本次拆分”。
    - 对用户的影响：辅助技术用户在执行破坏性清理或撤销拆分前，需要额外回读卡片内容确认对象。
@@ -441,7 +455,7 @@
    - 推荐改进方案：为预览、执行和撤销按钮生成“动作 + 建议标题/拆分数量”的可访问名称，长文本截断。
    - 处理状态：已修复。
 
-18. 可用性检测结果卡动作按钮可访问名称重复
+19. 可用性检测结果卡动作按钮可访问名称重复
    - 页面/组件位置：options 可用性检测异常结果列表
    - 现象描述：低置信和高置信异常卡片里重复暴露“选择、打开链接、移入高置信异常、移回低置信异常”。
    - 对用户的影响：辅助技术用户在批量选择、打开确认或调整置信分区时，需要额外回读卡片内容确认对象。
@@ -449,7 +463,7 @@
    - 推荐改进方案：为选择、打开和置信分区移动控件生成“动作 + 书签标题 + 路径”的可访问名称，长文本截断。
    - 处理状态：已修复。
 
-19. newtab 候选文件夹搜索框可访问名称不稳定
+20. newtab 候选文件夹搜索框可访问名称不稳定
    - 页面/组件位置：newtab 设置抽屉 / 文件夹来源候选列表
    - 现象描述：候选文件夹搜索框只通过 placeholder 提示用途，没有稳定 `aria-label`，也没有显式关联候选列表。
    - 对用户的影响：辅助技术用户进入文件夹来源选择时，可能难以判断该输入框的作用和结果列表关系。
@@ -457,7 +471,7 @@
    - 推荐改进方案：为输入框添加稳定名称，并用 `aria-controls` 指向 `folder-candidate-list`。
    - 处理状态：已修复。
 
-20. newtab 主搜索输入缺少 combobox 角色
+21. newtab 主搜索输入缺少 combobox 角色
    - 页面/组件位置：newtab 主搜索框
    - 现象描述：搜索输入已有自动补全和候选列表状态，但没有显式 `role="combobox"`。
    - 对用户的影响：辅助技术可能只把它当作普通搜索输入，无法稳定感知候选列表语义。
@@ -465,7 +479,7 @@
    - 推荐改进方案：补充 combobox 角色，并静态约束它继续控制 `newtab-search-suggestions` listbox。
    - 处理状态：已修复。
 
-21. newtab 搜索引擎菜单缺少完整键盘导航
+22. newtab 搜索引擎菜单缺少完整键盘导航
    - 页面/组件位置：newtab 主搜索框 / 搜索引擎切换菜单
    - 现象描述：菜单已有 `role="menu"` 和 `menuitemradio`，但打开后不会把焦点送入菜单项，也没有方向键、Home/End 和 Escape 的菜单行为。
    - 对用户的影响：键盘用户需要额外 Tab 才能进入菜单，切换搜索引擎的路径不符合常见菜单控件预期。
@@ -473,7 +487,7 @@
    - 推荐改进方案：触发按钮支持 ArrowDown/ArrowUp 打开菜单并聚焦首尾项；菜单内支持 ArrowUp/ArrowDown/Home/End 移动焦点，Escape 关闭并回焦按钮。
    - 处理状态：已修复。
 
-22. newtab 候选文件夹 listbox 缺少方向键导航
+23. newtab 候选文件夹 listbox 缺少方向键导航
    - 页面/组件位置：newtab 设置抽屉 / 文件夹来源候选列表
    - 现象描述：候选文件夹列表声明为多选 listbox，但选项缺少 roving focus 和方向键/Home/End/Escape 行为。
    - 对用户的影响：键盘用户筛选和选择来源文件夹时，需要在多个候选项之间连续 Tab，选择后也可能丢失当前候选项上下文。
@@ -571,8 +585,8 @@
   - 影响范围：newtab/options/popup UI 与可访问性。
   - 测试方式：`npm test`、`npm run typecheck`
 
-- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、`b185052`、`87f4f3c`、`d4cb535`、`e33821c`、`71770a7`、`3e1e935`、`77b58d9`、`f43c79b`、`53c771d`、`66bbf0d`、`c634fcb`、`1ac5063`、`15fc795`、`a83c2a8`、`33b2a3a`、`0903ab3`、`500624a`、`a9cbde5`、`77ac5c6`、`3cf2451`、`1a48e09`、本提交
-  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化、AI 响应解析、Inbox 状态模块、回收站事务 helper 和完整内容快照存储模块改为触发对应功能后再加载或通过轻量常量/搜索入口解耦；自动分析失败后按剩余队列重新计算下一次唤醒，移除首屏和后台队列的非必要运行成本；popup 书签树和搜索结果的操作菜单按钮使用书签标题生成可访问名称；popup 书签操作菜单支持触发按钮方向键入口和关闭回焦；popup 筛选文件夹 listbox 补齐 roving focus 和方向键导航；options 范围筛选文件夹 listbox 补齐 roving focus 和方向键导航；options AI 模型 picker listbox 补齐 roving focus 和方向键导航；Dashboard 卡片打开、复制、改标签、移动、删除动作加入书签标题上下文；回收站选择、恢复和清除控件加入书签标题上下文；重定向结果选择、更新和打开最终链接控件加入书签标题上下文；书签智能分析结果的选择、打开、应用和移动控件加入书签标题上下文；重复书签逐条移入回收站勾选项加入标题和路径上下文；忽略规则删除按钮加入规则名称、路径或域名上下文；文件夹清理预览、执行和拆分撤销按钮加入建议标题和移动数量上下文；可用性检测结果选择、打开和置信分区移动控件加入书签标题与路径上下文；newtab 候选文件夹搜索框加入稳定名称和候选列表关联；newtab 主搜索输入补充 combobox 语义；newtab 搜索引擎菜单补齐键盘焦点与方向键导航；newtab 候选文件夹 listbox 补齐 roving focus 和方向键导航，避免重复或无上下文控件名称。
+- 集成分支补充优化 / `5a8589c`、`32d636d`、`323898b`、`4699fb9`、`d88164f`、`0e7bd5c`、`b185052`、`87f4f3c`、`d4cb535`、`e33821c`、`71770a7`、`3e1e935`、`77b58d9`、`f43c79b`、`53c771d`、`66bbf0d`、`c634fcb`、`1ac5063`、`15fc795`、`a83c2a8`、`33b2a3a`、`0903ab3`、`500624a`、`a9cbde5`、`77ac5c6`、`3cf2451`、`1a48e09`、`a21eac8`、本提交
+  - 实现思路：修复 popup 窄视口横向溢出；将 newtab 搜索重 chunk 改为按需加载，并保留轻量同步建议；将 newtab 标签索引读取改为轻量 storage normalizer；内联 newtab loading SVG 和关闭动效 helper；将回收站删除/撤销模块改为按需加载；将启动读书签树改为本页轻量 wrapper，书签移动、编辑、新建、撤销恢复等写操作通过 `bookmarks-api` 动态加载；将 popup 自然语言搜索、智能分类网页内容抽取、AI 设置归一化、AI 响应解析、Inbox 状态模块、回收站事务 helper 和完整内容快照存储模块改为触发对应功能后再加载或通过轻量常量/搜索入口解耦；自动分析失败后按剩余队列重新计算下一次唤醒，移除首屏和后台队列的非必要运行成本；popup 书签树和搜索结果的操作菜单按钮使用书签标题生成可访问名称；popup 书签操作菜单支持触发按钮方向键入口和关闭回焦；popup 筛选文件夹 listbox 补齐 roving focus 和方向键导航；options 范围筛选文件夹 listbox 补齐 roving focus 和方向键导航；options AI 模型 picker listbox 补齐 roving focus 和方向键导航；options 移动目标文件夹 picker 补齐 listbox/option 语义与方向键导航；Dashboard 卡片打开、复制、改标签、移动、删除动作加入书签标题上下文；回收站选择、恢复和清除控件加入书签标题上下文；重定向结果选择、更新和打开最终链接控件加入书签标题上下文；书签智能分析结果的选择、打开、应用和移动控件加入书签标题上下文；重复书签逐条移入回收站勾选项加入标题和路径上下文；忽略规则删除按钮加入规则名称、路径或域名上下文；文件夹清理预览、执行和拆分撤销按钮加入建议标题和移动数量上下文；可用性检测结果选择、打开和置信分区移动控件加入书签标题与路径上下文；newtab 候选文件夹搜索框加入稳定名称和候选列表关联；newtab 主搜索输入补充 combobox 语义；newtab 搜索引擎菜单补齐键盘焦点与方向键导航；newtab 候选文件夹 listbox 补齐 roving focus 和方向键导航，避免重复或无上下文控件名称。
   - 影响范围：`src/popup/popup.css`、`src/popup/popup.ts`、`src/newtab/content-state.ts`、`src/newtab/newtab.ts`、`src/newtab/newtab.html`、`src/options/options.ts`、`src/options/sections/dashboard.ts`、`src/options/sections/recycle.ts`、`src/options/sections/redirects.ts`、`src/options/sections/duplicates.ts`、`src/options/sections/ignore.ts`、`src/options/sections/folder-cleanup.ts`、相关测试。
   - 测试方式：focused tests、`npm test`、`npm run validate`、Playwright 产物/搜索冒烟。
 
@@ -613,6 +627,9 @@
 - focused AI 模型 picker 可访问性测试：通过。
   - `npm run test:build && node --test .tmp-test/tests/options-management-ui.test.js`：32/32 通过。
   - 覆盖 AI 模型 picker listbox 的方向键入口、roving `tabIndex` 和 Escape 回搜索框。
+- focused 移动目标文件夹 picker 可访问性测试：通过。
+  - `npm run test:build && node --test .tmp-test/tests/options-management-ui.test.js`：33/33 通过。
+  - 覆盖移动目标文件夹 picker 的 listbox/option 语义、方向键入口、roving `tabIndex` 和 Escape 回搜索框。
 - focused 回收站可访问性测试：通过。
   - `npm run test:build && node --test .tmp-test/tests/recycle.test.js .tmp-test/tests/options-management-ui.test.js`：35/35 通过。
   - 覆盖回收站条目选择、恢复和清除控件的书签特定可访问名称，以及回收站存储序列化和回滚路径。
@@ -677,6 +694,7 @@
 - popup 筛选文件夹 listbox 支持方向键进入、循环移动、Home/End 跳转和 Escape 回搜索框，改善键盘筛选文件夹体验。
 - options 范围筛选文件夹 listbox 支持方向键进入、循环移动、Home/End 跳转和 Escape 回搜索框，改善检测/历史/AI 分析范围切换体验。
 - options AI 模型 picker listbox 支持方向键进入、循环移动、Home/End 跳转和 Escape 回搜索框，改善键盘筛选和切换模型体验。
+- options 移动目标文件夹 picker 补充 listbox/option 语义，并支持方向键进入、循环移动、Home/End 跳转和 Escape 回搜索框，改善批量移动和单条移动目标选择体验。
 - Dashboard 卡片动作按钮加入书签标题上下文，降低批量浏览和移动/删除时的误操作风险。
 - 回收站条目选择、恢复、清除控件加入书签标题上下文，降低恢复或永久清除时的误操作风险。
 - 重定向结果选择、更新、打开最终链接控件加入书签标题上下文，降低最终 URL 写入时的误操作风险。
