@@ -880,23 +880,6 @@ function setSearchQuery(value, { immediate = false } = {}) {
 async function toggleNaturalLanguageSearch() {
   const enabled = !state.naturalSearchEnabled
 
-  if (enabled) {
-    const settings = await loadAiProviderSettings()
-    if (!hasConfiguredAiProviderSettings(settings)) {
-      state.naturalSearchEnabled = false
-      state.naturalSearchSetupRequired = true
-      state.naturalSearchPending = false
-      state.naturalSearchError = ''
-      state.naturalSearchPlan = null
-      state.searchHighlightQuery = ''
-      state.searchRunId += 1
-      state.searchPending = false
-      render()
-      void savePopupPreferences().catch(() => {})
-      return
-    }
-  }
-
   state.naturalSearchEnabled = enabled
   state.naturalSearchSetupRequired = false
   state.naturalSearchPending = false
@@ -922,10 +905,15 @@ async function toggleNaturalLanguageSearch() {
 async function prepareNaturalLanguageSearchAi() {
   try {
     const settings = await loadAiProviderSettings()
+    if (!hasConfiguredAiProviderSettings(settings)) {
+      state.naturalSearchError = '未配置 AI 渠道，当前使用本地解析。'
+      return
+    }
+
     validateSmartAiSettings(settings)
     await ensureSmartClassifyPermissions(settings, { interactive: true })
   } catch {
-    state.naturalSearchError = 'AI 未就绪，当前使用本地自然语言解析。'
+    state.naturalSearchError = 'AI 未就绪，当前使用本地解析。'
   }
 }
 
@@ -1094,22 +1082,37 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
 
 async function resolveNaturalSearchPlan(query, normalizedQuery): Promise<NaturalSearchPlan> {
   const cacheKey = getNaturalSearchPlanCacheKey(normalizedQuery)
+  const localPlan = buildLocalNaturalSearchPlan(query)
+  let plan = localPlan
+  let settings
+
+  try {
+    settings = await loadAiProviderSettings()
+  } catch (error) {
+    state.naturalSearchError = normalizeNaturalSearchError(error)
+    return localPlan
+  }
+
+  if (!hasConfiguredAiProviderSettings(settings)) {
+    state.naturalSearchError = '未配置 AI 渠道，已使用本地解析。'
+    return localPlan
+  }
+
   const cachedPlan = state.naturalSearchPlanCache.get(cacheKey)
   if (cachedPlan) {
     return cachedPlan
   }
 
-  const localPlan = buildLocalNaturalSearchPlan(query)
-  let plan = localPlan
-
   try {
-    plan = await requestNaturalSearchAiPlan(query, localPlan)
+    plan = await requestNaturalSearchAiPlan(query, localPlan, settings)
     state.naturalSearchError = ''
   } catch (error) {
     state.naturalSearchError = normalizeNaturalSearchError(error)
   }
 
-  state.naturalSearchPlanCache.set(cacheKey, plan)
+  if (plan.source === 'ai') {
+    state.naturalSearchPlanCache.set(cacheKey, plan)
+  }
 
   return plan
 }
@@ -1212,7 +1215,7 @@ function getNaturalSearchToggleText() {
     return 'AI'
   }
 
-  return 'AI'
+  return '本地'
 }
 
 function getNaturalSearchToggleAriaLabel(isPending: boolean) {
@@ -1743,11 +1746,11 @@ function renderMainContent() {
 function renderNaturalSearchSetupState() {
   return `
     <div class="empty-search-state natural-search-setup-state">
-      <p class="empty-title">需要配置 AI 渠道</p>
-      <p class="empty-hint">语义搜索需要先配置自定义 AI 渠道。配置完成后，再回到这里点击“语义”。</p>
+      <p class="empty-title">正在使用本地解析</p>
+      <p class="empty-hint">无需配置 AI 渠道；配置后可尝试 AI 改写，失败也会继续本地解析。</p>
       <div class="empty-actions">
-        <button class="empty-action primary" type="button" data-empty-action="open-ai-settings">配置 AI 渠道</button>
-        <button class="empty-action" type="button" data-empty-action="dismiss-natural-setup">继续关键词搜索</button>
+        <button class="empty-action primary" type="button" data-empty-action="dismiss-natural-setup">继续本地解析</button>
+        <button class="empty-action" type="button" data-empty-action="open-ai-settings">配置 AI 增强</button>
       </div>
     </div>
   `
@@ -3813,8 +3816,7 @@ async function ensureSmartClassifyPermissions(settings, { interactive = false } 
   return true
 }
 
-async function requestNaturalSearchAiPlan(query, localPlan: NaturalSearchPlan): Promise<NaturalSearchPlan> {
-  const settings = await loadAiProviderSettings()
+async function requestNaturalSearchAiPlan(query, localPlan: NaturalSearchPlan, settings): Promise<NaturalSearchPlan> {
   validateSmartAiSettings(settings)
   await ensureSmartClassifyPermissions(settings, { interactive: false })
 
