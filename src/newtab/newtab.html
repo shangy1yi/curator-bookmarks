@@ -546,9 +546,20 @@
       aria-label="书签仪表盘"
       aria-hidden="true"
       data-dashboard-ready="false"
+      data-dashboard-error="false"
       tabindex="-1"
       hidden
     >
+      <button
+        id="newtab-dashboard-close"
+        class="newtab-dashboard-close"
+        type="button"
+        aria-label="返回新标签页"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="m6.5 6.5 11 11M17.5 6.5l-11 11"></path>
+        </svg>
+      </button>
       <div class="newtab-dashboard-surface">
         <div class="newtab-dashboard-loading" role="status" aria-label="正在打开书签仪表盘">
           <div class="newtab-dashboard-loading-card">
@@ -579,6 +590,23 @@
               <circle class="dot-matrix-loader-lit dot-matrix-loader-d43" cx="39" cy="50" r="3.1"></circle>
               <circle class="dot-matrix-loader-lit dot-matrix-loader-d44" cx="50" cy="50" r="3.1"></circle>
             </svg>
+          </div>
+        </div>
+        <div
+          id="newtab-dashboard-fallback"
+          class="newtab-dashboard-fallback"
+          role="alert"
+          aria-live="assertive"
+          hidden
+        >
+          <div class="newtab-dashboard-fallback-card">
+            <p class="newtab-dashboard-fallback-kicker">Dashboard</p>
+            <h2>书签仪表盘暂时无法打开</h2>
+            <p id="newtab-dashboard-fallback-copy">加载耗时过长。你可以返回新标签页，或重试打开仪表盘。</p>
+            <div class="newtab-dashboard-fallback-actions">
+              <button class="newtab-button secondary" type="button" data-dashboard-fallback-action="return">返回新标签页</button>
+              <button class="newtab-button" type="button" data-dashboard-fallback-action="retry">重试</button>
+            </div>
           </div>
         </div>
         <iframe

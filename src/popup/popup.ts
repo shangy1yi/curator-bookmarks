@@ -2201,8 +2201,24 @@ function syncBackdropVisibility() {
       state.editTargetBookmarkId ||
       state.confirmDeleteBookmarkId
   )
+  syncPopupAppShellModalState(hasOpenModal)
   dom.modalBackdrop.setAttribute('aria-hidden', String(!hasOpenModal))
   setPopupSurfaceOpen(dom.modalBackdrop, hasOpenModal)
+}
+
+function syncPopupAppShellModalState(hasOpenModal) {
+  if (!dom.appShell) {
+    return
+  }
+
+  if (hasOpenModal) {
+    dom.appShell.setAttribute('aria-hidden', 'true')
+    dom.appShell.setAttribute('inert', '')
+    return
+  }
+
+  dom.appShell.setAttribute('aria-hidden', 'false')
+  dom.appShell.removeAttribute('inert')
 }
 
 function renderFilterFolderList() {
@@ -2885,7 +2901,7 @@ function getFocusableElements(container) {
 
     return !element.hasAttribute('disabled') &&
       !element.getAttribute('aria-hidden') &&
-      element.offsetParent !== null
+      element.getClientRects().length > 0
   })
 }
 

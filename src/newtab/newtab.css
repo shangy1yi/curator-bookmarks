@@ -946,6 +946,44 @@ body.background-mask-enabled .newtab-background-mask {
   display: none;
 }
 
+.newtab-dashboard-close {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 4;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(245, 245, 247, 0.18);
+  border-radius: 6px;
+  background: rgba(12, 12, 13, 0.82);
+  color: rgba(245, 245, 247, 0.82);
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+.newtab-dashboard-close svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.newtab-dashboard-close:hover,
+.newtab-dashboard-close:focus-visible {
+  border-color: rgba(245, 245, 247, 0.32);
+  background: rgba(24, 24, 26, 0.92);
+  color: #ffffff;
+}
+
+.newtab-dashboard-close:focus-visible {
+  outline: 2px solid rgba(245, 245, 247, 0.36);
+  outline-offset: 3px;
+}
+
 .newtab-dashboard-surface {
   position: relative;
   display: grid;
@@ -977,6 +1015,10 @@ body.background-mask-enabled .newtab-background-mask {
   transition: opacity 160ms ease;
 }
 
+.newtab-dashboard-overlay[data-dashboard-error="true"] .newtab-dashboard-loading {
+  opacity: 0;
+}
+
 .newtab-dashboard-loading-card {
   display: grid;
   width: 78px;
@@ -994,6 +1036,65 @@ body.background-mask-enabled .newtab-background-mask {
 .newtab-dashboard-loading-loader {
   width: 44px;
   height: 44px;
+}
+
+.newtab-dashboard-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.newtab-dashboard-fallback[hidden] {
+  display: none;
+}
+
+.newtab-dashboard-fallback-card {
+  display: grid;
+  width: min(430px, 100%);
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid rgba(245, 245, 247, 0.12);
+  border-radius: 8px;
+  background: rgba(8, 8, 9, 0.88);
+  color: var(--text);
+  box-shadow:
+    0 22px 60px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+.newtab-dashboard-fallback-kicker {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.newtab-dashboard-fallback-card h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.newtab-dashboard-fallback-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.newtab-dashboard-fallback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 .newtab-dashboard-frame {

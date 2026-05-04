@@ -449,6 +449,31 @@ function applyDashboardSelectionInputState(input: HTMLInputElement): boolean {
   return true
 }
 
+function getDashboardScopeTitle(folderId: string): string {
+  const folder = folderId ? availabilityState.folderMap.get(folderId) : null
+  if (!folder) {
+    return '书签栏'
+  }
+
+  return formatFolderPath(folder, availabilityState.folderMap) || folder.title || '书签栏'
+}
+
+function toggleDashboardTagPopover(tagToggle: HTMLElement): boolean {
+  const bookmarkId = String(tagToggle.getAttribute('data-dashboard-toggle-tags') || '').trim()
+  if (!bookmarkId) {
+    return false
+  }
+
+  if (dashboardState.expandedTagIds.has(bookmarkId)) {
+    dashboardState.expandedTagIds.delete(bookmarkId)
+  } else {
+    dashboardState.expandedTagIds.clear()
+    dashboardState.expandedTagIds.add(bookmarkId)
+  }
+  renderDashboardSection()
+  return true
+}
+
 export function removeDashboardSelectionIds(bookmarkIds: unknown[]): void {
   for (const bookmarkId of bookmarkIds) {
     dashboardState.selectedIds.delete(String(bookmarkId))
@@ -478,7 +503,17 @@ export function renderDashboardSection(): void {
     new Set(model.items.map((item) => String(item.id)))
   )
 
-  dom.dashboardTotal.textContent = `(${model.totalBookmarks})`
+  const effectiveFolderId = getDashboardEffectiveFolderId()
+  const scopeTitle = getDashboardScopeTitle(effectiveFolderId)
+  const scopedCountText = `(${visibleItems.length})`
+  if (dom.dashboardTitle) {
+    dom.dashboardTitle.innerHTML = `${escapeHtml(scopeTitle)} <span id="dashboard-total">${escapeHtml(scopedCountText)}</span>`
+    dom.dashboardTotal = dom.dashboardTitle.querySelector('#dashboard-total') as typeof dom.dashboardTotal
+  }
+  if (dom.dashboardCardsTitle) {
+    dom.dashboardCardsTitle.textContent = scopeTitle
+  }
+  dom.dashboardTotal.textContent = scopedCountText
   dom.dashboardStatus.innerHTML = availabilityState.deleting
     ? renderDashboardLoadingLabel('正在处理所选书签...', {
       loaderClass: 'dashboard-status-dot-loader'
@@ -545,6 +580,14 @@ export function handleDashboardKeydown(event: KeyboardEvent): void {
     return
   }
 
+  if (event.key === 'Escape' && dashboardState.expandedTagIds.size) {
+    if (closeDashboardTagPopover()) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    return
+  }
+
   if (handleDashboardFolderListboxKeydown(event, target)) {
     return
   }
@@ -572,18 +615,7 @@ export function handleDashboardKeydown(event: KeyboardEvent): void {
 
   event.preventDefault()
   event.stopPropagation()
-  const bookmarkId = String(tagToggle.getAttribute('data-dashboard-toggle-tags') || '').trim()
-  if (!bookmarkId) {
-    return
-  }
-
-  if (dashboardState.expandedTagIds.has(bookmarkId)) {
-    dashboardState.expandedTagIds.delete(bookmarkId)
-  } else {
-    dashboardState.expandedTagIds.clear()
-    dashboardState.expandedTagIds.add(bookmarkId)
-  }
-  renderDashboardSection()
+  toggleDashboardTagPopover(tagToggle)
 }
 
 export async function handleDashboardClick(event: Event, callbacks: DashboardCallbacks): Promise<void> {
@@ -603,6 +635,12 @@ export async function handleDashboardClick(event: Event, callbacks: DashboardCal
     if (applyDashboardSelectionInputState(selectionInput)) {
       renderDashboardSection()
     }
+    return
+  }
+
+  const tagToggle = target.closest<HTMLElement>('[data-dashboard-toggle-tags]')
+  if (tagToggle) {
+    toggleDashboardTagPopover(tagToggle)
     return
   }
 

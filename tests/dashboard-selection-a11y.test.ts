@@ -50,6 +50,35 @@ test('dashboard cards expose keyboard-triggerable move and delete actions', () =
   assert.match(dashboardSource, /async function deleteDashboardBookmarkFromCard/)
 })
 
+test('dashboard default copy matches the bookmarks bar scope', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
+  const dashboardPanel = optionsHtml.match(/<section[\s\S]*?id="dashboard"[\s\S]*?<\/section>/)?.[0] || ''
+
+  assert.match(dashboardPanel, /<h1 id="dashboard-title">书签栏 <span id="dashboard-total">\(0\)<\/span><\/h1>/)
+  assert.match(dashboardPanel, /<strong id="dashboard-cards-title">书签栏<\/strong>/)
+  assert.match(dashboardSource, /function getDashboardScopeTitle\(folderId: string\): string/)
+  assert.match(dashboardSource, /return '书签栏'/)
+  assert.match(dashboardSource, /dom\.dashboardCardsTitle\.textContent = scopeTitle/)
+  assert.match(dashboardSource, /const scopedCountText = `\(\$\{visibleItems\.length\}\)`/)
+  assert.doesNotMatch(dashboardPanel, /全部书签/)
+})
+
+test('dashboard hidden tag count toggles by click or keyboard and closes with Escape', () => {
+  const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
+
+  assert.match(dashboardSource, /function toggleDashboardTagPopover\(tagToggle: HTMLElement\): boolean/)
+  assert.match(dashboardSource, /dashboardState\.expandedTagIds\.has\(bookmarkId\)[\s\S]*?dashboardState\.expandedTagIds\.delete\(bookmarkId\)/)
+  assert.match(dashboardSource, /dashboardState\.expandedTagIds\.clear\(\)[\s\S]*?dashboardState\.expandedTagIds\.add\(bookmarkId\)/)
+  assert.match(dashboardSource, /if \(event\.key === 'Escape' && dashboardState\.expandedTagIds\.size\)[\s\S]*?closeDashboardTagPopover\(\)/)
+  assert.match(dashboardSource, /event\.key !== 'Enter' && event\.key !== ' '/)
+  assert.match(dashboardSource, /const tagToggle = target\.closest<HTMLElement>\('\[data-dashboard-toggle-tags\]'\)[\s\S]*?toggleDashboardTagPopover\(tagToggle\)/)
+  assert.match(dashboardSource, /aria-expanded="\$\{expanded \? 'true' : 'false'\}"/)
+  assert.match(dashboardSource, /aria-controls="dashboard-tag-popover-\$\{escapeAttr\(item\.id\)\}"/)
+  assert.match(dashboardSource, /handleDashboardTagPointerOver/)
+  assert.match(dashboardSource, /handleDashboardTagPointerOut/)
+})
+
 test('dashboard folder filter uses listbox option semantics instead of tree semantics', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')

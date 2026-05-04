@@ -76,3 +76,18 @@ test('popup search and modal inputs keep visible keyboard focus rings', () => {
     /\.modal-card:focus-visible,\s*\.modal-input:focus-visible\s*\{[\s\S]*?outline:\s*2px solid rgba\(245,\s*245,\s*247,\s*0\.86\)/
   )
 })
+
+test('popup modals make the background app shell inert while open', () => {
+  const popupHtml = readProjectFile('src/popup/popup.html')
+  const popupDom = readProjectFile('src/popup/dom.ts')
+  const popupSource = readProjectFile('src/popup/popup.ts')
+
+  assert.match(popupHtml, /<main id="popup-app-shell" class="app-shell">/)
+  assert.match(popupDom, /dom\.appShell = byId\('popup-app-shell'\)/)
+  assert.match(popupSource, /function syncPopupAppShellModalState\(hasOpenModal\)/)
+  assert.match(popupSource, /syncPopupAppShellModalState\(hasOpenModal\)/)
+  assert.match(popupSource, /dom\.appShell\.setAttribute\('aria-hidden', 'true'\)[\s\S]*?dom\.appShell\.setAttribute\('inert', ''\)/)
+  assert.match(popupSource, /dom\.appShell\.setAttribute\('aria-hidden', 'false'\)[\s\S]*?dom\.appShell\.removeAttribute\('inert'\)/)
+  assert.match(popupSource, /element\.getClientRects\(\)\.length > 0/)
+  assert.doesNotMatch(popupSource, /element\.offsetParent !== null/)
+})
