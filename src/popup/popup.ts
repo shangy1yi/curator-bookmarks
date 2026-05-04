@@ -32,10 +32,6 @@ import {
   moveBookmark,
   updateBookmark
 } from '../shared/bookmarks-api.js'
-import {
-  deleteBookmarkToRecycle,
-  removeRecycleEntry
-} from '../shared/recycle-bin.js'
 import { getLocalStorage, removeLocalStorage, setLocalStorage } from '../shared/storage.js'
 import { requestBookmarkSave } from '../shared/messages.js'
 import { loadBookmarkTagIndex, normalizeBookmarkTags } from '../shared/bookmark-tags.js'
@@ -92,6 +88,7 @@ let naturalSearchModulePromise: Promise<typeof import('./natural-search.js')> | 
 let contentExtractionModulePromise: Promise<typeof import('../options/sections/content-extraction.js')> | null = null
 let aiSettingsModulePromise: Promise<typeof import('../options/sections/ai-settings.js')> | null = null
 let aiResponseModulePromise: Promise<typeof import('../shared/ai-response.js')> | null = null
+let recycleBinModulePromise: Promise<typeof import('../shared/recycle-bin.js')> | null = null
 
 function loadNaturalSearchModule(): Promise<typeof import('./natural-search.js')> {
   naturalSearchModulePromise ||= import('./natural-search.js')
@@ -111,6 +108,11 @@ function loadAiSettingsModule(): Promise<typeof import('../options/sections/ai-s
 function loadAiResponseModule(): Promise<typeof import('../shared/ai-response.js')> {
   aiResponseModulePromise ||= import('../shared/ai-response.js')
   return aiResponseModulePromise
+}
+
+function loadRecycleBinModule(): Promise<typeof import('../shared/recycle-bin.js')> {
+  recycleBinModulePromise ||= import('../shared/recycle-bin.js')
+  return recycleBinModulePromise
 }
 
 const SMART_CLASSIFY_SCHEMA = {
@@ -3660,6 +3662,7 @@ async function confirmDeleteBookmark() {
   renderDeleteModal()
 
   try {
+    const recycleBin = await loadRecycleBinModule()
     state.lastDeletedBookmark = {
       title: bookmark.title,
       url: bookmark.url,
@@ -3668,7 +3671,7 @@ async function confirmDeleteBookmark() {
       recycleId: `recycle-${bookmark.id}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
     }
 
-    await deleteBookmarkToRecycle(bookmark.id, {
+    await recycleBin.deleteBookmarkToRecycle(bookmark.id, {
       recycleId: state.lastDeletedBookmark.recycleId,
       bookmarkId: String(bookmark.id),
       title: bookmark.title,
@@ -3722,7 +3725,8 @@ async function undoDelete() {
       parentId
     })
     if (payload.recycleId) {
-      await removeRecycleEntry(payload.recycleId)
+      const recycleBin = await loadRecycleBinModule()
+      await recycleBin.removeRecycleEntry(payload.recycleId)
     }
     showToast({
       type: 'success',

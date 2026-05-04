@@ -108,6 +108,17 @@ test('popup inbox filter title does not preload inbox state module', { skip: !ex
   assert.doesNotMatch(builtPopupHtml, /<link[^>]+inbox[^>]+rel="modulepreload"/i)
 })
 
+test('popup recycle bin helpers load only after delete actions', { skip: !existsSync(resolve(process.cwd(), 'dist/src/popup/popup.html')) }, () => {
+  const builtPopupHtml = readProjectFile('dist/src/popup/popup.html')
+  assert.match(popupSource, /let recycleBinModulePromise: Promise<typeof import\('\.\.\/shared\/recycle-bin\.js'\)> \| null = null/)
+  assert.match(popupSource, /recycleBinModulePromise \|\|= import\('\.\.\/shared\/recycle-bin\.js'\)/)
+  assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/shared\/recycle-bin\.js['"]/m)
+  assert.match(popupSource, /const recycleBin = await loadRecycleBinModule\(\)[\s\S]*?recycleBin\.deleteBookmarkToRecycle/)
+  assert.match(popupSource, /const recycleBin = await loadRecycleBinModule\(\)[\s\S]*?recycleBin\.removeRecycleEntry/)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+rel="modulepreload"[^>]+recycle-bin/i)
+  assert.doesNotMatch(builtPopupHtml, /<link[^>]+recycle-bin[^>]+rel="modulepreload"/i)
+})
+
 test('popup folder pickers expose option and treeitem semantics', () => {
   assert.match(popupHtml, /id="folder-breadcrumbs"[^>]+aria-label="当前文件夹路径"/)
   assert.match(popupSource, /data-folder-breadcrumb-id="\$\{escapeAttr\(segment\.id\)\}"/)
