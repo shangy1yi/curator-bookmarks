@@ -2577,14 +2577,10 @@ function handleContentClick(event) {
   if (menuToggle) {
     const bookmarkId = menuToggle.getAttribute('data-open-menu')
     if (state.activeMenuBookmarkId === bookmarkId) {
-      closeActionMenu()
+      closeActionMenu({ restoreFocus: true, focusBookmarkId: bookmarkId })
       return
     }
-    state.activeMenuBookmarkId = bookmarkId
-    renderMainContent()
-    window.requestAnimationFrame(() => {
-      focusActionMenuItem(0)
-    })
+    openActionMenuFromToggle(bookmarkId)
     return
   }
 
@@ -2737,20 +2733,40 @@ function handleSmartFolderListClick(event) {
   }
 }
 
-function closeActionMenu() {
+function openActionMenuFromToggle(bookmarkId, { focusLast = false } = {}) {
+  if (!bookmarkId) {
+    return
+  }
+
+  state.activeMenuBookmarkId = bookmarkId
+  renderMainContent()
+  window.requestAnimationFrame(() => {
+    focusActionMenuItem(focusLast ? getActionMenuItems().length - 1 : 0)
+  })
+}
+
+function closeActionMenu({ restoreFocus = false, focusBookmarkId = state.activeMenuBookmarkId } = {}) {
   const menu = document.querySelector('.action-menu')
   const hadMenu = Boolean(state.activeMenuBookmarkId)
+  const returnBookmarkId = focusBookmarkId
   state.activeMenuBookmarkId = null
+  const focusMenuToggle = () => {
+    if (restoreFocus) {
+      getMenuToggleForBookmark(returnBookmarkId)?.focus()
+    }
+  }
 
   if (menu instanceof HTMLElement && !menu.classList.contains('is-closing')) {
     void closeWithExitMotion(menu, 'is-closing', () => {
       renderMainContent()
+      focusMenuToggle()
     }, 180)
     return
   }
 
   if (hadMenu) {
     renderMainContent()
+    focusMenuToggle()
   }
 }
 
@@ -2785,6 +2801,10 @@ function handleDocumentKeydown(event) {
   }
 
   if (handleSearchFocusShortcut(event)) {
+    return
+  }
+
+  if (handleActionMenuToggleKeydown(event)) {
     return
   }
 
@@ -2824,7 +2844,7 @@ function handleEscapeAction() {
   }
 
   if (state.activeMenuBookmarkId) {
-    closeActionMenu()
+    closeActionMenu({ restoreFocus: true })
     return true
   }
 
@@ -2908,6 +2928,28 @@ function handleActionMenuKeydown(event) {
   }
 
   return false
+}
+
+function handleActionMenuToggleKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return false
+  }
+
+  const toggle = event.target instanceof Element
+    ? event.target.closest('[data-open-menu]')
+    : null
+  if (!toggle) {
+    return false
+  }
+
+  const bookmarkId = toggle.getAttribute('data-open-menu')
+  if (!bookmarkId) {
+    return false
+  }
+
+  event.preventDefault()
+  openActionMenuFromToggle(bookmarkId, { focusLast: event.key === 'ArrowUp' })
+  return true
 }
 
 function focusActionMenuItem(index) {

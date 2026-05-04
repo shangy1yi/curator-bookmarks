@@ -102,6 +102,19 @@ test('popup bookmark action menus expose bookmark-specific labels', () => {
   assert.doesNotMatch(popupSource, /aria-label="打开操作菜单"/)
 })
 
+test('popup bookmark action menu restores focus and supports trigger arrow keys', () => {
+  const popupSource = readProjectFile('src/popup/popup.ts')
+
+  assert.match(popupSource, /function openActionMenuFromToggle\(bookmarkId, \{ focusLast = false \} = \{\}\)/)
+  assert.match(popupSource, /focusActionMenuItem\(focusLast \? getActionMenuItems\(\)\.length - 1 : 0\)/)
+  assert.match(popupSource, /function closeActionMenu\(\{ restoreFocus = false, focusBookmarkId = state\.activeMenuBookmarkId \} = \{\}\)/)
+  assert.match(popupSource, /getMenuToggleForBookmark\(returnBookmarkId\)\?\.focus\(\)/)
+  assert.match(popupSource, /closeActionMenu\(\{ restoreFocus: true \}\)/)
+  assert.match(popupSource, /function handleActionMenuToggleKeydown\(event\)/)
+  assert.match(popupSource, /event\.key !== 'ArrowDown' && event\.key !== 'ArrowUp'/)
+  assert.match(popupSource, /openActionMenuFromToggle\(bookmarkId, \{ focusLast: event\.key === 'ArrowUp' \}\)/)
+})
+
 test('popup shell can shrink below the extension popup width without horizontal overflow', () => {
   const popupCss = readProjectFile('src/popup/popup.css')
   const rootSizeRule = popupCss.match(/html,\s*body\s*\{[\s\S]*?\n\}/)?.[0] || ''
