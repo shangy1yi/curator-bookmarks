@@ -30,6 +30,26 @@ function getCssRuleBodies(css: string, selector: string): string[] {
   return [...css.matchAll(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, 'g'))].map((match) => match[1] || '')
 }
 
+function getFunctionBody(source: string, functionName: string): string {
+  const start = source.indexOf(`function ${functionName}`)
+  assert.ok(start >= 0, `${functionName} should exist`)
+  const bodyStart = source.indexOf('{', start)
+  assert.ok(bodyStart >= 0, `${functionName} should have a body`)
+  let depth = 0
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index]
+    if (char === '{') {
+      depth += 1
+    } else if (char === '}') {
+      depth -= 1
+      if (depth === 0) {
+        return source.slice(bodyStart + 1, index)
+      }
+    }
+  }
+  assert.fail(`${functionName} body should close`)
+}
+
 test('does not offset vertically centered icons when utility stack has enough clearance', () => {
   assert.equal(getVerticalCenterCollisionOffset({
     utilityBottom: 120,
@@ -787,4 +807,19 @@ test('newtab bookmark suggestions are debounced and cached', () => {
   assert.match(script, /normalizeNewTabSearchText\(query\)/)
   assert.match(script, /searchSuggestionCache\.clear\(\)/)
   assert.doesNotMatch(script, /input\.addEventListener\('input', \(\) => \{[\s\S]*?renderSuggestions\(\)/)
+})
+
+test('newtab bookmark change events are coalesced before full refresh', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /const BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS = 120/)
+  assert.match(script, /let bookmarkChangeRefreshTimer = 0/)
+  assert.match(script, /let bookmarkChangeRefreshInFlight = false/)
+  assert.match(script, /let bookmarkChangeRefreshQueued = false/)
+  assert.match(script, /function scheduleBookmarkChangeRefresh\(\): void/)
+  assert.match(script, /function flushBookmarkChangeRefresh\(\): Promise<void>/)
+  assert.match(getFunctionBody(script, 'handleBookmarksChanged'), /scheduleBookmarkChangeRefresh\(\)/)
+  assert.doesNotMatch(getFunctionBody(script, 'handleBookmarksChanged'), /refreshNewTab\(\)/)
+  assert.match(getFunctionBody(script, 'scheduleBookmarkChangeRefresh'), /window\.setTimeout/)
+  assert.match(getFunctionBody(script, 'flushBookmarkChangeRefresh'), /await refreshNewTab\(\)/)
 })

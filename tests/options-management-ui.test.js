@@ -106,6 +106,28 @@ test('content snapshot full text search map is not awaited during initial option
   assert.match(readProjectFile('src/options/sections/dashboard.ts'), /ensureDashboardFullTextSearchMapForQuery/)
 })
 
+test('AI snapshot saves update only the changed search text entry', () => {
+  const optionsSource = readProjectFile('src/options/options.ts')
+  const saveBody = getFunctionBody(optionsSource, 'saveContentSnapshotForAiPreparedItem')
+  const updateBody = getFunctionBody(optionsSource, 'updateContentSnapshotSearchTextForRecord')
+
+  assert.match(saveBody, /updateContentSnapshotSearchTextForRecord\(record\)/)
+  assert.doesNotMatch(saveBody, /buildContentSnapshotSearchMapWithFullText/)
+  assert.match(updateBody, /buildContentSnapshotSearchText\(record/)
+  assert.match(updateBody, /new Map\(contentSnapshotState\.searchTextMap\)/)
+  assert.match(updateBody, /scheduleContentSnapshotFullTextSearchMapHydration\(\)/)
+})
+
+test('popup and options brand use small extension icon assets', () => {
+  const popupHtml = readProjectFile('src/popup/popup.html')
+  const optionsHtml = readProjectFile('src/options/options.html')
+
+  assert.match(popupHtml, /src="\.\.\/assets\/icon128\.png"/)
+  assert.match(optionsHtml, /src="\.\.\/assets\/icon128\.png"/)
+  assert.doesNotMatch(popupHtml, /icon4096\.jpg/)
+  assert.doesNotMatch(optionsHtml, /icon4096\.jpg/)
+})
+
 test('dashboard virtual grid computes bounded windows for large card lists', async () => {
   const {
     computeDashboardVirtualWindow,

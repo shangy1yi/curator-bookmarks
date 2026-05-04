@@ -105,6 +105,7 @@ import {
 } from './sections/content-extraction.js'
 import {
   buildContentSnapshotSearchMap,
+  buildContentSnapshotSearchText,
   buildContentSnapshotSearchMapWithFullText,
   normalizeContentSnapshotIndex,
   normalizeContentSnapshotSettings,
@@ -6325,12 +6326,7 @@ async function saveContentSnapshotForAiPreparedItem(preparedItem): Promise<void>
         [record.bookmarkId]: record
       }
     })
-    contentSnapshotState.searchTextMap = await buildContentSnapshotSearchMapWithFullText(contentSnapshotState.index, {
-      includeFullText: contentSnapshotState.settings.fullTextSearchEnabled,
-      maxRecords: 1000
-    }).catch(() => contentSnapshotState.searchTextMap)
-    contentSnapshotState.searchTextMapIncludesFullText = contentSnapshotState.settings.fullTextSearchEnabled
-    contentSnapshotState.searchTextMapLoadingFullText = false
+    updateContentSnapshotSearchTextForRecord(record)
     resetContentSnapshotFullTextSearchMapRetry()
     contentSnapshotState.aiRunSavedCount += 1
     contentSnapshotState.statusMessage = ''
@@ -6342,6 +6338,30 @@ async function saveContentSnapshotForAiPreparedItem(preparedItem): Promise<void>
     contentSnapshotState.statusMessage = `书签智能分析保存网页内容索引失败：${title}：${message}`
     console.warn('[Curator] 书签智能分析保存网页内容索引失败', error)
     renderContentSnapshotSettings()
+  }
+}
+
+function updateContentSnapshotSearchTextForRecord(record): void {
+  const searchText = buildContentSnapshotSearchText(record, {
+    includeFullText: contentSnapshotState.searchTextMapIncludesFullText
+  })
+  const bookmarkId = String(record?.bookmarkId || '').trim()
+  if (!bookmarkId) {
+    return
+  }
+
+  const nextSearchMap = new Map(contentSnapshotState.searchTextMap)
+  if (searchText) {
+    nextSearchMap.set(bookmarkId, searchText)
+  } else {
+    nextSearchMap.delete(bookmarkId)
+  }
+  contentSnapshotState.searchTextMap = nextSearchMap
+  if (
+    contentSnapshotState.settings.fullTextSearchEnabled &&
+    !contentSnapshotState.searchTextMapIncludesFullText
+  ) {
+    scheduleContentSnapshotFullTextSearchMapHydration()
   }
 }
 

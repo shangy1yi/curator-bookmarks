@@ -171,6 +171,7 @@ const SEARCH_SUGGESTION_DEBOUNCE_MS = 80
 const SEARCH_SUGGESTION_CACHE_LIMIT = 24
 const BOOKMARK_TILE_INITIAL_RENDER_LIMIT = 160
 const BOOKMARK_TILE_RENDER_CHUNK_SIZE = 80
+const BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS = 120
 const QUICK_ACCESS_ITEM_LIMIT = 8
 const ACTIVITY_RECORD_LIMIT = 160
 const DEFAULT_GENERAL_SETTINGS = {
@@ -351,6 +352,9 @@ let iconSettingsSaveTimer = 0
 let faviconAccentSaveTimer = 0
 let timeSettingsSaveTimer = 0
 let settingsSaveStatusTimer = 0
+let bookmarkChangeRefreshTimer = 0
+let bookmarkChangeRefreshInFlight = false
+let bookmarkChangeRefreshQueued = false
 let bookmarkDragSlotRects = new Map<string, DOMRect>()
 let bookmarkDragSlotOrderIds: string[] = []
 let dashboardReturnFocusTarget: HTMLElement | null = null
@@ -2244,7 +2248,7 @@ function handleBookmarksChanged(): void {
     return
   }
 
-  void refreshNewTab()
+  scheduleBookmarkChangeRefresh()
 }
 
 function handleBookmarkMoved(bookmarkId: string): void {
@@ -2253,6 +2257,35 @@ function handleBookmarkMoved(bookmarkId: string): void {
   }
 
   handleBookmarksChanged()
+}
+
+function scheduleBookmarkChangeRefresh(): void {
+  bookmarkChangeRefreshQueued = true
+  if (bookmarkChangeRefreshTimer || bookmarkChangeRefreshInFlight) {
+    return
+  }
+
+  bookmarkChangeRefreshTimer = window.setTimeout(() => {
+    bookmarkChangeRefreshTimer = 0
+    void flushBookmarkChangeRefresh()
+  }, BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS)
+}
+
+async function flushBookmarkChangeRefresh(): Promise<void> {
+  if (bookmarkChangeRefreshInFlight || !bookmarkChangeRefreshQueued) {
+    return
+  }
+
+  bookmarkChangeRefreshQueued = false
+  bookmarkChangeRefreshInFlight = true
+  try {
+    await refreshNewTab()
+  } finally {
+    bookmarkChangeRefreshInFlight = false
+    if (bookmarkChangeRefreshQueued) {
+      scheduleBookmarkChangeRefresh()
+    }
+  }
 }
 
 function isSelfBookmarkMoveEvent(bookmarkId: string): boolean {
