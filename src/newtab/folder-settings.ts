@@ -33,7 +33,7 @@ export function normalizeFolderSettingsWithDefault(
     return settings
   }
 
-  const defaultFolder = findNewTabFolder(rootNode)
+  const defaultFolder = findDefaultNewTabSourceFolder(rootNode)
   if (!defaultFolder?.id) {
     return settings
   }
@@ -42,6 +42,31 @@ export function normalizeFolderSettingsWithDefault(
     ...settings,
     selectedFolderIds: [String(defaultFolder.id)]
   }
+}
+
+export function findDefaultNewTabSourceFolder(
+  rootNode: chrome.bookmarks.BookmarkTreeNode | null
+): chrome.bookmarks.BookmarkTreeNode | null {
+  if (!rootNode) {
+    return null
+  }
+
+  const bookmarksBar = findFolderById(rootNode, BOOKMARKS_BAR_ID)
+  if (bookmarksBar && hasDirectBookmarks(bookmarksBar)) {
+    return bookmarksBar
+  }
+
+  const newTabFolder = findNewTabFolder(rootNode, { requireDirectBookmarks: true })
+  if (newTabFolder?.id) {
+    return newTabFolder
+  }
+
+  const topLevelFolder = findFirstNonEmptyTopLevelFolder(rootNode, bookmarksBar)
+  if (topLevelFolder?.id) {
+    return topLevelFolder
+  }
+
+  return null
 }
 
 export function normalizeFolderIds(value: unknown): string[] {
@@ -60,7 +85,8 @@ export function normalizeFolderIds(value: unknown): string[] {
 }
 
 export function findNewTabFolder(
-  rootNode: chrome.bookmarks.BookmarkTreeNode | null
+  rootNode: chrome.bookmarks.BookmarkTreeNode | null,
+  options: { requireDirectBookmarks?: boolean } = {}
 ): chrome.bookmarks.BookmarkTreeNode | null {
   const candidates: Array<{
     node: chrome.bookmarks.BookmarkTreeNode
@@ -73,7 +99,11 @@ export function findNewTabFolder(
     node: chrome.bookmarks.BookmarkTreeNode,
     ancestors: chrome.bookmarks.BookmarkTreeNode[] = []
   ): void {
-    if (!node.url && node.title === DEFAULT_NEW_TAB_FOLDER_TITLE) {
+    if (
+      !node.url &&
+      node.title === DEFAULT_NEW_TAB_FOLDER_TITLE &&
+      (!options.requireDirectBookmarks || hasDirectBookmarks(node))
+    ) {
       candidates.push({
         node,
         depth: ancestors.length,
@@ -104,6 +134,46 @@ export function findNewTabFolder(
   })
 
   return candidates[0]?.node || null
+}
+
+function findFolderById(
+  node: chrome.bookmarks.BookmarkTreeNode | null,
+  targetId: string
+): chrome.bookmarks.BookmarkTreeNode | null {
+  if (!node) {
+    return null
+  }
+
+  if (!node.url && String(node.id) === targetId) {
+    return node
+  }
+
+  for (const child of node.children || []) {
+    const match = findFolderById(child, targetId)
+    if (match) {
+      return match
+    }
+  }
+
+  return null
+}
+
+function findFirstNonEmptyTopLevelFolder(
+  rootNode: chrome.bookmarks.BookmarkTreeNode,
+  bookmarksBar: chrome.bookmarks.BookmarkTreeNode | null
+): chrome.bookmarks.BookmarkTreeNode | null {
+  const bookmarksBarChild = (bookmarksBar?.children || [])
+    .find((child) => !child.url && hasDirectBookmarks(child))
+  if (bookmarksBarChild) {
+    return bookmarksBarChild
+  }
+
+  return (rootNode.children || [])
+    .find((child) => !child.url && hasDirectBookmarks(child)) || null
+}
+
+function hasDirectBookmarks(node: chrome.bookmarks.BookmarkTreeNode): boolean {
+  return (node.children || []).some((child) => Boolean(child.url))
 }
 
 function hasExplicitFolderSelection(rawSettings: unknown): boolean {
