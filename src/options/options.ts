@@ -961,9 +961,13 @@ function bindEvents() {
   dom.saveAiModelModal?.addEventListener('click', saveAiModelModalSettings)
   dom.aiModelPickerSearchInput?.addEventListener('input', () => {
     managerState.aiModelPickerSearchQuery = dom.aiModelPickerSearchInput.value
+    managerState.aiModelPickerActiveId = ''
     renderAiModelPickerModal()
   })
+  dom.aiModelPickerSearchInput?.addEventListener('keydown', handleAiModelPickerSearchKeydown)
   dom.aiModelPickerResults?.addEventListener('click', handleAiModelPickerResultsClick)
+  dom.aiModelPickerResults?.addEventListener('keydown', handleAiModelPickerResultsKeydown)
+  dom.aiModelPickerResults?.addEventListener('focusin', handleAiModelPickerResultsFocus)
   dom.closeAiModelPickerModal?.addEventListener('click', closeAiModelPickerModal)
   dom.cancelAiModelPickerModal?.addEventListener('click', closeAiModelPickerModal)
   dom.aiModelPickerFetchButton?.addEventListener('click', handleFetchAiModels)
@@ -4233,6 +4237,7 @@ function openAiModelPickerModal() {
 
   managerState.aiModelPickerModalOpen = true
   managerState.aiModelPickerSearchQuery = ''
+  managerState.aiModelPickerActiveId = aiNamingManagerState.settings.model || AI_NAMING_DEFAULT_MODEL
   renderAiModelPickerModal()
 
   window.setTimeout(() => {
@@ -4246,6 +4251,7 @@ function openAiModelPickerModal() {
 function closeAiModelPickerModal() {
   managerState.aiModelPickerModalOpen = false
   managerState.aiModelPickerSearchQuery = ''
+  managerState.aiModelPickerActiveId = ''
   renderAiModelPickerModal()
 }
 
@@ -4321,12 +4327,14 @@ function renderAiModelPickerModal() {
     : allModels
 
   if (!filteredModels.length) {
+    managerState.aiModelPickerActiveId = ''
     dom.aiModelPickerResults.innerHTML = normalizedQuery
       ? '<div class="detect-empty">没有匹配的模型。</div>'
       : '<div class="detect-empty">尚未加载模型，可点击下方「获取模型」从 API 拉取。</div>'
     return
   }
 
+  resolveAiModelPickerActiveId(filteredModels, settings)
   dom.aiModelPickerResults.innerHTML = filteredModels
     .map((model) => buildAiModelPickerCard(model, settings))
     .join('')
@@ -4334,6 +4342,7 @@ function renderAiModelPickerModal() {
 
 function buildAiModelPickerCard(model, settings = aiNamingManagerState.settings) {
   const isCurrent = String(model) === String(settings.model || '')
+  const isActive = String(model) === String(managerState.aiModelPickerActiveId || '')
   const isFetched = settings.fetchedModels.some((value) => value === model)
   const isCustom = settings.customModels.some((value) => value === model)
   const isPreset = AI_NAMING_PRESET_MODELS.some((value) => value === model)
@@ -4361,6 +4370,7 @@ function buildAiModelPickerCard(model, settings = aiNamingManagerState.settings)
       role="option"
       aria-selected="${isCurrent ? 'true' : 'false'}"
       data-ai-model-id="${escapeAttr(model)}"
+      tabindex="${isActive ? '0' : '-1'}"
       title="${escapeAttr(model)}"
     >
       <div class="scope-folder-head">
@@ -4369,6 +4379,127 @@ function buildAiModelPickerCard(model, settings = aiNamingManagerState.settings)
       ${tagsHtml}
     </button>
   `
+}
+
+function resolveAiModelPickerActiveId(models, settings = aiNamingManagerState.settings) {
+  if (!models.length) {
+    managerState.aiModelPickerActiveId = ''
+    return ''
+  }
+
+  const activeId = models.some((model) => model === managerState.aiModelPickerActiveId)
+    ? managerState.aiModelPickerActiveId
+    : models.some((model) => model === settings.model)
+      ? settings.model
+      : models[0] || ''
+  managerState.aiModelPickerActiveId = activeId
+  return activeId
+}
+
+function getAiModelPickerOptionButtons() {
+  return [...dom.aiModelPickerResults.querySelectorAll<HTMLButtonElement>('[data-ai-model-id]')]
+}
+
+function handleAiModelPickerSearchKeydown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+    return
+  }
+
+  if (!getAiModelPickerOptionButtons().length) {
+    return
+  }
+
+  event.preventDefault()
+  focusAiModelPickerOption(event.key === 'ArrowDown' ? 'first' : 'last')
+}
+
+function handleAiModelPickerResultsKeydown(event) {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End' &&
+    event.key !== 'Escape'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  if (event.key === 'Escape') {
+    dom.aiModelPickerSearchInput?.focus()
+    return
+  }
+
+  if (event.key === 'Home') {
+    focusAiModelPickerOption('first')
+  } else if (event.key === 'End') {
+    focusAiModelPickerOption('last')
+  } else {
+    focusAiModelPickerOption(event.key === 'ArrowDown' ? 1 : -1)
+  }
+}
+
+function handleAiModelPickerResultsFocus(event) {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.dataset.aiModelId) {
+    return
+  }
+
+  managerState.aiModelPickerActiveId = target.dataset.aiModelId
+  syncAiModelPickerTabStops(managerState.aiModelPickerActiveId)
+}
+
+function syncAiModelPickerTabStops(activeId) {
+  for (const button of getAiModelPickerOptionButtons()) {
+    button.tabIndex = button.dataset.aiModelId === activeId ? 0 : -1
+  }
+}
+
+function focusAiModelPickerOptionById(modelId) {
+  let targetButton = null
+  for (const button of getAiModelPickerOptionButtons()) {
+    const isTarget = button.dataset.aiModelId === modelId
+    button.tabIndex = isTarget ? 0 : -1
+    if (isTarget) {
+      targetButton = button
+    }
+  }
+
+  if (!targetButton) {
+    return false
+  }
+
+  managerState.aiModelPickerActiveId = modelId
+  targetButton.focus()
+  return true
+}
+
+function focusAiModelPickerOption(direction) {
+  const buttons = getAiModelPickerOptionButtons()
+  if (!buttons.length) {
+    return
+  }
+
+  const currentIndex = buttons.findIndex((button) => button === document.activeElement)
+  let nextIndex = managerState.aiModelPickerActiveId
+    ? buttons.findIndex((button) => button.dataset.aiModelId === managerState.aiModelPickerActiveId)
+    : -1
+
+  if (direction === 'first') {
+    nextIndex = 0
+  } else if (direction === 'last') {
+    nextIndex = buttons.length - 1
+  } else if (currentIndex >= 0) {
+    nextIndex = (currentIndex + direction + buttons.length) % buttons.length
+  } else if (nextIndex < 0) {
+    nextIndex = direction > 0 ? 0 : buttons.length - 1
+  }
+
+  const button = buttons[Math.max(0, nextIndex)]
+  const modelId = String(button?.dataset.aiModelId || '')
+  if (modelId) {
+    focusAiModelPickerOptionById(modelId)
+  }
 }
 
 function handleAiModelPickerResultsClick(event) {
@@ -4386,6 +4517,7 @@ function handleAiModelPickerResultsClick(event) {
     return
   }
 
+  managerState.aiModelPickerActiveId = modelId
   aiNamingManagerState.settings = normalizeAiNamingSettings({
     ...aiNamingManagerState.settings,
     model: modelId

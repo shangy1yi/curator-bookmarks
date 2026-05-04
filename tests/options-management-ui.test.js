@@ -59,6 +59,22 @@ test('options folder listbox options expose role and aria-selected state', () =>
   assert.match(optionsSource, /tabindex="\$\{isActive \? '0' : '-1'\}"/)
 })
 
+test('AI model picker listbox supports keyboard navigation', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const optionsSource = readProjectFile('src/options/options.ts')
+
+  assert.match(optionsHtml, /id="ai-model-picker-results"[^>]+role="listbox"/)
+  assert.match(optionsSource, /class="scope-folder-card ai-model-card \$\{isCurrent \? 'current' : ''\}"[\s\S]*?role="option"[\s\S]*?aria-selected="\$\{isCurrent \? 'true' : 'false'\}"/)
+  assert.match(optionsSource, /aiModelPickerActiveId/)
+  assert.match(optionsSource, /dom\.aiModelPickerSearchInput\?\.addEventListener\('keydown', handleAiModelPickerSearchKeydown\)/)
+  assert.match(optionsSource, /dom\.aiModelPickerResults\?\.addEventListener\('keydown', handleAiModelPickerResultsKeydown\)/)
+  assert.match(optionsSource, /dom\.aiModelPickerResults\?\.addEventListener\('focusin', handleAiModelPickerResultsFocus\)/)
+  assert.match(optionsSource, /function handleAiModelPickerResultsKeydown\(event\)/)
+  assert.match(optionsSource, /event\.key !== 'Home'[\s\S]*?event\.key !== 'End'[\s\S]*?event\.key !== 'Escape'/)
+  assert.match(optionsSource, /dom\.aiModelPickerSearchInput\?\.focus\(\)/)
+  assert.match(optionsSource, /tabindex="\$\{isActive \? '0' : '-1'\}"/)
+})
+
 test('dashboard exposes a persistent folder sidebar with cached DOM refs', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const domSource = readProjectFile('src/options/shared-options/dom.ts')

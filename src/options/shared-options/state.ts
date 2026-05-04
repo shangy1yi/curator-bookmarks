@@ -162,6 +162,7 @@ export const managerState = {
   aiModelModalOpen: false,
   aiModelPickerModalOpen: false,
   aiModelPickerSearchQuery: '',
+  aiModelPickerActiveId: '',
   confirmModalOpen: false,
   confirmModalTone: 'danger',
   confirmModalLabel: '确认',
