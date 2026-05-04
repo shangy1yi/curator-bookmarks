@@ -26,14 +26,17 @@ test('popup empty search state offers actionable recovery controls', () => {
   assert.match(popupSource, /handleEmptySearchAction/)
 })
 
-test('popup natural search asks for AI channel setup before enabling semantic mode', () => {
+test('popup natural search allows local parsing without AI setup', () => {
   assert.match(popupSource, /naturalSearchSetupRequired/)
   assert.match(popupSource, /function renderNaturalSearchSetupState/)
-  assert.match(popupSource, /需要配置 AI 渠道/)
+  assert.doesNotMatch(popupSource, /state\.naturalSearchEnabled = false[\s\S]{0,240}state\.naturalSearchSetupRequired = true/)
+  assert.match(popupSource, /未配置 AI 渠道，已使用本地解析。/)
+  assert.match(popupSource, /正在使用本地解析/)
+  assert.match(popupSource, /无需配置 AI 渠道/)
   assert.match(popupSource, /data-empty-action="open-ai-settings"/)
-  assert.match(popupSource, /配置 AI 渠道/)
+  assert.match(popupSource, /配置 AI 增强/)
   assert.match(popupSource, /function hasConfiguredAiProviderSettings/)
-  assert.match(popupSource, /if \(!hasConfiguredAiProviderSettings\(settings\)\)/)
+  assert.match(popupSource, /if \(!hasConfiguredAiProviderSettings\(settings\)\)[\s\S]*?return localPlan/)
   assert.match(popupSource, /openSettingsPage\('ai-provider'\)/)
 })
 
