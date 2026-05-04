@@ -27,6 +27,7 @@ import {
   getFolderGapPx,
   getIconGapPx,
   getIconPageWidthPx,
+  getResponsiveFixedIconColumns,
   getIconRowGapPx,
   normalizeIconSettings
 } from './icon-settings.js'
@@ -436,11 +437,14 @@ const state = {
   folderDragOffsetX: 0,
   folderDragOffsetY: 0,
   folderDragOriginalOrderIds: [] as string[],
+  folderDragOriginalSections: [] as NewTabFolderSection[],
   folderDragSuppressClick: false,
   reorderingBookmarks: false,
   selfBookmarkMoveIds: new Set<string>(),
   selfBookmarkMoveSuppressUntil: 0,
   bookmarkReorderError: '',
+  folderReorderStatus: '',
+  folderReorderStatusTone: 'success' as 'success' | 'error',
   backgroundSettings: { ...DEFAULT_BACKGROUND_SETTINGS },
   searchSettings: { ...DEFAULT_SEARCH_SETTINGS },
   iconSettings: { ...DEFAULT_ICON_SETTINGS },
@@ -496,6 +500,7 @@ let iconSettingsSaveTimer = 0
 let faviconAccentSaveTimer = 0
 let timeSettingsSaveTimer = 0
 let settingsSaveStatusTimer = 0
+let folderReorderStatusTimer = 0
 let bookmarkChangeRefreshTimer = 0
 let bookmarkChangeRefreshInFlight = false
 let bookmarkChangeRefreshQueued = false
@@ -636,8 +641,8 @@ function bindEvents(): void {
     void finishFolderDrag(event)
   })
   window.addEventListener('pointercancel', () => {
-    cancelBookmarkDrag()
-    cancelFolderDrag()
+    cancelBookmarkDrag({ keepSuppressClick: true })
+    cancelFolderDrag({ keepSuppressClick: true })
   })
   root?.addEventListener('contextmenu', (event) => {
     const target = event.target
@@ -2279,8 +2284,10 @@ function beginFolderDrag(): void {
 
   closeBookmarkMenu()
   closeAddBookmarkMenu()
+  clearFolderReorderStatus()
   state.folderDragLongPressTimer = 0
   state.folderDragOriginalOrderIds = state.folderSections.map((section) => section.id)
+  state.folderDragOriginalSections = [...state.folderSections]
   state.folderDragSuppressClick = true
   document.body.classList.add('folder-order-dragging')
   const sourceHeader = getActiveFolderDragHeader()
@@ -2324,6 +2331,7 @@ async function finishFolderDrag(event: PointerEvent): Promise<void> {
   const wasDragging = Boolean(state.folderDragOriginalOrderIds.length)
   const finalOrderIds = state.folderSections.map((section) => section.id)
   const originalOrderIds = [...state.folderDragOriginalOrderIds]
+  const originalSections = [...state.folderDragOriginalSections]
   clearFolderDragState({ keepSuppressClick: wasDragging })
 
   if (!wasDragging) {
@@ -2341,8 +2349,20 @@ async function finishFolderDrag(event: PointerEvent): Promise<void> {
     ...state.folderSettings,
     selectedFolderIds: finalOrderIds
   })
-  await saveFolderSettings()
-  syncFolderSettingsControls()
+  try {
+    await saveFolderSettings()
+    syncFolderSettingsControls()
+    setFolderReorderStatus('文件夹顺序已保存。', 'success')
+  } catch (error) {
+    state.folderSettings = normalizeFolderSettings({
+      ...state.folderSettings,
+      selectedFolderIds: originalOrderIds
+    })
+    restoreFolderDragOrder(originalOrderIds, originalSections)
+    syncFolderSettingsControls()
+    const message = error instanceof Error ? error.message : '请稍后重试。'
+    setFolderReorderStatus(`文件夹顺序保存失败，已恢复到拖拽前顺序。${message}`, 'error')
+  }
 }
 
 function cancelFolderDrag({ keepSuppressClick = false } = {}): void {
@@ -2351,7 +2371,10 @@ function cancelFolderDrag({ keepSuppressClick = false } = {}): void {
   }
 
   window.clearTimeout(state.folderDragLongPressTimer)
+  const originalOrderIds = [...state.folderDragOriginalOrderIds]
+  const originalSections = [...state.folderDragOriginalSections]
   clearFolderDragState({ keepSuppressClick })
+  restoreFolderDragOrder(originalOrderIds, originalSections)
   render()
   updateClockText()
 }
@@ -2366,6 +2389,7 @@ function clearFolderDragState({ keepSuppressClick = false } = {}): void {
   state.folderDragOffsetX = 0
   state.folderDragOffsetY = 0
   state.folderDragOriginalOrderIds = []
+  state.folderDragOriginalSections = []
   removeFolderDragGhost()
   document.body.classList.remove('folder-order-dragging')
 
@@ -2551,6 +2575,29 @@ function moveDraggedFolderInState(insertIndex: number): boolean {
 
   nextSections.splice(normalizedIndex, 0, draggedSection)
   state.folderSections = nextSections
+  refreshDerivedBookmarkState()
+  return true
+}
+
+function restoreFolderDragOrder(
+  originalOrderIds: string[],
+  originalSections: NewTabFolderSection[]
+): boolean {
+  if (!originalOrderIds.length || originalSections.length !== originalOrderIds.length) {
+    return false
+  }
+
+  const sectionById = new Map(originalSections.map((section) => [section.id, section]))
+  const restoredSections: NewTabFolderSection[] = []
+  for (const folderId of originalOrderIds) {
+    const section = sectionById.get(folderId)
+    if (!section) {
+      return false
+    }
+    restoredSections.push(section)
+  }
+
+  state.folderSections = restoredSections
   refreshDerivedBookmarkState()
   return true
 }
@@ -2937,6 +2984,7 @@ async function refreshNewTab(): Promise<void> {
   state.loading = true
   state.error = ''
   state.bookmarkReorderError = ''
+  clearFolderReorderStatus()
   render()
 
   try {
@@ -4465,12 +4513,14 @@ function createBookmarkSections(sections: NewTabFolderSection[]): HTMLElement {
     groupList.appendChild(sectionNode)
   }
 
-  if (state.bookmarkReorderError) {
-    const error = document.createElement('p')
-    error.className = 'bookmark-reorder-status'
-    error.setAttribute('role', 'status')
-    error.textContent = state.bookmarkReorderError
-    groupList.appendChild(error)
+  const reorderStatusMessage = state.bookmarkReorderError || state.folderReorderStatus
+  if (reorderStatusMessage) {
+    const status = document.createElement('p')
+    status.className = 'bookmark-reorder-status'
+    status.dataset.tone = state.bookmarkReorderError ? 'error' : state.folderReorderStatusTone
+    status.setAttribute('role', 'status')
+    status.textContent = reorderStatusMessage
+    groupList.appendChild(status)
   }
 
   view.appendChild(groupList)
@@ -4858,27 +4908,10 @@ function createQuickAccessItem(
 }
 
 function getResponsiveIconColumns(settings: IconSettings): number {
-  if (settings.layoutMode !== 'fixed') {
-    return settings.columns
-  }
-
-  const viewportWidth = Math.max(
-    320,
+  return getResponsiveFixedIconColumns(
+    settings,
     document.documentElement.clientWidth || window.innerWidth || 1280
   )
-  const horizontalShellPadding = Math.max(48, Math.min(viewportWidth * 0.1, 144))
-  const tileWidth = getEffectiveIconTileWidthPx(settings)
-  const availablePageWidth = Math.max(
-    tileWidth,
-    Math.min(getIconPageWidthPx(settings.pageWidth), 1280, viewportWidth - horizontalShellPadding)
-  )
-  const gap = getIconGapPx(settings.columnGap)
-  const maxColumns = Math.max(
-    1,
-    Math.floor((availablePageWidth + gap) / (tileWidth + gap))
-  )
-
-  return Math.max(1, Math.min(settings.columns, maxColumns))
 }
 
 function createBookmarkTile(
@@ -7168,6 +7201,27 @@ async function saveFolderSettings(): Promise<void> {
   await saveSettingsWithFeedback({
     [STORAGE_KEYS.newTabFolderSettings]: state.folderSettings
   })
+}
+
+function setFolderReorderStatus(message: string, tone: 'success' | 'error'): void {
+  window.clearTimeout(folderReorderStatusTimer)
+  state.folderReorderStatus = message
+  state.folderReorderStatusTone = tone
+  render()
+  updateClockText()
+
+  folderReorderStatusTimer = window.setTimeout(() => {
+    clearFolderReorderStatus()
+    render()
+    updateClockText()
+  }, tone === 'success' ? 1800 : 4200)
+}
+
+function clearFolderReorderStatus(): void {
+  window.clearTimeout(folderReorderStatusTimer)
+  folderReorderStatusTimer = 0
+  state.folderReorderStatus = ''
+  state.folderReorderStatusTone = 'success'
 }
 
 function applyFolderSettings(): void {

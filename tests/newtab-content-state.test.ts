@@ -696,6 +696,40 @@ test('newtab advanced icon layout exposes a default reset control', () => {
   assert.match(css, /\.icon-reset-defaults/)
 })
 
+test('newtab fixed icon layout clamps columns and keeps compact grids fluid', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+  const responsiveColumnsBody = getFunctionBody(script, 'getResponsiveIconColumns')
+  const fixedCompactRule = css.match(
+    /\.newtab-content\[data-icon-layout-mode="fixed"\]\s+\.bookmark-grid\s*\{[\s\S]*?max-width:\s*min\(var\(--icon-fixed-grid-width\),\s*100%\)[\s\S]*?grid-template-columns:\s*repeat\(var\(--icon-columns\),\s*minmax\(0,\s*1fr\)\)[\s\S]*?\}/
+  )?.[0] || ''
+  const fixedContentRule = getCssRuleBody(css, '.newtab-content[data-icon-layout-mode="fixed"]')
+
+  assert.match(script, /getResponsiveFixedIconColumns/)
+  assert.match(responsiveColumnsBody, /document\.documentElement\.clientWidth \|\| window\.innerWidth \|\| 1280/)
+  assert.match(fixedContentRule, /width:\s*min\(max\(var\(--icon-page-width\),\s*var\(--icon-fixed-grid-width\)\),\s*100%\)/)
+  assert.match(fixedCompactRule, /width:\s*100%/)
+  assert.match(fixedCompactRule, /column-gap:\s*min\(var\(--icon-column-gap\),\s*18px\)/)
+})
+
+test('newtab folder reorder reports save outcome, rolls back failed saves, and suppresses pointercancel clicks', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+  const finishBody = getFunctionBody(script, 'finishFolderDrag')
+
+  assert.match(script, /folderReorderStatus: ''/)
+  assert.match(script, /folderDragOriginalSections: \[\] as NewTabFolderSection\[\]/)
+  assert.match(script, /window\.addEventListener\('pointercancel', \(\) => \{[\s\S]*?cancelFolderDrag\(\{ keepSuppressClick: true \}\)/)
+  assert.match(finishBody, /try \{[\s\S]*?await saveFolderSettings\(\)[\s\S]*?setFolderReorderStatus\('文件夹顺序已保存。', 'success'\)/)
+  assert.match(finishBody, /catch \(error\) \{[\s\S]*?selectedFolderIds: originalOrderIds[\s\S]*?restoreFolderDragOrder\(originalOrderIds, originalSections\)/)
+  assert.match(finishBody, /文件夹顺序保存失败，已恢复到拖拽前顺序。/)
+  assert.match(script, /function cancelFolderDrag\(\{ keepSuppressClick = false \} = \{\}\): void \{[\s\S]*?restoreFolderDragOrder\(originalOrderIds, originalSections\)/)
+  assert.match(script, /function restoreFolderDragOrder\(/)
+  assert.match(script, /status\.dataset\.tone = state\.bookmarkReorderError \? 'error' : state\.folderReorderStatusTone/)
+  assert.match(css, /\.bookmark-reorder-status\[data-tone="success"\]/)
+  assert.match(css, /\.bookmark-reorder-status\[data-tone="error"\]/)
+})
+
 test('newtab settings rows avoid per-option divider lines', () => {
   const css = readProjectFile('src/newtab/newtab.css')
   const sectionDividerRule = getCssRuleBody(css, '.settings-section + .settings-section')

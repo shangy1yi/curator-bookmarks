@@ -963,6 +963,10 @@ body.background-mask-enabled .newtab-background-mask {
   justify-items: stretch;
 }
 
+.newtab-content[data-icon-layout-mode="fixed"] {
+  width: min(max(var(--icon-page-width), var(--icon-fixed-grid-width)), 100%);
+}
+
 .newtab-dashboard-overlay {
   position: fixed;
   inset: 0;
@@ -1479,6 +1483,14 @@ body.background-mask-enabled .newtab-background-mask {
   font-size: 12px;
   font-weight: 650;
   line-height: 1.4;
+}
+
+.bookmark-reorder-status[data-tone="success"] {
+  color: rgba(132, 218, 137, 0.9);
+}
+
+.bookmark-reorder-status[data-tone="error"] {
+  color: rgba(255, 183, 176, 0.94);
 }
 
 .folder-section-header-row {
@@ -3852,7 +3864,8 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 
   .newtab-content[data-icon-layout-mode="fixed"] .bookmark-grid {
     width: 100%;
-    grid-template-columns: repeat(var(--icon-columns), minmax(0, min(calc(var(--icon-tile-width) * 0.93), 100%)));
+    max-width: min(var(--icon-fixed-grid-width), 100%);
+    grid-template-columns: repeat(var(--icon-columns), minmax(0, 1fr));
     column-gap: min(var(--icon-column-gap), 18px);
   }
 

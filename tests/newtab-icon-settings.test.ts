@@ -9,6 +9,7 @@ import {
   getFolderGapPx,
   getIconGapPx,
   getIconRowGapPx,
+  getResponsiveFixedIconColumns,
   normalizeIconSettings
 } from '../src/newtab/icon-settings.js'
 
@@ -120,4 +121,27 @@ test('shrinks effective tile width when card titles are hidden', () => {
   })
 
   assert.equal(getEffectiveIconTileWidthPx(settings), 55)
+})
+
+test('clamps fixed icon columns to fit narrow viewports without changing desktop columns', () => {
+  const settings = normalizeIconSettings({
+    layoutMode: 'fixed',
+    columns: 8,
+    tileWidth: 184,
+    columnGap: 10,
+    pageWidth: 78
+  })
+
+  assert.equal(getResponsiveFixedIconColumns(settings, 1920), 8)
+  assert.equal(getResponsiveFixedIconColumns(settings, 820), 3)
+  assert.equal(getResponsiveFixedIconColumns(settings, 390), 1)
+})
+
+test('leaves auto layout column setting unchanged for responsive calculation', () => {
+  const settings = normalizeIconSettings({
+    layoutMode: 'auto',
+    columns: 7
+  })
+
+  assert.equal(getResponsiveFixedIconColumns(settings, 390), 7)
 })

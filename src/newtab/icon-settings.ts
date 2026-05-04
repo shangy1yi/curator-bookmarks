@@ -194,6 +194,35 @@ export function getFixedIconGridWidthPx(settings: IconSettings): number {
   return Math.round(columns * tileWidth + Math.max(columns - 1, 0) * gap)
 }
 
+export function getResponsiveFixedIconColumns(
+  settings: IconSettings,
+  viewportWidth: number
+): number {
+  const requestedColumns = clampNumber(settings.columns, 2, 8, DEFAULT_ICON_SETTINGS.columns)
+  if (settings.layoutMode !== 'fixed') {
+    return requestedColumns
+  }
+
+  const safeViewportWidth = Math.max(320, Math.round(Number(viewportWidth) || 0))
+  const horizontalShellPadding = Math.max(48, Math.min(safeViewportWidth * 0.1, 144))
+  const tileWidth = getEffectiveIconTileWidthPx(settings)
+  const fixedGridWidth = getFixedIconGridWidthPx(settings)
+  const availablePageWidth = Math.max(
+    tileWidth,
+    Math.min(
+      Math.max(getIconPageWidthPx(settings.pageWidth), fixedGridWidth),
+      safeViewportWidth - horizontalShellPadding
+    )
+  )
+  const gap = getIconGapPx(settings.columnGap)
+  const maxColumns = Math.max(
+    1,
+    Math.floor((availablePageWidth + gap) / (tileWidth + gap))
+  )
+
+  return Math.max(1, Math.min(requestedColumns, maxColumns))
+}
+
 export function getEffectiveIconTileWidthPx(settings: IconSettings): number {
   if (settings.showTitles) {
     return settings.tileWidth
