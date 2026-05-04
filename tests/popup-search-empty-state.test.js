@@ -134,6 +134,9 @@ test('popup startup uses light snapshot search metadata instead of full snapshot
 
 test('popup folder pickers expose option and treeitem semantics', () => {
   assert.match(popupHtml, /id="folder-breadcrumbs"[^>]+aria-label="当前文件夹路径"/)
+  assert.match(popupHtml, /id="filter-folder-list"[^>]+role="listbox"[^>]+aria-label="筛选文件夹候选列表"/)
+  assert.match(popupHtml, /id="move-folder-list"[^>]+role="tree"[^>]+aria-label="移动目标文件夹"/)
+  assert.match(popupHtml, /id="smart-folder-list"[^>]+role="tree"[^>]+aria-label="保存目标文件夹"/)
   assert.match(popupSource, /data-folder-breadcrumb-id="\$\{escapeAttr\(segment\.id\)\}"/)
   assert.match(popupSource, /aria-current="page"/)
   assert.match(popupSource, /function handlePopupBreadcrumbClick/)
