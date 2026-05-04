@@ -63,7 +63,7 @@ test('AI model picker listbox supports keyboard navigation', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const optionsSource = readProjectFile('src/options/options.ts')
 
-  assert.match(optionsHtml, /id="ai-model-picker-results"[^>]+role="listbox"/)
+  assert.match(optionsHtml, /id="ai-model-picker-results"[^>]+role="listbox"[^>]+aria-label="AI 模型候选列表"/)
   assert.match(optionsSource, /class="scope-folder-card ai-model-card \$\{isCurrent \? 'current' : ''\}"[\s\S]*?role="option"[\s\S]*?aria-selected="\$\{isCurrent \? 'true' : 'false'\}"/)
   assert.match(optionsSource, /aiModelPickerActiveId/)
   assert.match(optionsSource, /dom\.aiModelPickerSearchInput\?\.addEventListener\('keydown', handleAiModelPickerSearchKeydown\)/)
