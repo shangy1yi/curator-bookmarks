@@ -2,7 +2,8 @@ import {
   BOOKMARKS_BAR_ID,
   RECYCLE_BIN_LIMIT
 } from '../../shared/constants.js'
-import { createBookmark } from '../../shared/bookmarks-api.js'
+import { createBookmark, getBookmarkTree } from '../../shared/bookmarks-api.js'
+import { extractBookmarkData } from '../../shared/bookmark-tree.js'
 import {
   appendRecycleEntries,
   deleteBookmarkToRecycle,
@@ -272,8 +273,9 @@ async function restoreRecycleEntriesByIds(recycleIds, callbacks) {
   let restoreError = null
 
   try {
+    const currentFolderIds = await loadCurrentFolderIds()
     for (const entry of targetEntries) {
-      const fallbackParentId = availabilityState.folderMap.has(String(entry.parentId))
+      const fallbackParentId = currentFolderIds.has(String(entry.parentId))
         ? entry.parentId
         : BOOKMARKS_BAR_ID
 
@@ -311,6 +313,12 @@ async function restoreRecycleEntriesByIds(recycleIds, callbacks) {
 
     callbacks.renderAvailabilitySection()
   }
+}
+
+async function loadCurrentFolderIds(): Promise<Set<string>> {
+  const tree = await getBookmarkTree()
+  const folders = extractBookmarkData(tree[0]).folderMap
+  return new Set([...folders.keys(), BOOKMARKS_BAR_ID])
 }
 
 export async function clearRecycleBin(callbacks) {

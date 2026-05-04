@@ -237,10 +237,12 @@ export async function buildBackupRestorePreview(
 ): Promise<BackupRestorePreview> {
   const currentTree = await getBookmarkTree()
   const currentData = extractBookmarkData(currentTree[0])
-  const currentUrls = new Set(currentData.bookmarks.map((bookmark) => normalizeBookmarkTagUrl(bookmark.url)))
   const backupBookmarks = extractBackupBookmarkNodes(backup.chromeBookmarks.tree)
-  const missingBookmarkUrls = backupBookmarks.filter((node) => {
-    return node.url && !currentUrls.has(normalizeBookmarkTagUrl(node.url))
+  const currentInstances = new Set(
+    currentData.bookmarks.map((bookmark) => buildBookmarkInstanceKey(bookmark.url, bookmark.path || ''))
+  )
+  const missingBookmarkUrls = extractBackupBookmarkInstances(backup.chromeBookmarks.tree).filter((instance) => {
+    return !currentInstances.has(buildBookmarkInstanceKey(instance.url, instance.path))
   }).length
   const tagRecords = Object.values(backup.storage.bookmarkTagIndex.records)
   const matchedTags = tagRecords.filter((record) => {
@@ -256,8 +258,9 @@ export async function buildBackupRestorePreview(
     warnings.push('备份文件中出现疑似 API Key 字段，恢复会忽略这些字段。')
   }
   if (missingBookmarkUrls) {
-    warnings.push(`有 ${missingBookmarkUrls} 条备份书签当前不存在；完整恢复会复制到新的恢复文件夹。`)
+    warnings.push(`有 ${missingBookmarkUrls} 条备份书签实例当前不存在；完整恢复会复制到新的恢复文件夹。`)
   }
+  warnings.push('完整恢复会覆盖回收站、忽略规则、重定向缓存和弹窗偏好等集合类本地数据；不会覆盖 Chrome 现有书签树。')
 
   return {
     valid: true,
@@ -291,7 +294,7 @@ export async function buildBackupRestorePreview(
       {
         mode: 'safeFull',
         label: '恢复全部可安全恢复的数据',
-        description: '恢复扩展本地数据；缺失书签复制到新的恢复文件夹，不替换现有书签树。'
+        description: '恢复扩展本地数据并覆盖集合类本地记录；缺失书签按 URL 和路径实例复制到新的恢复文件夹，不替换现有书签树。'
       }
     ]
   }

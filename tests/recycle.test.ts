@@ -10,9 +10,13 @@ import {
   removeRecycleEntry,
   removeRecycleEntries
 } from '../src/shared/recycle-bin.js'
-import { normalizeRecycleBin } from '../src/options/sections/recycle.js'
+import {
+  normalizeRecycleBin,
+  restoreSelectedRecycleEntries
+} from '../src/options/sections/recycle.js'
 import { getRecycleEntryActionLabel } from '../src/options/sections/recycle.js'
 import { STORAGE_KEYS } from '../src/shared/constants.js'
+import { availabilityState, managerState } from '../src/options/shared-options/state.js'
 
 function readProjectFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -271,14 +275,84 @@ test('rolls back recycle entry when Chrome bookmark removal fails', async () => 
   assert.deepEqual(store[STORAGE_KEYS.recycleBin], [])
 })
 
+test('restores recycle entry to current parent folder even when cached folder map is stale', async () => {
+  const store: Record<string, unknown> = {
+    [STORAGE_KEYS.recycleBin]: [
+      {
+        recycleId: 'recycle-1',
+        bookmarkId: 'bookmark-1',
+        deletedAt: 100,
+        parentId: 'folder-current',
+        index: 2,
+        title: 'Recovered',
+        url: 'https://recovered.example.com'
+      }
+    ]
+  }
+  const createdBookmarks: chrome.bookmarks.BookmarkCreateArg[] = []
+  const renderCalls: string[] = []
+
+  ;(globalThis as any).chrome = createChromeMock({
+    store,
+    tree: [rootNode([
+      folderNode('1', 'Bookmarks Bar', [
+        folderNode('folder-current', 'Still Here', [], '1')
+      ], '0')
+    ])],
+    createdBookmarks
+  })
+  managerState.recycleBin = normalizeRecycleBin(store[STORAGE_KEYS.recycleBin])
+  managerState.selectedRecycleIds = new Set(['recycle-1'])
+  availabilityState.folderMap = new Map()
+  availabilityState.deleting = false
+  availabilityState.lastError = ''
+
+  try {
+    await restoreSelectedRecycleEntries({
+      renderAvailabilitySection() {
+        renderCalls.push('render')
+      },
+      async hydrateAvailabilityCatalog() {
+        renderCalls.push('hydrate')
+      }
+    })
+
+    assert.equal(createdBookmarks.length, 1)
+    assert.equal(createdBookmarks[0].parentId, 'folder-current')
+    assert.equal(createdBookmarks[0].index, 2)
+    assert.equal(createdBookmarks[0].url, 'https://recovered.example.com')
+    assert.deepEqual(store[STORAGE_KEYS.recycleBin], [])
+    assert.equal(managerState.recycleBin.length, 0)
+    assert.match(availabilityState.lastError, /已从回收站恢复 1 条书签/)
+    assert.ok(renderCalls.includes('hydrate'))
+  } finally {
+    delete (globalThis as any).chrome
+    managerState.recycleBin = []
+    managerState.selectedRecycleIds = new Set()
+    availabilityState.folderMap = new Map()
+    availabilityState.deleting = false
+    availabilityState.lastError = ''
+  }
+})
+
 function createChromeMock(options: {
   store: Record<string, unknown>
   setError?: string
   removeBookmarkError?: string
   removedBookmarkIds?: string[]
+  tree?: chrome.bookmarks.BookmarkTreeNode[]
+  createdBookmarks?: chrome.bookmarks.BookmarkCreateArg[]
 }) {
-  const { store, setError, removeBookmarkError, removedBookmarkIds = [] } = options
+  const {
+    store,
+    setError,
+    removeBookmarkError,
+    removedBookmarkIds = [],
+    tree = [rootNode([])],
+    createdBookmarks = []
+  } = options
   let lastError: { message: string } | undefined
+  let nextBookmarkId = 1000
 
   return {
     storage: {
@@ -303,6 +377,21 @@ function createChromeMock(options: {
       }
     },
     bookmarks: {
+      getTree(callback: (nodes: chrome.bookmarks.BookmarkTreeNode[]) => void) {
+        setTimeout(() => callback(tree), 0)
+      },
+      create(payload: chrome.bookmarks.BookmarkCreateArg, callback: (node: chrome.bookmarks.BookmarkTreeNode) => void) {
+        setTimeout(() => {
+          createdBookmarks.push({ ...payload })
+          callback({
+            id: String(nextBookmarkId++),
+            parentId: payload.parentId,
+            index: payload.index,
+            title: payload.title || '',
+            url: payload.url
+          })
+        }, 0)
+      },
       remove(bookmarkId: string, callback: () => void) {
         setTimeout(() => {
           removedBookmarkIds.push(bookmarkId)
@@ -317,5 +406,27 @@ function createChromeMock(options: {
         return lastError
       }
     }
+  }
+}
+
+function rootNode(children: chrome.bookmarks.BookmarkTreeNode[]): chrome.bookmarks.BookmarkTreeNode {
+  return {
+    id: '0',
+    title: '',
+    children
+  }
+}
+
+function folderNode(
+  id: string,
+  title: string,
+  children: chrome.bookmarks.BookmarkTreeNode[],
+  parentId = '0'
+): chrome.bookmarks.BookmarkTreeNode {
+  return {
+    id,
+    parentId,
+    title,
+    children
   }
 }

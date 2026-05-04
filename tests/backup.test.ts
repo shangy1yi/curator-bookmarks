@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildBackupRestorePreview,
   getBackupFileName,
   parseCuratorBackupFile,
   restoreCuratorBackup,
@@ -121,6 +122,66 @@ test('safe full restore copies same URL when the missing instance is in another 
     assert.equal(result.skippedBookmarks, 1)
     assert.equal(created.some((item) => item.title === 'React Docs B' && item.url === 'https://react.dev/learn'), true)
     assert.equal(created.some((item) => item.title === 'React Docs A' && item.url === 'https://react.dev/learn'), false)
+  } finally {
+    delete (globalThis as any).chrome
+  }
+})
+
+test('restore preview counts missing bookmark instances by URL and folder path', async () => {
+  const store: Record<string, unknown> = {}
+  ;(globalThis as any).chrome = createChromeMock({
+    store,
+    tree: [rootNode([
+      folderNode('10', 'Bookmarks Bar', [
+        folderNode('11', 'Folder A', [
+          bookmarkNode('12', 'React Docs', 'https://react.dev/learn', '11')
+        ])
+      ], '0')
+    ])]
+  })
+
+  try {
+    const preview = await buildBackupRestorePreview(createBackup({
+      tree: [rootNode([
+        folderNode('1', 'Bookmarks Bar', [
+          folderNode('2', 'Folder A', [
+            bookmarkNode('3', 'React Docs A', 'https://react.dev/learn', '2')
+          ], '1'),
+          folderNode('4', 'Folder B', [
+            bookmarkNode('5', 'React Docs B', 'https://react.dev/learn', '4')
+          ], '1')
+        ], '0')
+      ])]
+    }), 'fixture.json')
+
+    assert.equal(preview.counts.bookmarkUrls, 2)
+    assert.equal(preview.counts.missingBookmarkUrls, 1)
+    assert.match(preview.warnings.join('\n'), /1 条备份书签实例当前不存在/)
+  } finally {
+    delete (globalThis as any).chrome
+  }
+})
+
+test('safe full preview declares local collection overwrite semantics', async () => {
+  const store: Record<string, unknown> = {}
+  ;(globalThis as any).chrome = createChromeMock({
+    store,
+    tree: [rootNode([])]
+  })
+
+  try {
+    const preview = await buildBackupRestorePreview(createBackup({
+      tree: [rootNode([])]
+    }))
+
+    assert.match(
+      preview.warnings.join('\n'),
+      /完整恢复会覆盖回收站、忽略规则、重定向缓存和弹窗偏好等集合类本地数据/
+    )
+    assert.match(
+      preview.modes.find((mode) => mode.mode === 'safeFull')?.description || '',
+      /覆盖集合类本地记录/
+    )
   } finally {
     delete (globalThis as any).chrome
   }
