@@ -788,3 +788,26 @@ test('newtab bookmark suggestions are debounced and cached', () => {
   assert.match(script, /searchSuggestionCache\.clear\(\)/)
   assert.doesNotMatch(script, /input\.addEventListener\('input', \(\) => \{[\s\S]*?renderSuggestions\(\)/)
 })
+
+test('newtab source candidates distinguish direct and total bookmark counts', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /interface NewTabFolderCandidate[\s\S]*directBookmarkCount: number[\s\S]*totalBookmarkCount: number/)
+  assert.match(script, /function formatFolderCandidateCountSummary\(folder: NewTabFolderCandidate\): string/)
+  assert.match(script, /直属 \$\{folder\.directBookmarkCount\} \/ 合计 \$\{folder\.totalBookmarkCount\}/)
+  assert.match(script, /badge\.textContent = selected \? '已选' : String\(folder\.totalBookmarkCount\)/)
+  assert.doesNotMatch(script, /badge\.textContent = selected \? '已选' : `\$\{folder\.bookmarkCount\}`/)
+})
+
+test('newtab search suggestions explain bookmark enter behavior and empty web search fallback', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+
+  assert.match(script, /suggestionsHint\.className = 'newtab-search-hint'/)
+  assert.match(script, /createSearchWebFallbackButton\(query\)/)
+  assert.match(script, /未找到书签，按 Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索/)
+  assert.match(script, /suggestionsHint\.textContent = `按 Enter 打开选中的书签；Cmd\/Ctrl\+Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页`/)
+  assert.match(script, /button\.addEventListener\('click', \(\) => \{[\s\S]*?submitSearch\(query\)/)
+  assert.match(css, /\.newtab-search-hint\s*\{/)
+  assert.match(css, /\.newtab-search-web-hint\s*\{/)
+})

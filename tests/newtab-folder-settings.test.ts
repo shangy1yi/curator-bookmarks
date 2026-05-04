@@ -3,6 +3,8 @@ import { test } from 'node:test'
 import {
   findDefaultNewTabSourceFolder,
   findNewTabFolder,
+  getDisplayableNewTabSourceFolders,
+  getFolderBookmarkCounts,
   normalizeFolderIds,
   normalizeFolderSettingsWithDefault
 } from '../src/newtab/folder-settings.js'
@@ -111,7 +113,7 @@ test('new tab folder settings preserve explicit empty source selection', () => {
   )
 })
 
-test('new tab folder settings fall back to another non-empty bookmarks bar folder when no 标签页 source is displayable', () => {
+test('new tab folder settings aggregate the bookmarks bar when no 标签页 source is displayable', () => {
   const rootWithBookmarksBarFolder: chrome.bookmarks.BookmarkTreeNode = {
     id: '0',
     title: '',
@@ -158,14 +160,84 @@ test('new tab folder settings fall back to another non-empty bookmarks bar folde
     ]
   }
 
-  assert.equal(findDefaultNewTabSourceFolder(rootWithBookmarksBarFolder)?.id, '20')
+  assert.equal(findDefaultNewTabSourceFolder(rootWithBookmarksBarFolder)?.id, '1')
   assert.deepEqual(
     normalizeFolderSettingsWithDefault(undefined, rootWithBookmarksBarFolder),
     {
-      selectedFolderIds: ['20'],
+      selectedFolderIds: ['1'],
       hideFolderNames: false
     }
   )
+  assert.deepEqual(
+    getDisplayableNewTabSourceFolders(rootWithBookmarksBarFolder.children?.[0] || null).map((folder) => folder.id),
+    ['20']
+  )
+})
+
+test('new tab folder settings keep first-use bookmarks visible when bookmarks bar only has nested bookmarks', () => {
+  const rootWithNestedBookmarksBarItems: chrome.bookmarks.BookmarkTreeNode = {
+    id: '0',
+    title: '',
+    children: [
+      {
+        id: '1',
+        parentId: '0',
+        title: '书签栏',
+        children: [
+          {
+            id: '10',
+            parentId: '1',
+            title: '前端',
+            children: [
+              {
+                id: '11',
+                parentId: '10',
+                title: 'React',
+                url: 'https://react.dev/'
+              }
+            ]
+          },
+          {
+            id: '20',
+            parentId: '1',
+            title: '工具',
+            children: [
+              {
+                id: '21',
+                parentId: '20',
+                title: 'MDN',
+                url: 'https://developer.mozilla.org/'
+              },
+              {
+                id: '22',
+                parentId: '20',
+                title: 'CSS',
+                url: 'https://web.dev/learn/css'
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+  const bookmarksBar = rootWithNestedBookmarksBarItems.children?.[0] || null
+
+  assert.equal(findDefaultNewTabSourceFolder(rootWithNestedBookmarksBarItems)?.id, '1')
+  assert.deepEqual(
+    normalizeFolderSettingsWithDefault(undefined, rootWithNestedBookmarksBarItems),
+    {
+      selectedFolderIds: ['1'],
+      hideFolderNames: false
+    }
+  )
+  assert.deepEqual(
+    getDisplayableNewTabSourceFolders(bookmarksBar).map((folder) => folder.id),
+    ['10', '20']
+  )
+  assert.deepEqual(getFolderBookmarkCounts(bookmarksBar), {
+    directBookmarkCount: 0,
+    totalBookmarkCount: 3
+  })
 })
 
 test('new tab folder settings fall back to another non-empty root folder after bookmarks bar options', () => {

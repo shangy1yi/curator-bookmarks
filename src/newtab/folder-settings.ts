@@ -7,6 +7,11 @@ export interface NewTabFolderSettings {
   hideFolderNames: boolean
 }
 
+export interface NewTabFolderBookmarkCounts {
+  directBookmarkCount: number
+  totalBookmarkCount: number
+}
+
 export const DEFAULT_FOLDER_SETTINGS: NewTabFolderSettings = {
   selectedFolderIds: [],
   hideFolderNames: false
@@ -56,9 +61,13 @@ export function findDefaultNewTabSourceFolder(
     return bookmarksBar
   }
 
-  const newTabFolder = findNewTabFolder(rootNode, { requireDirectBookmarks: true })
+  const newTabFolder = findNewTabFolder(rootNode, { requireDisplayableBookmarks: true })
   if (newTabFolder?.id) {
     return newTabFolder
+  }
+
+  if (bookmarksBar && hasDescendantBookmarks(bookmarksBar)) {
+    return bookmarksBar
   }
 
   const topLevelFolder = findFirstNonEmptyTopLevelFolder(rootNode, bookmarksBar)
@@ -86,7 +95,7 @@ export function normalizeFolderIds(value: unknown): string[] {
 
 export function findNewTabFolder(
   rootNode: chrome.bookmarks.BookmarkTreeNode | null,
-  options: { requireDirectBookmarks?: boolean } = {}
+  options: { requireDirectBookmarks?: boolean; requireDisplayableBookmarks?: boolean } = {}
 ): chrome.bookmarks.BookmarkTreeNode | null {
   const candidates: Array<{
     node: chrome.bookmarks.BookmarkTreeNode
@@ -102,7 +111,8 @@ export function findNewTabFolder(
     if (
       !node.url &&
       node.title === DEFAULT_NEW_TAB_FOLDER_TITLE &&
-      (!options.requireDirectBookmarks || hasDirectBookmarks(node))
+      (!options.requireDirectBookmarks || hasDirectBookmarks(node)) &&
+      (!options.requireDisplayableBookmarks || hasDescendantBookmarks(node))
     ) {
       candidates.push({
         node,
@@ -136,6 +146,58 @@ export function findNewTabFolder(
   return candidates[0]?.node || null
 }
 
+export function getDisplayableNewTabSourceFolders(
+  sourceFolder: chrome.bookmarks.BookmarkTreeNode | null
+): chrome.bookmarks.BookmarkTreeNode[] {
+  if (!sourceFolder || sourceFolder.url) {
+    return []
+  }
+
+  const displayableFolders: chrome.bookmarks.BookmarkTreeNode[] = []
+
+  function walk(node: chrome.bookmarks.BookmarkTreeNode): void {
+    if (hasDirectBookmarks(node)) {
+      displayableFolders.push(node)
+    }
+
+    for (const child of node.children || []) {
+      if (!child.url) {
+        walk(child)
+      }
+    }
+  }
+
+  walk(sourceFolder)
+  return displayableFolders.length ? displayableFolders : [sourceFolder]
+}
+
+export function getFolderBookmarkCounts(
+  node: chrome.bookmarks.BookmarkTreeNode | null
+): NewTabFolderBookmarkCounts {
+  let directBookmarkCount = 0
+  let totalBookmarkCount = 0
+
+  function walk(currentNode: chrome.bookmarks.BookmarkTreeNode, depth: number): void {
+    for (const child of currentNode.children || []) {
+      if (child.url) {
+        totalBookmarkCount += 1
+        if (depth === 0) {
+          directBookmarkCount += 1
+        }
+        continue
+      }
+
+      walk(child, depth + 1)
+    }
+  }
+
+  if (node && !node.url) {
+    walk(node, 0)
+  }
+
+  return { directBookmarkCount, totalBookmarkCount }
+}
+
 function findFolderById(
   node: chrome.bookmarks.BookmarkTreeNode | null,
   targetId: string
@@ -163,17 +225,21 @@ function findFirstNonEmptyTopLevelFolder(
   bookmarksBar: chrome.bookmarks.BookmarkTreeNode | null
 ): chrome.bookmarks.BookmarkTreeNode | null {
   const bookmarksBarChild = (bookmarksBar?.children || [])
-    .find((child) => !child.url && hasDirectBookmarks(child))
+    .find((child) => !child.url && hasDescendantBookmarks(child))
   if (bookmarksBarChild) {
     return bookmarksBarChild
   }
 
   return (rootNode.children || [])
-    .find((child) => !child.url && hasDirectBookmarks(child)) || null
+    .find((child) => !child.url && hasDescendantBookmarks(child)) || null
 }
 
 function hasDirectBookmarks(node: chrome.bookmarks.BookmarkTreeNode): boolean {
-  return (node.children || []).some((child) => Boolean(child.url))
+  return getFolderBookmarkCounts(node).directBookmarkCount > 0
+}
+
+function hasDescendantBookmarks(node: chrome.bookmarks.BookmarkTreeNode): boolean {
+  return getFolderBookmarkCounts(node).totalBookmarkCount > 0
 }
 
 function hasExplicitFolderSelection(rawSettings: unknown): boolean {
