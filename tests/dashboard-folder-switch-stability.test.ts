@@ -229,7 +229,7 @@ test('dashboard stable update overlay uses the shared dot matrix loader', () => 
   assert.match(source, /function hideDashboardResultsUpdateOverlay\(\)[\s\S]*?dashboardResultsUpdateOverlay\?\.remove\(\)/)
 })
 
-test('dashboard large selection motion defers virtual resize to one final render', () => {
+test('dashboard selection motion reuses the transform path for every list size', () => {
   const testDir = dirname(fileURLToPath(import.meta.url))
   const sourcePath = resolve(testDir, '../../src/options/sections/dashboard.ts')
   const source = readFileSync(sourcePath, 'utf8')
@@ -238,7 +238,8 @@ test('dashboard large selection motion defers virtual resize to one final render
   )?.[0] || ''
 
   assert.match(source, /const DASHBOARD_SELECTION_MOTION_MS\s*=\s*260/)
-  assert.match(source, /function shouldUseDashboardSelectionCompositeMotion\(visibleItems: DashboardItem\[\]\): boolean\s*\{[\s\S]*?visibleItems\.length\s*>=\s*DASHBOARD_VIRTUAL_THRESHOLD/)
+  assert.match(source, /function shouldUseDashboardSelectionCompositeMotion\(\): boolean\s*\{[\s\S]*?return\s+true/)
+  assert.match(source, /const useCompositeMotion\s*=\s*shouldUseDashboardSelectionCompositeMotion\(\)/)
   assert.match(source, /data-dashboard-selection-motion[\s\S]*?useCompositeMotion\s*\?\s*'composite'\s*:\s*'layout'/)
   assert.match(source, /function transitionDashboardSelectionBarVisibility\([\s\S]*?getBoundingClientRect\(\)\.top[\s\S]*?beginDashboardSelectionCompositeMotion\(\)[\s\S]*?classList\.toggle\('hidden',\s*shouldHideSelection\)[\s\S]*?animateDashboardSelectionCardRegionShift/)
   assert.match(finishMotionBody, /dashboardVirtualResizeDeferredForSelection/)

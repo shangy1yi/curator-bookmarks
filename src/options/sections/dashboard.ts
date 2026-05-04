@@ -1688,7 +1688,7 @@ function renderDashboardSelectionBar(visibleItems: DashboardItem[]): void {
   const selectedCount = getSelectedDashboardBookmarks().length
   const shouldHideSelection = selectedCount === 0
   const selectionVisibilityChanged = dom.dashboardSelectionGroup.classList.contains('hidden') !== shouldHideSelection
-  const useCompositeMotion = shouldUseDashboardSelectionCompositeMotion(visibleItems)
+  const useCompositeMotion = shouldUseDashboardSelectionCompositeMotion()
 
   dom.dashboardPanel?.setAttribute(
     'data-dashboard-selection-motion',
@@ -1715,8 +1715,8 @@ function renderDashboardSelectionBar(visibleItems: DashboardItem[]): void {
     })
 }
 
-function shouldUseDashboardSelectionCompositeMotion(visibleItems: DashboardItem[]): boolean {
-  return visibleItems.length >= DASHBOARD_VIRTUAL_THRESHOLD
+function shouldUseDashboardSelectionCompositeMotion(): boolean {
+  return true
 }
 
 function transitionDashboardSelectionBarVisibility(
