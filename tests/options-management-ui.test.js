@@ -849,6 +849,28 @@ test('tag and backup data buttons expose data-scope labels', () => {
   }
 })
 
+test('privacy and tag management centers expose visible options entries', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const optionsSource = readProjectFile('src/options/options.ts')
+  const constants = readProjectFile('src/options/shared-options/constants.ts')
+
+  assert.match(optionsHtml, /data-section-link="privacy">隐私与权限中心</)
+  assert.match(optionsHtml, /<h1 id="privacy-title">隐私与权限中心<\/h1>/)
+  assert.match(optionsHtml, /不会劫持默认搜索/)
+  assert.match(optionsHtml, /API Key 不导出/)
+  assert.match(optionsHtml, /id="privacy-permission-list"/)
+  assert.match(optionsHtml, /data-section-link="tags">标签管理中心</)
+  assert.match(optionsHtml, /<h1 id="tags-title">标签管理中心<\/h1>/)
+  assert.match(optionsHtml, /id="tag-management-results"/)
+  assert.match(optionsHtml, /aria-label="重命名书签标签"/)
+  assert.match(optionsHtml, /aria-label="删除书签标签"/)
+  assert.match(constants, /privacy:[\s\S]*title: '隐私与权限中心'/)
+  assert.match(constants, /tags:[\s\S]*title: '标签管理中心'/)
+  assert.match(optionsSource, /renderPrivacySection/)
+  assert.match(optionsSource, /handleTagManagementRename/)
+  assert.match(optionsSource, /handleTagManagementDelete/)
+})
+
 test('smart bookmark analysis bulk selection buttons expose analysis-specific labels', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const labelledButtons = [

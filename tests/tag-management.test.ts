@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   buildBookmarkTagRecord,
-  normalizeBookmarkTagIndex
+  getEffectiveBookmarkTags,
+  normalizeBookmarkTagIndex,
+  type BookmarkTagIndex
 } from '../src/shared/bookmark-tags.js'
 import {
   buildBookmarkTagUsageStats,
@@ -11,6 +13,11 @@ import {
   pruneEmptyBookmarkTagRecords,
   renameBookmarkTag
 } from '../src/shared/tag-management.js'
+import {
+  buildTagUsageSummary,
+  deleteTagFromIndex,
+  renameTagInIndex
+} from '../src/options/sections/tag-management.js'
 import type { BookmarkRecord } from '../src/shared/types.js'
 
 function bookmark(overrides: Partial<BookmarkRecord>): BookmarkRecord {
@@ -63,6 +70,57 @@ function tagRecord(input: {
     record.manualUpdatedAt = input.updatedAt || 1000
   }
   return record
+}
+
+function createOptionsIndex(): BookmarkTagIndex {
+  return {
+    version: 1,
+    updatedAt: 1000,
+    records: {
+      a: {
+        schemaVersion: 1,
+        bookmarkId: 'a',
+        url: 'https://example.com/a',
+        normalizedUrl: 'https://example.com/a',
+        duplicateKey: 'https://example.com/a',
+        title: 'Alpha',
+        path: 'Bookmarks / Alpha',
+        summary: '',
+        contentType: '',
+        topics: [],
+        tags: ['tool', 'docs'],
+        aliases: [],
+        confidence: 0.8,
+        source: 'ai_naming',
+        model: 'test',
+        extraction: { status: '', source: '', warnings: [] },
+        generatedAt: 1000,
+        updatedAt: 1000
+      },
+      b: {
+        schemaVersion: 1,
+        bookmarkId: 'b',
+        url: 'https://example.com/b',
+        normalizedUrl: 'https://example.com/b',
+        duplicateKey: 'https://example.com/b',
+        title: 'Beta',
+        path: 'Bookmarks / Beta',
+        summary: '',
+        contentType: '',
+        topics: [],
+        tags: ['tool'],
+        manualTags: ['reference', 'tool'],
+        manualUpdatedAt: 1100,
+        aliases: [],
+        confidence: 1,
+        source: 'manual',
+        model: '',
+        extraction: { status: '', source: '', warnings: [] },
+        generatedAt: 1100,
+        updatedAt: 1100
+      }
+    }
+  }
 }
 
 test('builds tag usage stats with manual tags taking precedence', () => {
@@ -152,4 +210,29 @@ test('prunes empty tag records but keeps useful aliases and summaries', () => {
   assert.equal(result.index.records.empty, undefined)
   assert.ok(result.index.records.aliasOnly)
   assert.ok(result.index.records.summaryOnly)
+})
+
+test('options tag management summary adapts shared stats for the settings UI', () => {
+  const summary = buildTagUsageSummary(createOptionsIndex())
+
+  assert.equal(summary.totalTags, 3)
+  assert.equal(summary.taggedBookmarks, 2)
+  assert.equal(summary.manualTags, 2)
+  assert.deepEqual(summary.stats.map((stat) => [stat.tag, stat.count]), [
+    ['tool', 2],
+    ['reference', 1],
+    ['docs', 1]
+  ])
+})
+
+test('options tag management wrappers rename and delete through shared utilities', () => {
+  const renamed = renameTagInIndex(createOptionsIndex(), 'tool', 'utility')
+
+  assert.deepEqual(getEffectiveBookmarkTags(renamed.records.a), ['utility', 'docs'])
+  assert.deepEqual(getEffectiveBookmarkTags(renamed.records.b), ['reference', 'utility'])
+
+  const deleted = deleteTagFromIndex(renamed, 'utility')
+  assert.deepEqual(getEffectiveBookmarkTags(deleted.records.a), ['docs'])
+  assert.deepEqual(getEffectiveBookmarkTags(deleted.records.b), ['reference'])
+  assert.equal(Object.keys(deleted.records).length, 2)
 })

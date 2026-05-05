@@ -306,6 +306,15 @@
 
 ## Integration Log
 
+## Integration Log: agent/extension-modernization-20260506-options
+
+- 合并时间：2026-05-06
+- 合并结果：成功，有文档与测试冲突
+- 冲突文件：`Work documentation.md`、`tests/tag-management.test.ts`
+- 冲突解决方式：保留全部 agent 记录；`tests/tag-management.test.ts` 合并 shared 标签管理测试和 options UI wrapper 测试；options 标签 section 改为复用 shared tag-management utilities。
+- 合并后验证：`npm run typecheck` 通过；`npm run test:build && node --test .tmp-test/tests/options-navigation.test.js .tmp-test/tests/options-management-ui.test.js .tmp-test/tests/tag-management.test.js` 通过，65 项
+- 是否需要回到 agent worktree 修复：否
+
 ## Integration Log: agent/extension-modernization-20260506-newtab
 
 - 合并时间：2026-05-06
@@ -546,3 +555,51 @@
 ### 已知风险
 
 - `Ctrl/Cmd+K` 行为变化需要手动确认用户是否更喜欢先打开命令工作台，而非直接打开 dashboard。
+
+## Agent: agent/extension-modernization-20260506-options
+
+### 负责范围
+
+- Options 隐私与权限中心、标签管理中心、数据与备份说明补强。
+
+### 修复或优化的原有功能
+
+- 补强数据与备份区域说明：标签清空范围、完整备份敏感字段排除、恢复模式和 Chrome 书签恢复边界。
+
+### 新增功能 / 核心能力增强
+
+- 新增 `#privacy` 隐私与权限中心入口，集中说明本地优先、不会劫持默认搜索、不上传书签、AI/Jina/可用性检测何时联网、API Key 不导出、数据删除与备份入口。
+- 新增 `#tags` 标签管理中心入口，展示标签总数、已标记书签、手动标签数和按使用频率排序的标签列表；支持重命名和删除标签，删除前确认，空状态明确。
+
+### UI / UX 改进
+
+- 设置侧栏新增 `隐私与权限`、`标签管理` 入口。
+- 标签管理卡片展示频率、手动/AI 来源和示例书签。
+
+### 性能改进
+
+- 标签统计只在 `#tags` section 激活/刷新时计算，不进入 options 首屏路径。
+
+### 隐私 / 权限 / 数据安全影响
+
+- 标签重命名/删除只写 `STORAGE_KEYS.bookmarkTagIndex`，不会改 Chrome 书签；如果 shared tag-management utilities 在 shared worker 中出现，优先保留共享实现并替换本地纯函数。
+- 隐私中心不新增权限，只解释现有权限、本地数据、联网触发条件和备份敏感字段处理。
+
+### 影响范围
+
+- 涉及文件：`src/options/options.html`、`src/options/options.ts`、`src/options/options.css`、`src/options/shared-options/constants.ts`、`src/options/shared-options/dom.ts`、`src/options/sections/privacy.ts`、`src/options/sections/tag-management.ts`、`tests/options-management-ui.test.js`、`tests/tag-management.test.ts`、`Work documentation.md`
+- 涉及模块：options navigation、privacy disclosure、tag management、backup copy。
+
+### 实现思路
+
+- 集成时已将 options 标签 section 统一到 shared `src/shared/tag-management.ts`，避免保留两套标签逻辑。
+- `privacy` 使用静态 disclosure 数据渲染权限说明。
+
+### 测试方式
+
+- 已运行：`npm run typecheck`
+- 已运行：`npm run test:build && node --test .tmp-test/tests/options-navigation.test.js .tmp-test/tests/options-management-ui.test.js .tmp-test/tests/tag-management.test.js`
+
+### 已知风险
+
+- 新增 section key：`privacy`、`tags`，后续若调整 options sidebar 或 `SECTION_META` 必须保留这些入口。
