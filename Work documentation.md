@@ -306,6 +306,54 @@
 
 ## Integration Log
 
+## Agent: agent/extension-modernization-20260506-shared
+
+### 负责范围
+
+- 共享标签管理纯函数和对应测试。
+- 搜索与 saved search 基础审查，确认现有 `src/shared/search-query.ts` 已具备 normalize/save/delete/scope 的可复用模型。
+
+### 修复或优化的原有功能
+
+- 将标签统计、重命名、合并、删除和空记录清理从 UI 操作中抽象成可测试的共享能力。
+
+### 新增功能 / 核心能力增强
+
+- 新增 `buildBookmarkTagUsageStats`：生成标签使用次数、manual/AI 来源计数、最近更新时间和示例书签。
+- 新增 `renameBookmarkTag`、`mergeBookmarkTags`、`deleteBookmarkTags`、`pruneEmptyBookmarkTagRecords`：支持全局标签治理中心。
+
+### UI / UX 改进
+
+- 本分支不直接改 UI；为 options 标签管理中心提供稳定数据模型。
+
+### 性能改进
+
+- 标签统计是纯函数，供 settings 对应 section 按需调用，避免 popup/newtab 首屏承担全局标签扫描。
+
+### 隐私 / 权限 / 数据安全影响
+
+- 不新增权限，不联网，不引入依赖。所有操作只处理本地 `BookmarkTagIndex`。
+- 保持 manualTags 优先语义，避免 AI 标签覆盖用户手动标签。
+
+### 影响范围
+
+- 涉及文件：`src/shared/tag-management.ts`、`tests/tag-management.test.ts`、`Work documentation.md`
+- 涉及模块：共享标签索引、options 标签管理中心的后续数据基础。
+
+### 实现思路
+
+- 复用 `normalizeBookmarkTagIndex`、`normalizeBookmarkTags` 和 `getEffectiveBookmarkTags`。
+- 批量操作返回新的 index、影响记录数和被清理记录数，由 UI 再决定是否保存。
+
+### 测试方式
+
+- 已运行：`npm install`
+- 已运行：`npm run test:build && node --test .tmp-test/tests/search-query.test.js .tmp-test/tests/bookmark-tags.test.js .tmp-test/tests/tag-management.test.js`
+
+### 已知风险
+
+- UI 集成时仍需在保存前做确认，尤其是删除和合并标签。
+
 ### Integration Log: planning
 
 - 合并时间：2026-05-06
@@ -314,4 +362,3 @@
 - 冲突解决方式：无
 - 合并后验证：`git status --short --branch` 确认只新增 `Work documentation.md`
 - 是否需要回到 agent worktree 修复：否
-
