@@ -8,6 +8,7 @@ function readProjectFile(path) {
 }
 
 const popupSource = readProjectFile('src/popup/popup.ts')
+const popupStateSource = readProjectFile('src/popup/state.ts')
 const popupHtml = readProjectFile('src/popup/popup.html')
 
 test('popup natural search entry is understandable without relying on AI-only text', () => {
@@ -55,6 +56,21 @@ test('popup natural search does not reuse stale AI plans without provider setup'
   assert.match(popupSource, /return \{ plan: localPlan, canReuseResults: false \}/)
   assert.match(popupSource, /state\.searchCache\.delete\(cacheKey\)/)
   assert.match(popupSource, /未配置 AI 渠道，已使用本地解析。/)
+})
+
+test('popup natural search aborts stale AI requests when the query or mode changes', () => {
+  assert.match(popupStateSource, /naturalSearchAbortController: AbortController \| null/)
+  assert.match(popupSource, /function abortNaturalSearchRequest\(\)/)
+  assert.match(popupSource, /state\.naturalSearchAbortController\?\.abort\(\)/)
+  assert.match(popupSource, /const controller = new AbortController\(\)[\s\S]*?state\.naturalSearchAbortController = controller/)
+  assert.match(popupSource, /abortNaturalSearchRequest\(\)[\s\S]*?state\.naturalSearchEnabled = enabled/)
+  assert.match(popupSource, /if \(!normalizedQuery\)[\s\S]*?abortNaturalSearchRequest\(\)[\s\S]*?return/)
+  assert.match(popupSource, /if \(state\.naturalSearchEnabled\)[\s\S]*?runNaturalSearch\(query, normalizedQuery, runId\)[\s\S]*?return[\s\S]*?abortNaturalSearchRequest\(\)/)
+  assert.match(popupSource, /resolveNaturalSearchPlan\(query, normalizedQuery, naturalSearch, \{[\s\S]*?signal: controller\.signal/)
+  assert.match(popupSource, /requestNaturalSearchAiPlan\([\s\S]*?options: \{ signal\?: AbortSignal \| null \} = \{\}/)
+  assert.match(popupSource, /fetchWithSmartTimeout\(endpoint,[\s\S]*?signal: options\.signal/)
+  assert.match(popupSource, /function fetchWithSmartTimeout\(url, options = \{\}, timeoutMs = POPUP_SMART_DEFAULT_TIMEOUT_MS\)[\s\S]*?externalSignal/)
+  assert.match(popupSource, /isAbortError\(error\)/)
 })
 
 test('built popup html does not preload natural search chunk', { skip: !existsSync(resolve(process.cwd(), 'dist/src/popup/popup.html')) }, () => {

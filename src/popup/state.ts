@@ -87,6 +87,7 @@ export interface PopupState {
   naturalSearchPending: boolean
   naturalSearchError: string
   naturalSearchPlan: NaturalSearchPlan | null
+  naturalSearchAbortController: AbortController | null
   naturalSearchPlanCache: MemoryCache<string, NaturalSearchPlan>
   searchHighlightQuery: string
   filteredBookmarksCacheKey: string
@@ -172,6 +173,7 @@ export const state: PopupState = {
   naturalSearchPending: false,
   naturalSearchError: '',
   naturalSearchPlan: null,
+  naturalSearchAbortController: null,
   naturalSearchPlanCache: createMemoryCache<string, NaturalSearchPlan>({
     maxEntries: SEARCH_CACHE_LIMIT,
     version: 'popup-natural-search-plan-v1'

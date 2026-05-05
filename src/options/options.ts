@@ -5412,6 +5412,7 @@ function requestAiNamingStop() {
 
   aiNamingState.stopRequested = true
   aiNamingState.paused = false
+  aiNamingState.abortController?.abort()
   releaseAiNamingPauseResolvers()
   renderAvailabilitySection()
 }
@@ -6015,9 +6016,11 @@ function getAiExtractionLabel(status, source = '') {
 
 async function runAiNamingSuggestions() {
   const runStartedAt = Date.now()
+  const controller = new AbortController()
   aiNamingState.running = true
   aiNamingState.stopRequested = false
   aiNamingState.paused = false
+  aiNamingState.abortController = controller
   resetAiNamingRunState()
   aiNamingState.runStartedAt = runStartedAt
   aiNamingState.eligibleBookmarks = aiNamingState.bookmarks.length
@@ -6046,7 +6049,10 @@ async function runAiNamingSuggestions() {
         }
 
         try {
-          preparedItems.push(await buildAiNamingPreparedItem(bookmark, settings.timeoutMs))
+          preparedItems.push(await buildAiNamingPreparedItem(bookmark, settings.timeoutMs, {
+            signal: controller.signal
+          }))
+          throwIfAborted(controller.signal)
         } catch (error) {
           retryCandidates.push({
             bookmark,
@@ -6071,7 +6077,12 @@ async function runAiNamingSuggestions() {
       }
 
       try {
-        const aiResponseItems = await requestAiNamingBatch(preparedItems)
+        const aiResponseItems = await requestAiNamingBatch(preparedItems, {
+          signal: controller.signal
+        })
+        if (aiNamingState.stopRequested || controller.signal.aborted) {
+          break
+        }
         const failedPreparedItems = await mergeAiNamingBatchResults(preparedItems, aiResponseItems, settings)
         retryCandidates.push(...failedPreparedItems.map((preparedItem) => {
           return {
@@ -6099,11 +6110,11 @@ async function runAiNamingSuggestions() {
 
     aiNamingState.lastCompletedAt = Date.now()
     recalculateAiNamingSummary()
-    if (aiNamingState.stopRequested) {
+    if (aiNamingState.stopRequested || controller.signal.aborted) {
       aiNamingState.lastError = `已手动停止，本轮保留 ${aiNamingState.results.length} 条已生成结果。`
     }
     notifyAiNamingRunFinished({
-      stopped: aiNamingState.stopRequested,
+      stopped: aiNamingState.stopRequested || controller.signal.aborted,
       startedAt: runStartedAt,
       completedAt: aiNamingState.lastCompletedAt
     }).catch((error) => {
@@ -6113,6 +6124,9 @@ async function runAiNamingSuggestions() {
     aiNamingState.running = false
     aiNamingState.stopRequested = false
     aiNamingState.paused = false
+    if (aiNamingState.abortController === controller) {
+      aiNamingState.abortController = null
+    }
     releaseAiNamingPauseResolvers()
     recalculateAiNamingSummary()
     renderAvailabilitySection()
@@ -6440,7 +6454,9 @@ function buildAiFolderCandidates(bookmark) {
 }
 
 async function buildAiNamingPreparedItem(bookmark, timeoutMs, options: { signal?: AbortSignal | null } = {}) {
+  throwIfAborted(options.signal)
   const metadata = await getAiMetadataForBookmark(bookmark, timeoutMs, options)
+  throwIfAborted(options.signal)
   const pageContext = buildPageContextForAi(metadata)
   const preparedItem = {
     bookmark,
@@ -6458,6 +6474,7 @@ async function buildAiNamingPreparedItem(bookmark, timeoutMs, options: { signal?
     }
   }
   await saveContentSnapshotForAiPreparedItem(preparedItem)
+  throwIfAborted(options.signal)
   return preparedItem
 }
 

@@ -244,6 +244,7 @@ export const aiNamingState = {
   lastFetchModelsCount: 0,
   running: false,
   stopRequested: false,
+  abortController: null as AbortController | null,
   applying: false,
   requestingPermission: false,
   permissionGranted: false,
