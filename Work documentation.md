@@ -234,3 +234,44 @@
 
 - 2026-05-05：创建全新 integration worktree 与分支；完成现有代码审查和外部调研；创建本文档初版。
 
+## Agent: agent/newtab-speed-dial
+
+### 负责范围
+
+- Speed Dial / Pinned Bookmarks 展示数据、空状态和 pin/unpin 操作文案。
+
+### 修复或优化的原有功能
+
+- 将原本隐藏在右键菜单里的 pinned 语义整理成首屏 Speed Dial 可复用数据模型。
+
+### 新增功能
+
+- 新增 `buildSpeedDialItems()`，按 pinned id 顺序输出可展示卡片。
+- 新增 Speed Dial 空状态和 pin/unpin action copy。
+
+### UI / UX 改进
+
+- 本分支提供清晰空状态和操作文案，后续集成到首屏模块。
+
+### 性能改进
+
+- 只使用已在 newtab 读取的 bookmark map / array，不新增网络请求。
+
+### 影响范围
+
+- 涉及文件：`src/newtab/speed-dial.ts`、`tests/newtab-speed-dial.test.ts`。
+- 涉及模块：newtab pinned bookmarks / Speed Dial。
+
+### 实现思路
+
+- 过滤无效 id、重复 id 和无 URL 书签，保留用户 pinned 顺序。
+- 输出域名、fallback label、detail，减少 UI 层重复解析。
+
+### 测试方式
+
+- 已运行：`node -e "require('node:fs').rmSync('.tmp-test', { recursive: true, force: true })" && ./node_modules/.bin/tsc -p tsconfig.test.json && node --test .tmp-test/tests/newtab-speed-dial.test.js`，3 项通过。
+- 手动测试建议：固定多个书签后刷新 newtab，确认首屏 Speed Dial 顺序、空状态和取消固定反馈正确。
+
+### 已知风险
+
+- 当前分支不含 UI 接入；需要 integration 分支接入首屏和 bookmark menu。
