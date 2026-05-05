@@ -2271,6 +2271,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 
 .folder-source-panel {
   display: grid;
+  min-width: 0;
   gap: 10px;
   padding: 12px 14px 0;
 }
@@ -2301,6 +2302,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 .folder-selected-list,
 .folder-candidate-list {
   display: grid;
+  min-width: 0;
   gap: 5px;
 }
 
@@ -2316,9 +2318,10 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 .folder-candidate-card {
   display: grid;
   width: 100%;
+  max-width: 100%;
   min-height: 34px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: start;
   gap: 8px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 7px;
@@ -2355,6 +2358,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 .folder-source-selected-copy,
 .folder-candidate-copy {
   display: grid;
+  max-width: 100%;
   min-width: 0;
   gap: 1px;
 }
@@ -2366,8 +2370,8 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .folder-source-selected-copy span,
@@ -2377,8 +2381,8 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   font-size: 10px;
   font-weight: 500;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .folder-source-remove {
@@ -2407,6 +2411,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   min-width: 30px;
   height: 22px;
   place-items: center;
+  align-self: start;
   border-radius: 999px;
   background: rgba(245, 245, 247, 0.08);
   color: rgba(245, 245, 247, 0.58);
