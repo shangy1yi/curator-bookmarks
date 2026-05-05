@@ -1425,6 +1425,26 @@ body.background-mask-enabled .newtab-background-mask {
   backdrop-filter: blur(20px);
 }
 
+.newtab-command-palette-heading {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 2px 2px 0;
+}
+
+.newtab-command-palette-heading strong {
+  color: rgba(245, 245, 247, 0.94);
+  font-size: 13px;
+  font-weight: 780;
+  line-height: 1.25;
+}
+
+.newtab-command-palette-heading span {
+  color: rgba(245, 245, 247, 0.48);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .newtab-command-palette-input {
   width: 100%;
   min-width: 0;
@@ -2252,8 +2272,15 @@ body.bookmark-dragging .bookmark-tile:not(.dragging):focus-visible .bookmark-tit
     transform 160ms ease;
 }
 
-.dashboard-trigger {
+.command-trigger {
   right: 66px;
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+}
+
+.dashboard-trigger {
+  right: 114px;
   width: 40px;
   min-width: 40px;
   padding: 0;
@@ -2263,7 +2290,7 @@ body.bookmark-dragging .bookmark-tile:not(.dragging):focus-visible .bookmark-tit
 .dashboard-shortcut-hint {
   position: absolute;
   top: 24px;
-  right: 116px;
+  right: 164px;
   display: inline-flex;
   max-width: min(220px, calc(100vw - 168px));
   min-height: 28px;
@@ -2283,6 +2310,7 @@ body.bookmark-dragging .bookmark-tile:not(.dragging):focus-visible .bookmark-tit
   backdrop-filter: blur(14px);
 }
 
+.command-trigger span,
 .dashboard-trigger span {
   position: absolute;
   width: 1px;
@@ -4285,9 +4313,15 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   }
 
   .dashboard-trigger {
-    right: 58px;
+    right: 104px;
     min-width: 112px;
     padding: 0 10px;
+  }
+
+  .command-trigger {
+    right: 58px;
+    min-width: 40px;
+    padding: 0;
   }
 
   .dashboard-trigger span {

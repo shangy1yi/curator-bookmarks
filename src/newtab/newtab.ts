@@ -125,7 +125,7 @@ import {
 } from './bookmark-health.js'
 import {
   buildCommandPaletteItems,
-  shouldOpenDashboardFromKeydown,
+  shouldOpenCommandPaletteFromKeydown,
   type CommandPaletteItem
 } from './command-palette.js'
 import {
@@ -509,6 +509,7 @@ const state = {
 }
 
 const root = document.getElementById('newtab-root')
+const commandTrigger = document.getElementById('newtab-command-trigger')
 const dashboardTrigger = document.getElementById('newtab-dashboard-trigger')
 const dashboardOverlay = document.getElementById('newtab-dashboard-overlay')
 const dashboardFrame = document.getElementById('newtab-dashboard-frame') as HTMLIFrameElement | null
@@ -564,6 +565,9 @@ function bindEvents(): void {
   bindIconSettingsEvents()
   bindTimeSettingsEvents()
   bindSettingsRangeVisuals()
+  commandTrigger?.addEventListener('click', () => {
+    openCommandPalette()
+  })
   dashboardTrigger?.addEventListener('click', (event) => {
     event.preventDefault()
     openDashboardRoute()
@@ -783,9 +787,9 @@ function handleDocumentKeydown(event: KeyboardEvent): void {
     return
   }
 
-  if (shouldOpenDashboardFromKeydown(event)) {
+  if (shouldOpenCommandPaletteFromKeydown(event)) {
     event.preventDefault()
-    openDashboardRoute()
+    openCommandPalette()
     return
   }
 
@@ -1519,6 +1523,7 @@ function closeSettingsDrawer(): void {
 function setSettingsModalBackgroundInert(inert: boolean): void {
   const backgroundElements = [
     root,
+    commandTrigger instanceof HTMLElement ? commandTrigger : null,
     settingsTrigger instanceof HTMLElement ? settingsTrigger : null,
     dashboardTrigger instanceof HTMLElement ? dashboardTrigger : null
   ]
@@ -4868,8 +4873,8 @@ function createBookmarkHealthPanel(): HTMLElement | null {
   title.textContent = '书签健康'
   const meta = document.createElement('span')
   meta.textContent = hasActionableBookmarkHealth(health.cards)
-    ? '轻量整理提醒'
-    : '当前没有明显待处理项'
+    ? `${health.totalBookmarks} 个书签 · 本地轻量指标`
+    : `${health.totalBookmarks} 个书签 · 当前没有明显待处理项`
   header.append(title, meta)
 
   const list = document.createElement('div')
@@ -4879,6 +4884,7 @@ function createBookmarkHealthPanel(): HTMLElement | null {
     button.className = 'newtab-health-card'
     button.type = 'button'
     button.dataset.severity = card.severity
+    button.setAttribute('aria-label', `${card.label}：${card.detail}。打开对应整理入口`)
     button.addEventListener('click', () => {
       openOptionsHash(card.actionHash)
     })
@@ -4907,10 +4913,18 @@ function createCommandPaletteOverlay(): HTMLElement | null {
   overlay.className = 'newtab-command-palette'
   overlay.setAttribute('role', 'dialog')
   overlay.setAttribute('aria-modal', 'true')
-  overlay.setAttribute('aria-label', '命令面板')
+  overlay.setAttribute('aria-label', '命令工作台')
 
   const panel = document.createElement('div')
   panel.className = 'newtab-command-palette-panel'
+
+  const heading = document.createElement('div')
+  heading.className = 'newtab-command-palette-heading'
+  const title = document.createElement('strong')
+  title.textContent = '命令工作台'
+  const hint = document.createElement('span')
+  hint.textContent = '搜索书签，或输入“设置”“仪表盘”“清理”“重复”。'
+  heading.append(title, hint)
 
   const input = document.createElement('input')
   input.className = 'newtab-command-palette-input'
@@ -4919,6 +4933,7 @@ function createCommandPaletteOverlay(): HTMLElement | null {
   input.value = state.commandPaletteQuery
   input.setAttribute('aria-label', '搜索命令')
   input.setAttribute('aria-controls', 'newtab-command-palette-results')
+  input.setAttribute('aria-activedescendant', items.length ? getCommandPaletteItemElementId(state.commandPaletteActiveIndex) : '')
   input.addEventListener('input', () => {
     state.commandPaletteQuery = input.value
     state.commandPaletteActiveIndex = 0
@@ -4933,6 +4948,7 @@ function createCommandPaletteOverlay(): HTMLElement | null {
   items.forEach((item, index) => {
     const button = document.createElement('button')
     button.className = 'newtab-command-palette-item'
+    button.id = getCommandPaletteItemElementId(index)
     button.type = 'button'
     button.dataset.commandId = item.id
     button.dataset.commandType = item.type
@@ -4957,7 +4973,7 @@ function createCommandPaletteOverlay(): HTMLElement | null {
     list.appendChild(empty)
   }
 
-  panel.append(input, list)
+  panel.append(heading, input, list)
   overlay.appendChild(panel)
   overlay.addEventListener('pointerdown', (event) => {
     if (event.target === overlay) {
@@ -4985,12 +5001,21 @@ function getCurrentCommandPaletteItems(): CommandPaletteItem[] {
   })
 }
 
+function getCommandPaletteItemElementId(index: number): string {
+  return `newtab-command-palette-item-${Math.max(0, index)}`
+}
+
 function openCommandPalette(): void {
   closeBookmarkMenu()
   closeAddBookmarkMenu()
+  closeSettingsDrawer()
+  if (state.dashboardOpen) {
+    closeDashboardRoute()
+  }
   state.commandPaletteOpen = true
   state.commandPaletteQuery = ''
   state.commandPaletteActiveIndex = 0
+  commandTrigger?.setAttribute('aria-expanded', 'true')
   render()
 }
 
@@ -4998,7 +5023,11 @@ function closeCommandPalette(): void {
   state.commandPaletteOpen = false
   state.commandPaletteQuery = ''
   state.commandPaletteActiveIndex = 0
+  commandTrigger?.setAttribute('aria-expanded', 'false')
   render()
+  if (commandTrigger instanceof HTMLElement) {
+    commandTrigger.focus()
+  }
 }
 
 function handleCommandPaletteKeydown(event: KeyboardEvent): void {

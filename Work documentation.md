@@ -315,3 +315,11 @@
 - 合并后验证：`git status --short --branch` 确认只新增 `Work documentation.md`
 - 是否需要回到 agent worktree 修复：否
 
+## Agent: agent/extension-modernization-20260506-newtab
+
+- 责任范围：Newtab 命令工作台、书签健康摘要和对应测试。
+- 命令工作台：新增右上角可见入口；`Ctrl/Cmd+K` 打开 command palette，不再直接打开 dashboard；面板可搜索书签、固定/取消固定当前场景 Speed Dial、切换 workspace、打开新标签页设置、书签仪表盘、重复检测、清理中心和回收站。
+- 键盘与状态：命令工作台保留 Escape 关闭、上下键/Home/End 导航、Enter 执行；打开时关闭设置抽屉和 dashboard overlay，避免多个 overlay 互相遮挡；空结果提示可搜索的关键词方向。
+- 书签健康摘要：继续复用 `buildNewTabBookmarkHealth` 的本地轻量指标，展示待整理/重复/缺少标签/缺少摘要/新近未处理，并在卡片上给出对应 options hash 或 dashboard 入口；不新增首屏重型同步分析。
+- UI 调整：顶部提示改为 “Ctrl/Cmd+K 打开命令工作台”，健康摘要 meta 显示当前书签总量和本地指标来源，命令工作台增加标题和搜索提示。
+- 验证结果：先运行 `npm ci` 补齐该 worktree 的本地依赖；随后 `npm run test:build && node --test .tmp-test/tests/newtab-command-palette.test.js .tmp-test/tests/newtab-bookmark-health.test.js && npm run typecheck` 通过，覆盖 7 个 newtab 聚焦用例和 TypeScript 全量 typecheck。

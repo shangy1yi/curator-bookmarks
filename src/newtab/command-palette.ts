@@ -99,17 +99,17 @@ export function buildCommandPaletteItems({
 }
 
 export function shouldOpenCommandPaletteFromKeydown(event: KeyboardEventLike): boolean {
-  void event
-  return false
-}
-
-export function shouldOpenDashboardFromKeydown(event: KeyboardEventLike): boolean {
   if (event.defaultPrevented || event.altKey || event.shiftKey || isEditableEventTarget(event.target)) {
     return false
   }
 
   const key = String(event.key || '')
-  return (event.metaKey || event.ctrlKey) && key.toLowerCase() === 'k'
+  return Boolean(event.metaKey || event.ctrlKey) && key.toLowerCase() === 'k'
+}
+
+export function shouldOpenDashboardFromKeydown(event: KeyboardEventLike): boolean {
+  void event
+  return false
 }
 
 function createBookmarkCommand(entry: NewTabSearchIndexEntry): CommandPaletteItem {
@@ -156,10 +156,19 @@ function createStaticCommands(): CommandPaletteItem[] {
     {
       id: 'options:folder-cleanup',
       type: 'options',
-      title: '整理空文件夹',
-      detail: '打开文件夹清理工具',
-      keywords: 'folder cleanup 文件夹 清理 空文件夹 整理',
+      title: '打开清理中心',
+      detail: '整理文件夹结构、空文件夹和待归档书签',
+      keywords: 'folder cleanup 文件夹 清理 空文件夹 整理 清理中心',
       actionHash: '#folder-cleanup',
+      score: 0
+    },
+    {
+      id: 'options:recycle',
+      type: 'options',
+      title: '打开回收站',
+      detail: '查看和恢复最近删除的书签',
+      keywords: 'recycle trash 回收站 删除 恢复 清理',
+      actionHash: '#recycle',
       score: 0
     }
   ]
