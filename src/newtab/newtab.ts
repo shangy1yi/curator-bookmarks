@@ -1,5 +1,6 @@
 import {
   BOOKMARKS_BAR_ID,
+  NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE,
   STORAGE_KEYS
 } from '../shared/constants.js'
 import {
@@ -3490,6 +3491,41 @@ function handleDashboardMessage(event: MessageEvent): void {
     state.dashboardFrameError = ''
     state.dashboardFrameReady = true
     renderDashboard()
+    return
+  }
+
+  if (event.data?.type === NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE) {
+    const bookmarkId = String(event.data?.bookmarkId || '').trim()
+    void addDashboardBookmarkToActiveSpeedDial(bookmarkId)
+  }
+}
+
+async function addDashboardBookmarkToActiveSpeedDial(bookmarkId: string): Promise<void> {
+  const normalizedId = String(bookmarkId || '').trim()
+  const bookmark = normalizedId ? getBookmarkById(normalizedId) : null
+  if (!bookmark?.url) {
+    return
+  }
+
+  const activeWorkspace = getActiveNewTabWorkspace(state.workspaceSettings)
+  if (isSpeedDialBookmarkPinned(activeWorkspace.pinnedIds, normalizedId)) {
+    return
+  }
+
+  state.workspaceSettings = updateNewTabWorkspace(
+    state.workspaceSettings,
+    activeWorkspace.id,
+    { pinnedIds: [normalizedId, ...activeWorkspace.pinnedIds] },
+    { validBookmarkIds: state.allBookmarkMap.keys() }
+  )
+
+  try {
+    await saveNewTabWorkspaceSettings()
+    syncWorkspaceSettingsControls()
+    render()
+    updateClockText()
+  } catch (error) {
+    console.warn('从书签仪表盘添加 Speed Dial 失败。', error)
   }
 }
 
