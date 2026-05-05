@@ -4,10 +4,13 @@ import { resolve } from 'node:path'
 import { test } from 'node:test'
 
 import {
+  createNewTabAddSpeedDialMessage,
   getDashboardFaviconFallbackUrl,
   getDashboardCardActionLabel,
-  getDashboardSelectionLabel
+  getDashboardSelectionLabel,
+  isNewTabDashboardEmbed
 } from '../src/options/sections/dashboard.js'
+import { NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE } from '../src/shared/constants.js'
 
 function readProjectFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -73,11 +76,31 @@ test('dashboard cards render bookmark-specific action labels', () => {
   assert.match(dashboardSource, /const editTagsLabel = getDashboardCardActionLabel\('修改书签标签', item\)/)
   assert.match(dashboardSource, /const moveLabel = getDashboardCardActionLabel\('移动书签', item\)/)
   assert.match(dashboardSource, /const deleteLabel = getDashboardCardActionLabel\('删除书签', item\)/)
+  assert.match(dashboardSource, /const addSpeedDialLabel = getDashboardCardActionLabel\('添加进 Speed Dial', item\)/)
   assert.match(dashboardSource, /<a class="detect-result-open"[\s\S]*?aria-label="\$\{escapeAttr\(openLabel\)\}"/)
   assert.match(dashboardSource, /data-dashboard-copy="\$\{escapeAttr\(item\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(copyActionLabel\)\}"/)
   assert.match(dashboardSource, /data-dashboard-action="edit-tags"[\s\S]*?aria-label="\$\{escapeAttr\(editTagsLabel\)\}"/)
+  assert.match(dashboardSource, /data-dashboard-action="add-speed-dial"[\s\S]*?data-dashboard-no-drag[\s\S]*?aria-label="\$\{escapeAttr\(addSpeedDialLabel\)\}"[\s\S]*?>添加进 Speed Dial<\/button>/)
   assert.match(dashboardSource, /data-dashboard-action="move-one"[\s\S]*?aria-label="\$\{escapeAttr\(moveLabel\)\}"/)
   assert.match(dashboardSource, /data-dashboard-action="delete-one"[\s\S]*?aria-label="\$\{escapeAttr\(deleteLabel\)\}"/)
+})
+
+test('dashboard Speed Dial action uses the shared newtab message contract', () => {
+  const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
+  const constantsSource = readProjectFile('src/shared/constants.ts')
+
+  assert.equal(NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE, 'curator:newtab-add-speed-dial')
+  assert.deepEqual(createNewTabAddSpeedDialMessage('  b1  '), {
+    type: 'curator:newtab-add-speed-dial',
+    bookmarkId: 'b1'
+  })
+  assert.equal(isNewTabDashboardEmbed('?embed=newtab-dashboard'), true)
+  assert.equal(isNewTabDashboardEmbed('?embed=options'), false)
+  assert.match(constantsSource, /export interface NewTabAddSpeedDialMessage[\s\S]*?type: typeof NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE[\s\S]*?bookmarkId: string/)
+  assert.match(dashboardSource, /action === 'add-speed-dial'[\s\S]*?addDashboardBookmarkToSpeedDial\(bookmarkId\)/)
+  assert.match(dashboardSource, /function addDashboardBookmarkToSpeedDial\(bookmarkId: string\): void/)
+  assert.match(dashboardSource, /window\.parent\.postMessage\(createNewTabAddSpeedDialMessage\(safeBookmarkId\), window\.location\.origin\)/)
+  assert.match(dashboardSource, /setDashboardStatus\('请在新标签页打开仪表盘后添加到 Speed Dial。'\)/)
 })
 
 test('dashboard cards use stable Chrome favicon URLs without swapping visible sources', () => {

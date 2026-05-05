@@ -23,7 +23,11 @@ import {
   buildContentSnapshotSearchMapWithFullText,
   type ContentSnapshotIndex
 } from '../../shared/content-snapshots.js'
-import { BOOKMARKS_BAR_ID } from '../../shared/constants.js'
+import {
+  BOOKMARKS_BAR_ID,
+  NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE,
+  type NewTabAddSpeedDialMessage
+} from '../../shared/constants.js'
 import {
   buildDashboardFolderBookmarkCounts,
   buildDashboardModel,
@@ -141,6 +145,7 @@ const DASHBOARD_CARD_MIN_WIDTH = 300
 const DASHBOARD_VIRTUAL_OVERSCAN_ROWS = 12
 const DASHBOARD_VIRTUAL_THRESHOLD = 120
 const DASHBOARD_SELECTION_MOTION_MS = 260
+const DASHBOARD_NEWTAB_EMBED_PARAM = 'newtab-dashboard'
 
 let dashboardStatusTimer = 0
 let dashboardResultsStableFrame = 0
@@ -266,6 +271,17 @@ export function getDashboardCardActionLabel(
   const safeTitle = title.length > 48 ? `${title.slice(0, 47).trim()}…` : title
 
   return `${action}：${safeTitle || '未命名书签'}`
+}
+
+export function createNewTabAddSpeedDialMessage(bookmarkId: string): NewTabAddSpeedDialMessage {
+  return {
+    type: NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE,
+    bookmarkId: String(bookmarkId || '').trim()
+  }
+}
+
+export function isNewTabDashboardEmbed(search = window.location.search): boolean {
+  return new URLSearchParams(search).get('embed') === DASHBOARD_NEWTAB_EMBED_PARAM
 }
 
 export function resetDashboardDragStateSnapshot(): DashboardDragStateSnapshot {
@@ -700,6 +716,9 @@ export async function handleDashboardClick(event: Event, callbacks: DashboardCal
     } else if (action === 'delete-one') {
       const bookmarkId = String(actionButton.getAttribute('data-dashboard-bookmark-id') || '').trim()
       await deleteDashboardBookmarkFromCard(bookmarkId, callbacks)
+    } else if (action === 'add-speed-dial') {
+      const bookmarkId = String(actionButton.getAttribute('data-dashboard-bookmark-id') || '').trim()
+      addDashboardBookmarkToSpeedDial(bookmarkId)
     } else if (action === 'exit-dashboard') {
       if (callbacks.exitDashboard) {
         callbacks.exitDashboard()
@@ -1302,6 +1321,22 @@ function moveSingleDashboardItem(bookmarkId: string, callbacks: DashboardCallbac
 
   managerState.moveDashboardBookmarkId = String(bookmarkId)
   callbacks.openMoveModal('dashboard-single')
+}
+
+function addDashboardBookmarkToSpeedDial(bookmarkId: string): void {
+  const safeBookmarkId = String(bookmarkId || '').trim()
+  if (!safeBookmarkId || !availabilityState.bookmarkMap.has(safeBookmarkId)) {
+    setDashboardStatus('添加失败：书签不存在。')
+    return
+  }
+
+  if (isNewTabDashboardEmbed()) {
+    window.parent.postMessage(createNewTabAddSpeedDialMessage(safeBookmarkId), window.location.origin)
+    setDashboardStatus('已发送到 Speed Dial。')
+    return
+  }
+
+  setDashboardStatus('请在新标签页打开仪表盘后添加到 Speed Dial。')
 }
 
 export function getSingleDashboardMoveBookmark(): BookmarkRecord | null {
@@ -2752,6 +2787,7 @@ function buildDashboardCard(item: DashboardItem): string {
   const editTagsLabel = getDashboardCardActionLabel('修改书签标签', item)
   const moveLabel = getDashboardCardActionLabel('移动书签', item)
   const deleteLabel = getDashboardCardActionLabel('删除书签', item)
+  const addSpeedDialLabel = getDashboardCardActionLabel('添加进 Speed Dial', item)
   const visibleTagLimit = 1
   const tags = item.tags.slice(0, visibleTagLimit)
   const hiddenTagCount = Math.max(0, item.tags.length - tags.length)
@@ -2844,6 +2880,14 @@ function buildDashboardCard(item: DashboardItem): string {
             data-dashboard-no-drag
             aria-label="${escapeAttr(editTagsLabel)}"
           >修改标签</button>
+          <button
+            class="detect-result-action"
+            type="button"
+            data-dashboard-action="add-speed-dial"
+            data-dashboard-bookmark-id="${escapeAttr(item.id)}"
+            data-dashboard-no-drag
+            aria-label="${escapeAttr(addSpeedDialLabel)}"
+          >添加进 Speed Dial</button>
           <button
             class="detect-result-action"
             type="button"
