@@ -112,6 +112,7 @@ import {
   saveContentSnapshotFromContext,
   saveContentSnapshotSettings
 } from '../shared/content-snapshots.js'
+import { parseSearchQuery } from '../shared/search-query.js'
 import {
   SECTION_META,
   NAVIGATION_TIMEOUT_MS,
@@ -444,7 +445,6 @@ async function hydratePersistentState() {
     contentSnapshotState.searchTextMapIncludesFullText = false
     contentSnapshotState.searchTextMapLoadingFullText = false
     resetContentSnapshotFullTextSearchMapRetry()
-    scheduleContentSnapshotFullTextSearchMapHydration()
     hydrateFolderCleanupState(stored[STORAGE_KEYS.folderCleanupState])
     managerState.inboxSettings = normalizeInboxSettings(stored[STORAGE_KEYS.inboxSettings])
     void removeLocalStorage(LEGACY_AI_NAMING_CACHE_STORAGE_KEYS).catch(() => {})
@@ -522,7 +522,7 @@ async function hydrateContentSnapshotFullTextSearchMap(): Promise<void> {
     })
     contentSnapshotState.searchTextMapIncludesFullText = true
     resetContentSnapshotFullTextSearchMapRetry()
-    renderDashboardSection()
+    renderDashboardSectionIfVisible()
   } catch {
     contentSnapshotState.searchTextMapIncludesFullText = false
     scheduleContentSnapshotFullTextSearchMapRetry()
@@ -554,6 +554,7 @@ function syncPageSection() {
     prepareDashboardSectionEntry()
   }
   activeSectionKey = key
+  maybeHydrateContentSnapshotFullTextSearchMapForVisibleDashboard()
 
   document.body.classList.toggle('dashboard-fullscreen-active', key === 'dashboard')
 
@@ -6532,12 +6533,35 @@ function updateContentSnapshotSearchTextForRecord(record): void {
     nextSearchMap.delete(bookmarkId)
   }
   contentSnapshotState.searchTextMap = nextSearchMap
-  if (
-    contentSnapshotState.settings.fullTextSearchEnabled &&
-    !contentSnapshotState.searchTextMapIncludesFullText
-  ) {
+  if (shouldHydrateContentSnapshotFullTextSearchMapForDashboard()) {
     scheduleContentSnapshotFullTextSearchMapHydration()
   }
+}
+
+function renderDashboardSectionIfVisible(): void {
+  if (normalizeSectionKey(getCurrentSectionKey()) !== 'dashboard') {
+    return
+  }
+
+  renderDashboardSection()
+}
+
+function shouldHydrateContentSnapshotFullTextSearchMapForDashboard(): boolean {
+  return (
+    normalizeSectionKey(getCurrentSectionKey()) === 'dashboard' &&
+    parseSearchQuery(dashboardState.query).textTerms.length > 0 &&
+    contentSnapshotState.settings.fullTextSearchEnabled &&
+    !contentSnapshotState.searchTextMapIncludesFullText &&
+    !contentSnapshotState.searchTextMapLoadingFullText
+  )
+}
+
+function maybeHydrateContentSnapshotFullTextSearchMapForVisibleDashboard(): void {
+  if (!shouldHydrateContentSnapshotFullTextSearchMapForDashboard()) {
+    return
+  }
+
+  scheduleContentSnapshotFullTextSearchMapHydration()
 }
 
 async function getAiMetadataForBookmark(bookmark, timeoutMs, options: { signal?: AbortSignal | null } = {}) {

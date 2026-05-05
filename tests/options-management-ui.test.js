@@ -241,19 +241,38 @@ test('options modal footer buttons expose dialog-specific labels', () => {
 
 test('content snapshot full text search map is not awaited during initial options hydration', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
-  const hydrateBody = optionsSource.match(/async function hydratePersistentState\(\) \{([\s\S]*?)async function saveAiNamingSettings/)?.[1] || ''
-  const initialMapAssignment = hydrateBody.match(/contentSnapshotState\.searchTextMap = ([\s\S]*?)\n    contentSnapshotState\.searchTextMapIncludesFullText/)?.[1] || ''
+  const hydratePersistentBody = getFunctionBody(optionsSource, 'hydratePersistentState')
+  const initialMapAssignment = hydratePersistentBody.match(/contentSnapshotState\.searchTextMap = ([\s\S]*?)\n    contentSnapshotState\.searchTextMapIncludesFullText/)?.[1] || ''
 
   assert.match(optionsSource, /scheduleContentSnapshotFullTextSearchMapHydration/)
   assert.match(initialMapAssignment, /buildContentSnapshotSearchMap\(/)
   assert.doesNotMatch(initialMapAssignment, /await buildContentSnapshotSearchMapWithFullText/)
-  assert.match(optionsSource, /requestIdleCallback/)
+  assert.doesNotMatch(hydratePersistentBody, /scheduleContentSnapshotFullTextSearchMapHydration\(\)/)
+  assert.doesNotMatch(hydratePersistentBody, /requestIdleCallback/)
   assert.match(optionsSource, /CONTENT_SNAPSHOT_FULL_TEXT_RETRY_LIMIT\s*=\s*2/)
   assert.match(optionsSource, /function scheduleContentSnapshotFullTextSearchMapRetry/)
   assert.match(optionsSource, /contentSnapshotState\.searchTextMapFullTextRetryCount \+= 1/)
   assert.match(optionsSource, /function resetContentSnapshotFullTextSearchMapRetry/)
   assert.match(optionsSource, /hydrateContentSnapshotFullTextSearchMap/)
+  assert.match(optionsSource, /function shouldHydrateContentSnapshotFullTextSearchMapForDashboard\(\): boolean/)
+  assert.match(optionsSource, /parseSearchQuery\(dashboardState\.query\)\.textTerms\.length > 0/)
+  assert.match(optionsSource, /function renderDashboardSectionIfVisible\(\): void/)
+  assert.match(getFunctionBody(optionsSource, 'renderDashboardSectionIfVisible'), /normalizeSectionKey\(getCurrentSectionKey\(\)\) !== 'dashboard'[\s\S]*?return[\s\S]*?renderDashboardSection\(\)/)
   assert.match(readProjectFile('src/options/sections/dashboard.ts'), /ensureDashboardFullTextSearchMapForQuery/)
+})
+
+test('dashboard query hydrates full text map on demand and renders after hydration', () => {
+  const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
+  const inputBody = getFunctionBody(dashboardSource, 'handleDashboardInput')
+  const ensureBody = getFunctionBody(dashboardSource, 'ensureDashboardFullTextSearchMapForQuery')
+
+  assert.match(inputBody, /target\.id !== 'dashboard-query'[\s\S]*?return/)
+  assert.match(inputBody, /dashboardState\.query = target\.value/)
+  assert.match(inputBody, /ensureDashboardFullTextSearchMapForQuery\(\)/)
+  assert.match(ensureBody, /parseSearchQuery\(dashboardState\.query\)\.textTerms\.length/)
+  assert.match(ensureBody, /buildContentSnapshotSearchMapWithFullText\(contentSnapshotState\.index,\s*\{[\s\S]*?maxRecords:\s*1000/)
+  assert.match(ensureBody, /contentSnapshotState\.searchTextMap = searchMap/)
+  assert.match(ensureBody, /renderDashboardSection\(\)/)
 })
 
 test('AI snapshot saves update only the changed search text entry', () => {
@@ -265,6 +284,7 @@ test('AI snapshot saves update only the changed search text entry', () => {
   assert.doesNotMatch(saveBody, /buildContentSnapshotSearchMapWithFullText/)
   assert.match(updateBody, /buildContentSnapshotSearchText\(record/)
   assert.match(updateBody, /new Map\(contentSnapshotState\.searchTextMap\)/)
+  assert.match(updateBody, /shouldHydrateContentSnapshotFullTextSearchMapForDashboard\(\)/)
   assert.match(updateBody, /scheduleContentSnapshotFullTextSearchMapHydration\(\)/)
 })
 
