@@ -234,3 +234,46 @@
 
 - 2026-05-05：创建全新 integration worktree 与分支；完成现有代码审查和外部调研；创建本文档初版。
 
+## Agent: agent/newtab-workspaces
+
+### 负责范围
+
+- Workspace / 场景模式的数据结构、默认场景、独立 pinned bookmark 列表和旧 pinned 数据迁移。
+
+### 修复或优化的原有功能
+
+- 将旧的全局 `newTabActivity.pinnedIds` 迁移为默认 workspace 的 pinned 列表，后续 UI 可按场景隔离。
+
+### 新增功能
+
+- 新增 `newTabWorkspaceSettings` storage key。
+- 新增默认 `默认 / 工作 / 学习 / 个人` workspace。
+- 新增 workspace normalize、active workspace 切换、pin/unpin、rename/update 和无效 id 清理纯函数。
+
+### UI / UX 改进
+
+- 本分支提供 UI 接入所需数据基础，首屏切换器由集成分支接入。
+
+### 性能改进
+
+- 纯函数只基于已读取的 storage 和 bookmark id set 计算，不新增网络请求或 Chrome 权限。
+
+### 影响范围
+
+- 涉及文件：`src/shared/constants.ts`、`src/newtab/workspace-settings.ts`、`tests/newtab-workspace-settings.test.ts`。
+- 涉及模块：newtab storage settings、workspace pinned bookmarks。
+
+### 实现思路
+
+- 用固定默认 workspace 保证空状态可预测。
+- 通过 `validBookmarkIds` 过滤失效 pinned id，避免首屏展示不存在的书签。
+- 将所有修改做成不可变返回，方便后续 UI 状态更新和测试。
+
+### 测试方式
+
+- 已运行：`node -e "require('node:fs').rmSync('.tmp-test', { recursive: true, force: true })" && ./node_modules/.bin/tsc -p tsconfig.test.json && node --test .tmp-test/tests/newtab-workspace-settings.test.js`，4 项通过。
+- 手动测试建议：在 newtab settings 切换 workspace 后固定不同书签，刷新后确认各场景 pinned 列表互不影响。
+
+### 已知风险
+
+- 当前分支不含 UI 接入；需要 integration 分支把 settings 和首屏切换器接上。
