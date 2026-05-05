@@ -1,6 +1,7 @@
 import type { FolderRecord } from '../shared/types.js'
 import { createMemoryCache, type MemoryCache } from '../shared/cache.js'
 import type { BookmarkTagIndex } from '../shared/bookmark-tags.js'
+import type { SavedSearchIndex } from '../shared/search-query.js'
 import type { NaturalSearchPlan } from './natural-search.js'
 import type { PopupSearchIndexSnapshotState } from './search-index.js'
 import type { PopupSearchBookmark, PopupSearchResult } from './search.js'
@@ -77,6 +78,9 @@ export interface PopupState {
   searchRunId: number
   searchPending: boolean
   searchCache: MemoryCache<string, PopupSearchResult[]>
+  savedSearches: SavedSearchIndex | null
+  savedSearchesLoaded: boolean
+  savedSearchesError: string
   searchTagIndex: BookmarkTagIndex | null
   searchSnapshotState: PopupSearchIndexSnapshotState | null
   searchSnapshotFullTextReady: boolean
@@ -163,6 +167,9 @@ export const state: PopupState = {
     maxEntries: SEARCH_CACHE_LIMIT,
     version: 'popup-search-v1'
   }),
+  savedSearches: null,
+  savedSearchesLoaded: false,
+  savedSearchesError: '',
   searchTagIndex: null,
   searchSnapshotState: null,
   searchSnapshotFullTextReady: false,

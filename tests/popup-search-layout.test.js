@@ -7,15 +7,18 @@ function readProjectFile(path) {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('popup search block does not render saved search controls', () => {
+test('popup search block renders lightweight saved search controls', () => {
   const popupHtml = readProjectFile('src/popup/popup.html')
   const popupDom = readProjectFile('src/popup/dom.ts')
   const popupSource = readProjectFile('src/popup/popup.ts')
 
-  assert.doesNotMatch(popupHtml, /saved-search-row|saved-search-select|save-search|delete-saved-search/)
-  assert.doesNotMatch(popupHtml, /选择保存搜索|保存的搜索/)
-  assert.doesNotMatch(popupDom, /savedSearchSelect|saveSearch|deleteSavedSearch/)
-  assert.doesNotMatch(popupSource, /hydrateSavedSearches|applySelectedSavedSearch|saveCurrentSearch|deleteCurrentSavedSearch/)
+  assert.match(popupHtml, /id="saved-searches" class="saved-searches hidden"/)
+  assert.match(popupDom, /dom\.savedSearches = byId\('saved-searches'\)/)
+  assert.match(popupSource, /function renderSavedSearches\(\)/)
+  assert.match(popupSource, /data-saved-search-action="save-current"/)
+  assert.match(popupSource, /data-saved-search-action="apply"/)
+  assert.match(popupSource, /data-saved-search-action="delete"/)
+  assert.match(popupSource, /void hydrateSavedSearches\(\)/)
 })
 
 test('popup search help documents quoted filters and spaced operators', () => {

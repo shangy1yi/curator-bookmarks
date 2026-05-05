@@ -306,6 +306,15 @@
 
 ## Integration Log
 
+## Integration Log: agent/extension-modernization-20260506-popup
+
+- 合并时间：2026-05-06
+- 合并结果：成功，有文档冲突
+- 冲突文件：`Work documentation.md`
+- 冲突解决方式：保留 quality 与 popup agent 记录，并将 popup 记录整理为标准 agent 小节。
+- 合并后验证：待运行 popup 聚焦测试
+- 是否需要回到 agent worktree 修复：否
+
 ## Integration Log: agent/extension-modernization-20260506-quality
 
 - 合并时间：2026-05-06
@@ -429,3 +438,53 @@
 ### 已知风险
 
 - 本分支只增强测试，后续 UI 分支合并后仍需运行完整验证。
+
+## Agent: agent/extension-modernization-20260506-popup
+
+### 负责范围
+
+- Popup 保存搜索、当前页面快速操作、popup 相关测试与文档；未修改 options/newtab UI。
+
+### 修复或优化的原有功能
+
+- 当前页面 smart card 区分已收藏/未收藏，并缩短打开所在文件夹、编辑、保存和智能分类路径。
+
+### 新增功能 / 核心能力增强
+
+- 在 popup 搜索区新增保存搜索列表，可保存当前查询、复用已保存查询、删除保存项。
+- 已收藏当前页可固定/取消固定到 newtab 当前 workspace。
+
+### UI / UX 改进
+
+- 保存搜索以轻量 chip 呈现；读取失败时显示可理解错误，不阻断搜索。
+- 当前页操作压缩在原 smart card 内，空态和错误态保留恢复动作。
+
+### 性能改进
+
+- Saved search 在书签首屏数据完成后异步读取；未引入 dashboard/options 预加载。
+- Newtab 固定仅写入现有 workspace storage。
+
+### 隐私 / 权限 / 数据安全影响
+
+- 新增数据仅使用既有 `curatorBookmarkSavedSearches` 与 `curatorBookmarkNewTabWorkspaceSettings` 本地 storage。
+- 不上传书签、查询或当前页数据。
+
+### 影响范围
+
+- 涉及文件：`src/popup/popup.html`、`src/popup/dom.ts`、`src/popup/state.ts`、`src/popup/popup.ts`、`src/popup/popup.css`、`tests/popup-search-empty-state.test.js`、`tests/popup-search-layout.test.js`、`Work documentation.md`
+- 涉及模块：popup 搜索、当前页 smart card、newtab workspace pin storage。
+
+### 实现思路
+
+- 复用 `curatorBookmarkSavedSearches` 和 `getSavedSearchesForScope`。
+- 复用现有 newtab workspace setting model，在 popup 中只做当前 workspace pin toggle。
+
+### 测试方式
+
+- 已运行：`npm run typecheck`
+- 已运行：`npm run test:build && node --test .tmp-test/tests/popup-*.test.js`
+
+### 已知风险
+
+- Popup 直接写入 newtab workspace storage；如 shared/newtab workspace schema 后续变化，需要由集成方对齐。
+- 固定按钮当前采用 toggle 行为，文案成功态会区分固定或取消固定。
