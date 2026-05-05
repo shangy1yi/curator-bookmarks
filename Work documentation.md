@@ -315,3 +315,27 @@
 - 合并后验证：`git status --short --branch` 确认只新增 `Work documentation.md`
 - 是否需要回到 agent worktree 修复：否
 
+## Agent: agent/extension-modernization-20260506-options
+
+- 分支：`agent/extension-modernization-20260506-options`
+- Worktree：`/mnt/g/coding/worktrees/curator-modernization-20260506-options`
+- 范围：Options 隐私与权限中心、标签管理中心、数据与备份说明补强。
+
+### 实现内容
+
+- 新增 `#privacy` 隐私与权限中心入口，集中说明本地优先、不会劫持默认搜索、不上传书签、AI/Jina/可用性检测何时联网、API Key 不导出、数据删除与备份入口。
+- 新增 `#tags` 标签管理中心入口，展示标签总数、已标记书签、手动标签数和按使用频率排序的标签列表；支持重命名和删除标签，删除前确认，空状态明确。
+- 新增 options 专用 `sections/tag-management.ts` 纯函数，局部实现统计、重命名、删除，等待集成时可与共享 tag utilities 统一。
+- 补强数据与备份区域说明：标签清空范围、完整备份敏感字段排除、恢复模式和 Chrome 书签恢复边界。
+- 增加 `tests/tag-management.test.ts` 和 options 静态入口覆盖。
+
+### 验证
+
+- `npm run typecheck`：通过。
+- `npm run test:build && node --test .tmp-test/tests/options-navigation.test.js .tmp-test/tests/options-management-ui.test.js .tmp-test/tests/tag-management.test.js`：通过，60 项。
+
+### 集成注意事项
+
+- 标签重命名/删除只写 `STORAGE_KEYS.bookmarkTagIndex`，不会改 Chrome 书签；如果 shared tag-management utilities 在 shared worker 中出现，优先保留共享实现并替换本地纯函数。
+- 新增 section key：`privacy`、`tags`。若其他 worker 同时调整 sidebar 或 `SECTION_META`，合并时需要保留这些入口。
+- `npm install` 在本 worktree 安装了依赖用于验证；未改 package metadata。
