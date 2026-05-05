@@ -1,6 +1,12 @@
 export const BOOKMARKS_BAR_ID = '1'
 export const OTHER_BOOKMARKS_ID = '2'
 export const ROOT_ID = '0'
+export const NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE = 'curator:newtab-add-speed-dial'
+
+export interface NewTabAddSpeedDialMessage {
+  type: typeof NEWTAB_ADD_SPEED_DIAL_MESSAGE_TYPE
+  bookmarkId: string
+}
 
 export const STORAGE_KEYS = {
   ignoreRules: 'curatorBookmarkIgnoreRules',
