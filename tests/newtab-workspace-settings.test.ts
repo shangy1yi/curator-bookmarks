@@ -1,0 +1,88 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+import {
+  DEFAULT_NEW_TAB_WORKSPACE_ID,
+  getActiveNewTabWorkspace,
+  normalizeNewTabWorkspaceSettings,
+  pruneNewTabWorkspacePinnedIds,
+  setActiveNewTabWorkspace,
+  toggleNewTabWorkspacePin,
+  updateNewTabWorkspace
+} from '../src/newtab/workspace-settings.js'
+
+test('normalizes default workspaces and migrates legacy pins into the default scene', () => {
+  const settings = normalizeNewTabWorkspaceSettings(null, {
+    validBookmarkIds: ['1', '2', '3'],
+    legacyPinnedIds: ['2', 'missing', '2', '1'],
+    now: 100
+  })
+
+  assert.equal(settings.activeWorkspaceId, DEFAULT_NEW_TAB_WORKSPACE_ID)
+  assert.deepEqual(settings.workspaces.map((workspace) => [workspace.id, workspace.name]), [
+    ['default', '默认'],
+    ['work', '工作'],
+    ['study', '学习'],
+    ['personal', '个人']
+  ])
+  assert.deepEqual(settings.workspaces[0].pinnedIds, ['2', '1'])
+})
+
+test('keeps workspace pins isolated when toggling bookmarks', () => {
+  const settings = normalizeNewTabWorkspaceSettings({
+    activeWorkspaceId: 'work',
+    workspaces: [
+      { id: 'work', name: '工作', pinnedIds: ['1'], createdAt: 1, updatedAt: 1 },
+      { id: 'study', name: '学习', pinnedIds: ['2'], createdAt: 1, updatedAt: 1 }
+    ]
+  }, {
+    validBookmarkIds: ['1', '2', '3'],
+    now: 10
+  })
+
+  const pinned = toggleNewTabWorkspacePin(settings, 'work', '3', {
+    validBookmarkIds: ['1', '2', '3'],
+    now: 20
+  })
+  assert.deepEqual(pinned.workspaces.find((workspace) => workspace.id === 'work')?.pinnedIds, ['3', '1'])
+  assert.deepEqual(pinned.workspaces.find((workspace) => workspace.id === 'study')?.pinnedIds, ['2'])
+
+  const unpinned = toggleNewTabWorkspacePin(pinned, 'work', '1', {
+    validBookmarkIds: ['1', '2', '3'],
+    now: 30
+  })
+  assert.deepEqual(unpinned.workspaces.find((workspace) => workspace.id === 'work')?.pinnedIds, ['3'])
+})
+
+test('selects active workspace only when it exists', () => {
+  const settings = normalizeNewTabWorkspaceSettings(null)
+  assert.equal(setActiveNewTabWorkspace(settings, 'study').activeWorkspaceId, 'study')
+  assert.equal(setActiveNewTabWorkspace(settings, 'missing').activeWorkspaceId, 'default')
+  assert.equal(getActiveNewTabWorkspace(setActiveNewTabWorkspace(settings, 'personal')).name, '个人')
+})
+
+test('updates workspace names and prunes invalid pinned ids', () => {
+  const settings = normalizeNewTabWorkspaceSettings({
+    activeWorkspaceId: 'work',
+    workspaces: [
+      { id: 'work', name: 'Work', pinnedIds: ['1', 'missing', '2'], createdAt: 1, updatedAt: 1 }
+    ]
+  }, {
+    validBookmarkIds: ['1', '2', '3'],
+    now: 10
+  })
+
+  const renamed = updateNewTabWorkspace(settings, 'work', {
+    name: '  深度工作  ',
+    pinnedIds: ['3', '3', 'missing', '1']
+  }, {
+    validBookmarkIds: ['1', '2', '3'],
+    now: 20
+  })
+
+  assert.equal(renamed.workspaces.find((workspace) => workspace.id === 'work')?.name, '深度工作')
+  assert.deepEqual(renamed.workspaces.find((workspace) => workspace.id === 'work')?.pinnedIds, ['3', '1'])
+
+  const pruned = pruneNewTabWorkspacePinnedIds(renamed, ['1'])
+  assert.deepEqual(pruned.workspaces.find((workspace) => workspace.id === 'work')?.pinnedIds, ['1'])
+})
