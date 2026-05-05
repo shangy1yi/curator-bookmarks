@@ -1398,11 +1398,6 @@ function handleAvailabilityResultQuickAction(event) {
     return true
   }
 
-  if (action === 'never-check') {
-    void ignoreSingleAvailabilityResult(bookmarkId, 'bookmark')
-    return true
-  }
-
   if (action === 'ignore-bookmark' || action === 'ignore-domain' || action === 'ignore-folder') {
     void ignoreSingleAvailabilityResult(bookmarkId, action.replace('ignore-', ''))
     return true
@@ -7749,13 +7744,6 @@ function buildAvailabilityQuickActions(result, interactionLocked) {
         bookmarkId: result.id,
         label: bookmarkIgnored ? '已忽略书签' : '忽略此书签',
         impact: '以后不再检测此条',
-        disabled: interactionLocked || bookmarkIgnored
-      })}
-      ${buildAvailabilityQuickActionButton({
-        action: 'never-check',
-        bookmarkId: result.id,
-        label: bookmarkIgnored ? '已不再检测' : '以后不再检测',
-        impact: '同“忽略此书签”',
         disabled: interactionLocked || bookmarkIgnored
       })}
       ${buildAvailabilityQuickActionButton({
