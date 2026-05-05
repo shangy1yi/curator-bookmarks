@@ -25,7 +25,9 @@ import {
 } from '../../shared/content-snapshots.js'
 import {
   BOOKMARKS_BAR_ID,
+  NEWTAB_SPEED_DIAL_STATE_MESSAGE_TYPE,
   NEWTAB_TOGGLE_SPEED_DIAL_MESSAGE_TYPE,
+  type NewTabSpeedDialStateMessage,
   type NewTabToggleSpeedDialMessage
 } from '../../shared/constants.js'
 import {
@@ -325,6 +327,27 @@ export function createNewTabToggleSpeedDialMessage(bookmarkId: string): NewTabTo
     type: NEWTAB_TOGGLE_SPEED_DIAL_MESSAGE_TYPE,
     bookmarkId: String(bookmarkId || '').trim()
   }
+}
+
+export function applyNewTabSpeedDialStateMessage(
+  message: unknown
+): boolean {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    return false
+  }
+
+  const payload = message as Partial<NewTabSpeedDialStateMessage>
+  if (payload.type !== NEWTAB_SPEED_DIAL_STATE_MESSAGE_TYPE || !Array.isArray(payload.pinnedIds)) {
+    return false
+  }
+
+  dashboardState.speedDialPinnedIds = new Set(
+    payload.pinnedIds
+      .map((id) => String(id || '').trim())
+      .filter(Boolean)
+  )
+  renderDashboardSection()
+  return true
 }
 
 export function isNewTabDashboardEmbed(search = window.location.search): boolean {
@@ -1379,6 +1402,12 @@ function toggleDashboardBookmarkSpeedDial(bookmarkId: string): void {
 
   if (isNewTabDashboardEmbed()) {
     window.parent.postMessage(createNewTabToggleSpeedDialMessage(safeBookmarkId), window.location.origin)
+    if (dashboardState.speedDialPinnedIds.has(safeBookmarkId)) {
+      dashboardState.speedDialPinnedIds.delete(safeBookmarkId)
+    } else {
+      dashboardState.speedDialPinnedIds.add(safeBookmarkId)
+    }
+    renderDashboardSection()
     setDashboardStatus('已切换 Speed Dial 固定状态。')
     return
   }
@@ -2834,7 +2863,10 @@ function buildDashboardCard(item: DashboardItem): string {
   const editTagsLabel = getDashboardCardActionLabel('修改书签标签', item)
   const moveLabel = getDashboardCardActionLabel('移动书签', item)
   const deleteLabel = getDashboardCardActionLabel('删除书签', item)
-  const addSpeedDialLabel = getDashboardCardActionLabel('添加进 Speed Dial', item)
+  const speedDialPinned = dashboardState.speedDialPinnedIds.has(String(item.id))
+  const speedDialActionText = speedDialPinned ? '已在 Speed Dial' : '添加进 Speed Dial'
+  const speedDialTooltip = speedDialPinned ? '从 Speed Dial 移除' : '添加进 Speed Dial'
+  const speedDialActionLabel = getDashboardCardActionLabel(speedDialTooltip, item)
   const visibleTagLimit = 1
   const tags = item.tags.slice(0, visibleTagLimit)
   const hiddenTagCount = Math.max(0, item.tags.length - tags.length)
@@ -2944,11 +2976,11 @@ function buildDashboardCard(item: DashboardItem): string {
           })}
           ${renderDashboardCardAction({
             icon: 'speed-dial',
-            label: addSpeedDialLabel,
-            tooltip: '切换 Speed Dial',
-            className: 'detect-result-action dashboard-speed-dial-action',
-            attrs: `data-dashboard-action="toggle-speed-dial" data-dashboard-bookmark-id="${escapeAttr(item.id)}" data-dashboard-no-drag aria-pressed="false"`,
-            text: '添加进 Speed Dial'
+            label: speedDialActionLabel,
+            tooltip: speedDialTooltip,
+            className: `detect-result-action dashboard-speed-dial-action ${speedDialPinned ? 'active' : ''}`,
+            attrs: `data-dashboard-action="toggle-speed-dial" data-dashboard-bookmark-id="${escapeAttr(item.id)}" data-dashboard-no-drag aria-pressed="${speedDialPinned ? 'true' : 'false'}"`,
+            text: speedDialActionText
           })}
           ${renderDashboardCardAction({
             icon: 'move',

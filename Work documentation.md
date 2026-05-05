@@ -581,6 +581,42 @@
 
 - 否。等待用户手动测试和明确批准。
 
+## Follow-up UX Fix Summary - 2026-05-05
+
+### 用户测试反馈修复
+
+- newtab 搜索栏“背景”默认值从 `58%` 调整为 `30%`，设置面板初始值和默认配置保持一致。
+- 书签仪表盘 Speed Dial 图标按钮改为状态按钮：已在当前场景 Speed Dial 时显示 active 样式、`aria-pressed="true"` 和“从 Speed Dial 移除”提示；未固定时显示“添加进 Speed Dial”。
+- newtab 嵌入仪表盘会把当前场景的 Speed Dial 固定 ID 同步给 iframe；点击按钮可加入，也可再次点击取消固定。
+- newtab 图片链接背景改为自动缓存，删除“授权并缓存”按钮和相关权限请求；缓存失败只降级继续使用远程图片链接。
+- newtab 搜索栏书签建议改为复用 popup 搜索逻辑，保留异步缓存和自然语言扩展兜底。
+- newtab 时间/日期模块不再显示时区文本，并清理对应 `.newtab-clock-zone` 样式。
+
+### 本轮验证结果
+
+- `npm run typecheck` 通过。
+- `npm run lint` 通过。
+- `npm run test:build && node --test .tmp-test/tests/newtab-content-state.test.js .tmp-test/tests/newtab-search-index.test.js .tmp-test/tests/dashboard-selection-a11y.test.js .tmp-test/tests/newtab-time-settings.test.js .tmp-test/tests/options-management-ui.test.js` 通过；140 tests，140 pass。
+- `npm test` 通过；410 tests，410 pass，0 fail。
+- `npm run build` 通过；Vite 6.4.2 成功生成 `dist/`。
+- `npm run check:version` 通过；Version check passed: 1.4.25。
+
+### 更新后的手动测试重点
+
+- 打开 newtab settings，确认搜索栏“背景”默认显示 `30%`。
+- 设置图片链接背景后不需要点击缓存按钮；刷新后确认背景正常显示，设置里不再出现“授权并缓存”。
+- 在 newtab 搜索栏和 popup 搜索栏输入同一关键词、拼音或结构化查询，确认书签搜索结果一致。
+- 打开 newtab 时间/日期模块，确认只显示时间/日期，不显示时区标签。
+- 从 newtab 打开书签仪表盘，确认 Speed Dial 图标按钮能显示当前状态；点击加入当前场景，再次点击可取消固定。
+
+### 当前集成分支
+
+- `integration/newtab-modernization`
+
+### 是否合并 main
+
+- 否。等待用户手动测试和明确批准。
+
 ## Icon Action Follow-up - 2026-05-05
 
 ### 用户测试反馈修复
@@ -628,7 +664,7 @@
 - newtab 顶部入口文案改为“打开书签仪表盘”。
 - Speed Dial 空状态中去除“搜索书签”“在书签上右键固定”“管理场景”三个按钮。
 - options 书签仪表盘每个书签卡片新增“添加进 Speed Dial”按钮。
-- 嵌入 newtab 的仪表盘通过 `curator:newtab-add-speed-dial` 消息把书签加入当前场景 Speed Dial；已在当前场景固定时不会反向取消固定。
+- 嵌入 newtab 的仪表盘通过消息把书签加入当前场景 Speed Dial；该批次先按 add-only 语义落地，后续已修正为状态化 toggle。
 
 ### 本轮集成分支提交
 
@@ -653,7 +689,7 @@
 - 按 `Ctrl/Cmd+K`，确认直接打开书签仪表盘，而不是命令面板或快捷提示。
 - 按 `/`，确认仍聚焦 newtab 搜索框。
 - 清空某个场景的固定书签，确认 Speed Dial 空状态不再显示“搜索书签”“在书签上右键固定”“管理场景”三个按钮。
-- 在书签仪表盘卡片点击“添加进 Speed Dial”，返回 newtab 后确认该书签加入当前场景的 Speed Dial，重复点击不应取消固定。
+- 在书签仪表盘卡片点击“添加进 Speed Dial”，返回 newtab 后确认该书签加入当前场景的 Speed Dial；最终行为以后续状态化 toggle 记录为准。
 
 ### 当前集成分支
 

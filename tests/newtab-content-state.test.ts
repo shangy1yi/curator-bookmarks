@@ -374,6 +374,17 @@ test('newtab modernized bookmark modules are visible and settings-controlled', (
   assert.doesNotMatch(script, /createCommandHintBar\(\)/)
 })
 
+test('newtab time widget does not render timezone text', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+  const createClockBody = getFunctionBody(script, 'createClockWidget')
+  const updateClockBody = getFunctionBody(script, 'updateClockText')
+
+  assert.doesNotMatch(createClockBody, /data\.clockZone|newtab-clock-zone|getClockZoneLabel/)
+  assert.doesNotMatch(updateClockBody, /data-clock-zone|getClockZoneLabel|zoneNode/)
+  assert.doesNotMatch(css, /\.newtab-clock-zone/)
+})
+
 test('newtab pinning uses active workspace instead of legacy activity pins', () => {
   const script = readProjectFile('src/newtab/newtab.ts')
   const toggleBody = getFunctionBody(script, 'toggleActiveMenuBookmarkPin')
@@ -415,9 +426,29 @@ test('newtab search background opacity exposes a wide direct alpha range', () =>
 
   assert.match(backgroundInput, /min="0"/)
   assert.match(backgroundInput, /max="92"/)
+  assert.match(backgroundInput, /value="30"/)
+  assert.match(html, /id="search-background-value"[^>]*>30%<\/output>/)
+  assert.match(source, /background:\s*30/)
   assert.match(source, /background:\s*clampNumber\(settings\.background,\s*0,\s*92,\s*DEFAULT_SEARCH_SETTINGS\.background\)/)
   assert.match(css, /background:\s*rgba\(8,\s*8,\s*9,\s*var\(--search-bg-alpha\)\)/)
   assert.doesNotMatch(css, /var\(--search-bg-alpha\)\s*\+\s*0\.24/)
+})
+
+test('newtab URL backgrounds auto-cache without a manual permission button', () => {
+  const html = readProjectFile('src/newtab/newtab.html')
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+  const cacheBody = getFunctionBody(script, 'cacheBackgroundUrlImage')
+
+  assert.doesNotMatch(html, /background-url-cache-button/)
+  assert.doesNotMatch(html, /background-url-cache-row/)
+  assert.doesNotMatch(html, /授权并缓存/)
+  assert.doesNotMatch(css, /background-url-cache-button/)
+  assert.match(script, /void cacheBackgroundUrlImage\(imageUrl\)/)
+  assert.match(cacheBody, /fetchBackgroundUrlImage\(imageUrl\)/)
+  assert.match(cacheBody, /saveBackgroundUrlCache\(imageUrl, blob\)/)
+  assert.doesNotMatch(cacheBody, /hasOriginPermission|requestOriginPermission|chrome\.permissions/)
+  assert.doesNotMatch(script, /function requestOriginPermission|function hasOriginPermission|chrome\.permissions\.request/)
 })
 
 test('newtab search vertical offset uses adaptive runtime bounds', () => {
@@ -502,6 +533,9 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
   assert.match(script, /window\.location\.hash === '#dashboard'/)
   assert.match(script, /addEventListener\(['"]message['"][\s\S]*curator:newtab-dashboard-close/)
   assert.match(script, /NEWTAB_TOGGLE_SPEED_DIAL_MESSAGE_TYPE/)
+  assert.match(script, /NEWTAB_SPEED_DIAL_STATE_MESSAGE_TYPE/)
+  assert.match(script, /function postDashboardSpeedDialState\(\): void/)
+  assert.match(script, /pinnedIds:\s*getActiveWorkspacePinnedIds\(\)/)
   assert.match(script, /function toggleDashboardBookmarkSpeedDial\(bookmarkId: string\): Promise<void>/)
   assert.match(script, /toggleNewTabWorkspacePin\([\s\S]*?activeWorkspace\.id[\s\S]*?normalizedId/)
   assert.doesNotMatch(script, /dashboardClose\?\.addEventListener\('click', closeDashboardRoute\)/)
@@ -967,12 +1001,14 @@ test('newtab bookmark suggestions are debounced and cached', () => {
   assert.match(script, /const SEARCH_SUGGESTION_CACHE_LIMIT = 24/)
   assert.match(script, /const scheduleSuggestionsRender = \(\{ preserveActive = false, immediate = false \} = \{\}\) =>/)
   assert.match(script, /window\.setTimeout\(\(\) => \{[\s\S]*?renderCurrentSuggestions\(\)/)
-  assert.match(script, /const searchSuggestionCache = new Map<string, SearchBookmarkSuggestion\[\]>\(\)/)
+  assert.match(script, /const searchSuggestionCache = new Map<string, Promise<SearchBookmarkSuggestion\[\]>>\(\)/)
   assert.match(script, /const naturalSearchSuggestionCache = new Map<string, Promise<SearchBookmarkSuggestion\[\]>>\(\)/)
+  assert.match(script, /getPopupSearchBookmarkSuggestionsFromIndex\(/)
   assert.match(script, /function getSearchSuggestionCacheKey/)
   assert.match(script, /normalizeNewTabSearchText\(query\)/)
   assert.match(script, /searchSuggestionCache\.clear\(\)/)
   assert.match(script, /naturalSearchSuggestionCache\.clear\(\)/)
+  assert.match(script, /getSearchBookmarkSuggestions\(query\)\.then/)
   assert.match(script, /getNaturalSearchBookmarkSuggestions\(query\)\.then/)
   assert.match(script, /function shouldLoadNaturalSearchSuggestions/)
   assert.match(script, /if \(!shouldLoadNaturalSearchSuggestions\(query, directSuggestions\)\) \{[\s\S]*?return[\s\S]*?\}/)

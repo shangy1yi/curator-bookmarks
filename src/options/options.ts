@@ -245,6 +245,7 @@ import {
   handleDashboardPointerUp,
   handleDashboardTagPointerOut,
   handleDashboardTagPointerOver,
+  applyNewTabSpeedDialStateMessage,
   isDashboardViewReady,
   prepareDashboardSectionEntry,
   getSingleDashboardMoveBookmark,
@@ -399,6 +400,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     resetOptionsScrollPosition()
   })
   window.addEventListener('curator:dashboard-view-ready', notifyNewTabDashboardReady)
+  window.addEventListener('message', handleNewTabDashboardMessage)
   void hydrateShortcutCommands()
 
   await hydratePersistentState()
@@ -634,6 +636,14 @@ function notifyNewTabDashboardReady(): void {
       )
     })
   })
+}
+
+function handleNewTabDashboardMessage(event: MessageEvent): void {
+  if (!IS_OPTIONS_DASHBOARD_EMBED_MODE || event.origin !== window.location.origin) {
+    return
+  }
+
+  applyNewTabSpeedDialStateMessage(event.data)
 }
 
 function syncCollapsibleNavGroups(activeSectionKey) {

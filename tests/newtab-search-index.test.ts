@@ -5,6 +5,7 @@ import type { BookmarkRecord } from '../src/shared/types.js'
 import {
   buildNewTabSearchIndex,
   getNaturalSearchBookmarkSuggestionsFromIndex,
+  getPopupSearchBookmarkSuggestionsFromIndex,
   getSearchBookmarkSuggestionsFromIndex,
   normalizeNewTabSearchText,
   prepareNewTabSearchIndex
@@ -279,6 +280,7 @@ test('reuses lazy popup search for Chinese pinyin while keeping tags in the ligh
 
   assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('pinia', index, 6).map((item) => item.id), ['zh'])
   assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('qianduan', index, 6).map((item) => item.id), [])
+  assert.deepEqual((await getPopupSearchBookmarkSuggestionsFromIndex('qianduan', index, 6)).map((item) => item.id), ['zh'])
   assert.deepEqual((await getNaturalSearchBookmarkSuggestionsFromIndex('qianduan', index, 6)).map((item) => item.id), ['zh'])
 })
 
@@ -377,6 +379,36 @@ test('prepares reusable search lookup structures without changing popup matching
   assert.equal(prepared.popupSearchBookmarks, undefined)
   assert.equal(prepared.entriesById.get('tagged'), index[0])
   assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('pinia', prepared, 6).map((item) => item.id), ['tagged'])
+})
+
+test('popup-backed newtab search builds popup search entries lazily and reuses them', async () => {
+  const index = buildNewTabSearchIndex({
+    bookmarks: [
+      bookmark({
+        id: 'react',
+        title: 'React Table Guide',
+        normalizedTitle: 'react table guide',
+        path: 'Bookmarks Bar / Frontend'
+      })
+    ]
+  })
+  const prepared = prepareNewTabSearchIndex(index)
+
+  assert.equal(prepared.popupSearchBookmarks, undefined)
+  assert.deepEqual(
+    (await getPopupSearchBookmarkSuggestionsFromIndex('React Table', prepared, 6))
+      .map((item) => item.id),
+    ['react']
+  )
+
+  const firstPreparedBookmarks = prepared.popupSearchBookmarks
+  assert.ok(firstPreparedBookmarks)
+  assert.deepEqual(
+    (await getPopupSearchBookmarkSuggestionsFromIndex('React Table', prepared, 6))
+      .map((item) => item.id),
+    ['react']
+  )
+  assert.equal(prepared.popupSearchBookmarks, firstPreparedBookmarks)
 })
 
 test('natural newtab search builds popup search entries lazily and reuses them', async () => {

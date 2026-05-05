@@ -576,6 +576,34 @@ export function getSearchBookmarkSuggestionsFromIndex(
   return suggestions.sort(compareSearchBookmarkSuggestions)
 }
 
+export async function getPopupSearchBookmarkSuggestionsFromIndex(
+  query: string,
+  index: NewTabSearchIndexEntry[] | NewTabPreparedSearchIndex,
+  limit: number,
+  options: NewTabSearchSuggestionOptions = {}
+): Promise<SearchBookmarkSuggestion[]> {
+  const normalizedQuery = normalizeNewTabSearchText(query)
+  if (!normalizedQuery || limit <= 0) {
+    return []
+  }
+
+  const preparedIndex = Array.isArray(index) ? prepareNewTabSearchIndex(index) : index
+  if (!preparedIndex.supportsPopupSearch || !preparedIndex.popupSearchEntries.length) {
+    return getSearchBookmarkSuggestionsFromIndex(query, preparedIndex, limit, options)
+  }
+
+  const {
+    indexBookmarkForSearch,
+    searchBookmarks
+  } = await import('../popup/search.js')
+  const popupBookmarks = getPreparedPopupSearchBookmarks(preparedIndex, indexBookmarkForSearch)
+
+  return searchBookmarks(query, popupBookmarks)
+    .map((result) => getSuggestionFromPopupResult(preparedIndex, result.id, result.score))
+    .filter((suggestion): suggestion is SearchBookmarkSuggestion => Boolean(suggestion))
+    .slice(0, limit)
+}
+
 export async function getNaturalSearchBookmarkSuggestionsFromIndex(
   query: string,
   index: NewTabSearchIndexEntry[] | NewTabPreparedSearchIndex,

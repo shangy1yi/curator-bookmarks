@@ -1,5 +1,6 @@
 import {
   BOOKMARKS_BAR_ID,
+  NEWTAB_SPEED_DIAL_STATE_MESSAGE_TYPE,
   NEWTAB_TOGGLE_SPEED_DIAL_MESSAGE_TYPE,
   STORAGE_KEYS
 } from '../shared/constants.js'
@@ -44,7 +45,7 @@ import {
   getPortalQuickAccessItems,
   getNaturalSearchBookmarkSuggestionsFromIndex,
   getNewTabSourceAnchorId,
-  getSearchBookmarkSuggestionsFromIndex,
+  getPopupSearchBookmarkSuggestionsFromIndex,
   prepareNewTabSearchIndex,
   getAdaptiveSearchOffsetBounds,
   getAdaptiveSearchWidthBounds,
@@ -114,7 +115,6 @@ import {
   formatClockTimeDateTime,
   getClockAriaLabel,
   getClockUpdateDelay,
-  getClockZoneLabel,
   normalizeTimeSettings,
   type NewTabTimeSettings
 } from './time-settings.js'
@@ -187,7 +187,7 @@ const DEFAULT_SEARCH_SETTINGS = {
   width: 34,
   height: 34,
   offsetY: 0,
-  background: 58
+  background: 30
 }
 const SEARCH_OFFSET_BOUNDS_FALLBACK: AdaptiveSearchOffsetBounds = { min: -32, max: 72 }
 const SEARCH_OFFSET_ABSOLUTE_MIN = -240
@@ -860,9 +860,6 @@ function bindBackgroundSettingsEvents(): void {
   document.getElementById('background-mask-enabled')?.addEventListener('change', handleBackgroundSettingsChange)
   document.getElementById('background-mask-style')?.addEventListener('change', handleBackgroundSettingsChange)
   document.getElementById('background-mask-blur')?.addEventListener('input', handleBackgroundSettingsChange)
-  document.getElementById('background-url-cache-button')?.addEventListener('click', () => {
-    void handleBackgroundUrlCacheClick()
-  })
   document.getElementById('background-image-picker')?.addEventListener('click', () => {
     const input = document.getElementById('background-image-file')
     if (input instanceof HTMLInputElement) {
@@ -1414,63 +1411,6 @@ async function handleBackgroundFileChange(
     syncBackgroundSettingsControls()
   } catch (error) {
     setBackgroundStatus(getBackgroundMediaSaveErrorMessage(error), 'error')
-    syncBackgroundSettingsControls()
-  }
-}
-
-async function handleBackgroundUrlCacheClick(): Promise<void> {
-  if (state.backgroundUrlCacheBusy) {
-    return
-  }
-
-  const imageUrl = normalizeBackgroundImageUrl(state.backgroundSettings.url)
-  if (state.backgroundSettings.type !== 'urls' || !imageUrl) {
-    setBackgroundStatus('请输入有效的 http 或 https 图片链接后再缓存。', 'warning')
-    syncBackgroundSettingsControls()
-    return
-  }
-
-  state.backgroundUrlCacheBusy = true
-  state.backgroundUrlCacheStatus = '请求授权...'
-  setBackgroundStatus('正在请求图片域名授权...', 'info')
-  syncBackgroundSettingsControls()
-  try {
-    const granted = await requestOriginPermission(imageUrl)
-    if (!granted) {
-      state.backgroundUrlCacheStatus = '未授权'
-      setBackgroundStatus('未获得图片域名授权：请允许访问当前图片来源后重试。', 'warning')
-      return
-    }
-    if (!isCurrentBackgroundUrl(imageUrl)) {
-      return
-    }
-
-    state.backgroundUrlCacheStatus = '下载中...'
-    syncBackgroundSettingsControls()
-    const blob = await fetchBackgroundUrlImage(imageUrl)
-    if (!isCurrentBackgroundUrl(imageUrl)) {
-      return
-    }
-
-    state.backgroundUrlCacheStatus = '写入缓存...'
-    syncBackgroundSettingsControls()
-    await saveBackgroundUrlCache(imageUrl, blob)
-    if (!isCurrentBackgroundUrl(imageUrl)) {
-      return
-    }
-
-    const ready = await setBackgroundImageFromBlob(blob)
-    if (ready) {
-      lastAppliedBackgroundMediaSignature = getBackgroundMediaSignature(state.backgroundSettings)
-    }
-    markWallpaperReady()
-    state.backgroundUrlCacheStatus = `已缓存 ${formatBytes(blob.size)}`
-    setBackgroundStatus('远程图片已缓存到本地。', 'success')
-  } catch (error) {
-    state.backgroundUrlCacheStatus = '缓存失败'
-    setBackgroundStatus(getBackgroundUrlCacheErrorMessage(error), 'error')
-  } finally {
-    state.backgroundUrlCacheBusy = false
     syncBackgroundSettingsControls()
   }
 }
@@ -3490,6 +3430,7 @@ function handleDashboardMessage(event: MessageEvent): void {
     dashboardFrameReadyTimeout = 0
     state.dashboardFrameError = ''
     state.dashboardFrameReady = true
+    postDashboardSpeedDialState()
     renderDashboard()
     return
   }
@@ -3498,6 +3439,17 @@ function handleDashboardMessage(event: MessageEvent): void {
     const bookmarkId = String(event.data?.bookmarkId || '').trim()
     void toggleDashboardBookmarkSpeedDial(bookmarkId)
   }
+}
+
+function postDashboardSpeedDialState(): void {
+  if (!dashboardFrame || !state.dashboardFrameReady || !state.dashboardOpen) {
+    return
+  }
+
+  dashboardFrame.contentWindow?.postMessage({
+    type: NEWTAB_SPEED_DIAL_STATE_MESSAGE_TYPE,
+    pinnedIds: getActiveWorkspacePinnedIds()
+  }, window.location.origin)
 }
 
 async function toggleDashboardBookmarkSpeedDial(bookmarkId: string): Promise<void> {
@@ -3519,6 +3471,7 @@ async function toggleDashboardBookmarkSpeedDial(bookmarkId: string): Promise<voi
     await saveNewTabWorkspaceSettings()
     syncWorkspaceSettingsControls()
     render()
+    postDashboardSpeedDialState()
     updateClockText()
   } catch (error) {
     console.warn('从书签仪表盘切换 Speed Dial 固定状态失败。', error)
@@ -4008,24 +3961,31 @@ function createSearchWidget(): HTMLElement | null {
     window.clearTimeout(suggestionDebounceTimer)
 
     const renderCurrentSuggestions = () => {
-      const directSuggestions = getSearchBookmarkSuggestions(query)
-      if (requestId !== suggestionRequestId) {
-        return
-      }
-
-      renderSuggestions(directSuggestions, { preserveActive, query })
-      if (!shouldLoadNaturalSearchSuggestions(query, directSuggestions)) {
-        return
-      }
-
-      void getNaturalSearchBookmarkSuggestions(query).then((naturalSuggestions) => {
+      void getSearchBookmarkSuggestions(query).then((directSuggestions) => {
         if (requestId !== suggestionRequestId) {
           return
         }
 
-        renderSuggestions(naturalSuggestions, { preserveActive: true, query })
+        renderSuggestions(directSuggestions, { preserveActive, query })
+        if (!shouldLoadNaturalSearchSuggestions(query, directSuggestions)) {
+          return
+        }
+
+        void getNaturalSearchBookmarkSuggestions(query).then((naturalSuggestions) => {
+          if (requestId !== suggestionRequestId) {
+            return
+          }
+
+          renderSuggestions(naturalSuggestions, { preserveActive: true, query })
+        }).catch(() => {
+          // Keep the popup-aligned suggestions visible if the optional natural-search chunk fails to load.
+        })
       }).catch(() => {
-        // Keep the direct suggestions visible if the optional natural-search chunk fails to load.
+        if (requestId !== suggestionRequestId) {
+          return
+        }
+
+        renderSuggestions([], { preserveActive, query })
       })
     }
 
@@ -4188,10 +4148,10 @@ function syncSearchInputActions(
   submitButton.setAttribute('aria-disabled', String(!hasValue))
 }
 
-const searchSuggestionCache = new Map<string, SearchBookmarkSuggestion[]>()
+const searchSuggestionCache = new Map<string, Promise<SearchBookmarkSuggestion[]>>()
 const naturalSearchSuggestionCache = new Map<string, Promise<SearchBookmarkSuggestion[]>>()
 
-function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[] {
+function getSearchBookmarkSuggestions(query: string): Promise<SearchBookmarkSuggestion[]> {
   const cacheKey = getSearchSuggestionCacheKey(query)
   const cached = searchSuggestionCache.get(cacheKey)
   if (cached) {
@@ -4200,12 +4160,12 @@ function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[]
     return cached
   }
 
-  const suggestions = getSearchBookmarkSuggestionsFromIndex(
+  const suggestionsPromise = getPopupSearchBookmarkSuggestionsFromIndex(
     query,
     state.preparedSearchIndex,
     SEARCH_SUGGESTION_LIMIT
   )
-  searchSuggestionCache.set(cacheKey, suggestions)
+  searchSuggestionCache.set(cacheKey, suggestionsPromise)
   while (searchSuggestionCache.size > SEARCH_SUGGESTION_CACHE_LIMIT) {
     const oldestKey = searchSuggestionCache.keys().next().value
     if (!oldestKey) {
@@ -4213,7 +4173,7 @@ function getSearchBookmarkSuggestions(query: string): SearchBookmarkSuggestion[]
     }
     searchSuggestionCache.delete(oldestKey)
   }
-  return suggestions
+  return suggestionsPromise
 }
 
 function getNaturalSearchBookmarkSuggestions(query: string): Promise<SearchBookmarkSuggestion[]> {
@@ -4586,12 +4546,6 @@ function createClockWidget(): HTMLElement | null {
     date.textContent = formatClockDate(now, settings)
     clock.appendChild(date)
   }
-
-  const zone = document.createElement('span')
-  zone.className = 'newtab-clock-zone'
-  zone.dataset.clockZone = 'true'
-  zone.textContent = getClockZoneLabel(settings)
-  clock.appendChild(zone)
 
   return clock
 }
@@ -5082,6 +5036,7 @@ async function executeCommandPaletteItem(item: CommandPaletteItem | undefined): 
       { validBookmarkIds: state.allBookmarkMap.keys() }
     )
     await saveNewTabWorkspaceSettings()
+    postDashboardSpeedDialState()
     closeCommandPalette()
     return
   }
@@ -5118,6 +5073,7 @@ async function switchNewTabWorkspace(workspaceId: string): Promise<void> {
   await saveNewTabWorkspaceSettings()
   syncWorkspaceSettingsControls()
   render()
+  postDashboardSpeedDialState()
   updateClockText()
 }
 
@@ -5915,6 +5871,7 @@ async function removeBookmarkFromWorkspacePins(bookmarkId: string): Promise<void
 
   state.workspaceSettings = nextSettings
   await saveNewTabWorkspaceSettings()
+  postDashboardSpeedDialState()
 }
 
 async function saveNewTabActivity(): Promise<void> {
@@ -6555,9 +6512,6 @@ function syncBackgroundSettingsControls(): void {
   const imageRow = document.getElementById('background-image-row')
   const videoRow = document.getElementById('background-video-row')
   const urlRow = document.getElementById('background-url-row')
-  const urlCacheRow = document.getElementById('background-url-cache-row')
-  const urlCacheButton = document.getElementById('background-url-cache-button')
-  const urlCacheStatus = document.getElementById('background-url-cache-status')
   const backgroundStatus = document.getElementById('background-status')
   const colorControl = document.getElementById('background-color-control')
   const colorValue = document.getElementById('background-color-value')
@@ -6589,18 +6543,6 @@ function syncBackgroundSettingsControls(): void {
   }
   if (urlRow instanceof HTMLElement) {
     urlRow.hidden = settings.type !== 'urls'
-  }
-  if (urlCacheRow instanceof HTMLElement) {
-    urlCacheRow.hidden = settings.type !== 'urls'
-  }
-  if (urlCacheButton instanceof HTMLButtonElement) {
-    const imageUrl = normalizeBackgroundImageUrl(settings.url)
-    urlCacheButton.disabled = settings.type !== 'urls' || !imageUrl || state.backgroundUrlCacheBusy
-    urlCacheButton.textContent = state.backgroundUrlCacheBusy ? '缓存中...' : '授权并缓存'
-    urlCacheButton.title = imageUrl ? '授权当前图片域名并生成本地压缩缓存' : '请输入图片链接'
-  }
-  if (urlCacheStatus instanceof HTMLElement) {
-    urlCacheStatus.textContent = settings.type === 'urls' ? state.backgroundUrlCacheStatus : ''
   }
   if (backgroundStatus instanceof HTMLElement) {
     backgroundStatus.textContent = state.backgroundStatus
@@ -6980,20 +6922,28 @@ async function applyUrlBackgroundImage(
 }
 
 async function cacheBackgroundUrlImage(imageUrl: string): Promise<void> {
-  try {
-    const hasPermission = await hasOriginPermission(imageUrl)
-    if (!hasPermission || !isCurrentBackgroundUrl(imageUrl)) {
-      return
-    }
+  if (state.backgroundUrlCacheBusy || !isCurrentBackgroundUrl(imageUrl)) {
+    return
+  }
 
+  state.backgroundUrlCacheBusy = true
+  state.backgroundUrlCacheStatus = '下载中...'
+  try {
     const blob = await fetchBackgroundUrlImage(imageUrl)
     if (!isCurrentBackgroundUrl(imageUrl)) {
       return
     }
 
     await saveBackgroundUrlCache(imageUrl, blob)
+    if (!isCurrentBackgroundUrl(imageUrl)) {
+      return
+    }
+
+    state.backgroundUrlCacheStatus = `已缓存 ${formatBytes(blob.size)}`
   } catch {
     // 缓存是增强能力，失败时继续使用原图片链接，不向扩展错误页写入噪音。
+  } finally {
+    state.backgroundUrlCacheBusy = false
   }
 }
 
@@ -7071,51 +7021,6 @@ function normalizeBackgroundImageUrl(value: string): string {
   } catch {
     return ''
   }
-}
-
-function getOriginPermissionPattern(url: string): string {
-  try {
-    const parsedUrl = new URL(String(url || '').trim())
-    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-      return ''
-    }
-
-    return `${parsedUrl.origin}/*`
-  } catch {
-    return ''
-  }
-}
-
-function hasOriginPermission(url: string): Promise<boolean> {
-  const originPattern = getOriginPermissionPattern(url)
-  if (!originPattern || !chrome.permissions?.contains) {
-    return Promise.resolve(false)
-  }
-
-  return new Promise((resolve) => {
-    chrome.permissions.contains({ origins: [originPattern] }, (granted) => {
-      const error = chrome.runtime.lastError
-      resolve(!error && Boolean(granted))
-    })
-  })
-}
-
-async function requestOriginPermission(url: string): Promise<boolean> {
-  if (await hasOriginPermission(url)) {
-    return true
-  }
-
-  const originPattern = getOriginPermissionPattern(url)
-  if (!originPattern || !chrome.permissions?.request) {
-    return false
-  }
-
-  return new Promise((resolve) => {
-    chrome.permissions.request({ origins: [originPattern] }, (granted) => {
-      const error = chrome.runtime.lastError
-      resolve(!error && Boolean(granted))
-    })
-  })
 }
 
 function escapeCssUrl(value: string): string {
@@ -8671,8 +8576,7 @@ function updateClockText(): void {
   const timeNode = document.querySelector('[data-clock-time]')
   const dateNode = document.querySelector('[data-clock-date]')
   const periodNode = document.querySelector('[data-clock-period]')
-  const zoneNode = document.querySelector('[data-clock-zone]')
-  if (!timeNode && !dateNode && !periodNode && !zoneNode) {
+  if (!timeNode && !dateNode && !periodNode) {
     return
   }
 
@@ -8691,9 +8595,6 @@ function updateClockText(): void {
   if (dateNode instanceof HTMLTimeElement) {
     dateNode.textContent = formatClockDate(now, settings)
     dateNode.dateTime = formatClockDateTime(now, settings)
-  }
-  if (zoneNode) {
-    zoneNode.textContent = getClockZoneLabel(settings)
   }
 }
 

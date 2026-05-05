@@ -426,18 +426,13 @@ body.background-mask-enabled .newtab-background-mask {
   min-width: 8ch;
 }
 
-.newtab-clock-period,
-.newtab-clock-zone {
+.newtab-clock-period {
   color: rgba(245, 245, 247, 0.4);
   font-size: calc(10px * var(--clock-scale));
   font-weight: 720;
   letter-spacing: 0;
   line-height: 1;
   white-space: nowrap;
-}
-
-.newtab-clock-zone {
-  padding-top: calc(1px * var(--clock-scale));
 }
 
 .newtab-clock-date {
@@ -457,14 +452,6 @@ body.background-mask-enabled .newtab-background-mask {
 
 .newtab-clock[data-clock-density="comfortable"] .newtab-clock-date {
   color: rgba(245, 245, 247, 0.66);
-}
-
-.newtab-clock[data-clock-density="comfortable"] .newtab-clock-zone {
-  justify-self: center;
-  padding: calc(2px * var(--clock-scale)) calc(7px * var(--clock-scale));
-  border-radius: 999px;
-  background: rgba(245, 245, 247, 0.08);
-  color: rgba(245, 245, 247, 0.48);
 }
 
 .newtab-search-slot {
@@ -3298,63 +3285,6 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
     0 0 0 2px rgba(245, 245, 247, 0.1);
 }
 
-#background-url-cache-button.setting-file-button {
-  position: relative;
-  min-width: auto;
-  max-width: none;
-  min-height: 30px;
-  overflow: visible;
-  padding: 0 2px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: #e1e1e1;
-  font-size: 12px;
-  font-weight: 800;
-  box-shadow: none;
-  transition-duration: 400ms;
-  transition-property: color;
-  transition-timing-function: cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-
-#background-url-cache-button.setting-file-button::after {
-  content: "";
-  position: absolute;
-  bottom: 4px;
-  left: 50%;
-  width: 0;
-  height: 2px;
-  background-color: #ffffff;
-  pointer-events: none;
-  transition-duration: 400ms;
-  transition-property: width, left;
-  transition-timing-function: cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-
-#background-url-cache-button.setting-file-button:not(:disabled):hover,
-#background-url-cache-button.setting-file-button:not(:disabled):focus-visible {
-  border-color: transparent;
-  background: transparent;
-  color: #ffffff;
-  box-shadow: none;
-}
-
-#background-url-cache-button.setting-file-button:not(:disabled):hover::after,
-#background-url-cache-button.setting-file-button:not(:disabled):focus-visible::after {
-  left: 0;
-  width: 100%;
-}
-
-#background-url-cache-button.setting-file-button:focus-visible {
-  outline: none;
-}
-
-#background-url-cache-button.setting-file-button:disabled {
-  background: transparent;
-  box-shadow: none;
-  opacity: 0.45;
-}
-
 .setting-text-input,
 .setting-url-input {
   display: block;
@@ -4320,8 +4250,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
     font-size: calc(14px * var(--clock-scale));
   }
 
-  .newtab-clock-period,
-  .newtab-clock-zone {
+  .newtab-clock-period {
     font-size: calc(9px * var(--clock-scale));
   }
 

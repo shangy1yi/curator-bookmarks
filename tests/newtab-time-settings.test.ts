@@ -97,7 +97,7 @@ test('time density changes layout structure instead of only changing font size',
   assert.match(css, /\.newtab-clock\[data-clock-density="compact"\]\s*\{[\s\S]*?background:\s*transparent/)
   assert.match(css, /\.newtab-clock\[data-clock-density="comfortable"\]\s*\{[\s\S]*?grid-auto-flow:\s*row/)
   assert.match(css, /\.newtab-clock\[data-clock-density="comfortable"\]\s*\{[\s\S]*?min-width:\s*min\(100%,\s*300px\)/)
-  assert.match(css, /\.newtab-clock\[data-clock-density="comfortable"\]\s+\.newtab-clock-zone\s*\{[\s\S]*?background:\s*rgba\(245,\s*245,\s*247,\s*0\.08\)/)
+  assert.doesNotMatch(css, /\.newtab-clock-zone/)
   assert.doesNotMatch(css, /\.newtab-clock\[data-clock-density="compact"\]\s+\.newtab-clock-time\s*\{/)
   assert.doesNotMatch(css, /\.newtab-clock\[data-clock-density="comfortable"\]\s+\.newtab-clock-time\s*\{/)
 })

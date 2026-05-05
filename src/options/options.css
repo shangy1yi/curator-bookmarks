@@ -3355,6 +3355,25 @@ body.dashboard-fullscreen-active {
   transform: translateY(0) scale(0.92);
 }
 
+.dashboard-icon-action[aria-pressed="true"],
+.dashboard-icon-action.active {
+  border-color: rgba(156, 232, 177, 0.34);
+  background: rgba(156, 232, 177, 0.14);
+  color: #d9ffe2;
+  box-shadow:
+    inset 0 0 0 1px rgba(156, 232, 177, 0.12),
+    0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+.dashboard-icon-action[aria-pressed="true"]:hover,
+.dashboard-icon-action[aria-pressed="true"]:focus-visible,
+.dashboard-icon-action.active:hover,
+.dashboard-icon-action.active:focus-visible {
+  border-color: rgba(156, 232, 177, 0.48);
+  background: rgba(156, 232, 177, 0.2);
+  color: #effff2;
+}
+
 .dashboard-icon-action.danger {
   color: #ffb7b0;
 }

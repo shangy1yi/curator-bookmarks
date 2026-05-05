@@ -186,6 +186,7 @@ export const dashboardState = {
   month: '',
   sortKey: 'date-desc' as DashboardSortKey,
   selectedIds: new Set<string>(),
+  speedDialPinnedIds: new Set<string>(),
   expandedTagIds: new Set<string>(),
   tagEditorBookmarkId: '',
   tagEditorDraft: '',
