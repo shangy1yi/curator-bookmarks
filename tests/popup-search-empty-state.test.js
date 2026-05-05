@@ -28,6 +28,29 @@ test('popup empty search state offers actionable recovery controls', () => {
   assert.match(popupSource, /handleEmptySearchAction/)
 })
 
+test('popup exposes saved search controls without eager dashboard work', () => {
+  assert.match(popupHtml, /id="saved-searches"[^>]+aria-label="已保存搜索"/)
+  assert.match(popupSource, /loadSavedSearchIndex/)
+  assert.match(popupSource, /getSavedSearchesForScope\(state\.savedSearches, 'popup'\)/)
+  assert.match(popupSource, /data-saved-search-action="save-current"/)
+  assert.match(popupSource, /data-saved-search-action="apply"/)
+  assert.match(popupSource, /data-saved-search-action="delete"/)
+  assert.match(popupSource, /void hydrateSavedSearches\(\)/)
+  assert.doesNotMatch(popupSource, /^import\s+(?!type)(?:[^\n]|\n(?!import\b))*from\s+['"]\.\.\/options\//m)
+})
+
+test('popup current page card has bookmark-aware quick actions', () => {
+  assert.match(popupSource, /state\.currentPageBookmarkId = matchedBookmark\?\.id \|\| null/)
+  assert.match(popupSource, /已收藏 ·/)
+  assert.match(popupSource, /未收藏 · 可快速保存到文件夹/)
+  assert.match(popupSource, /data-current-page-action="open-folder"/)
+  assert.match(popupSource, /data-current-page-action="edit"/)
+  assert.match(popupSource, /data-current-page-action="pin-newtab"/)
+  assert.match(popupSource, /data-current-page-action="save"/)
+  assert.match(popupSource, /normalizeNewTabWorkspaceSettings/)
+  assert.match(popupSource, /toggleNewTabWorkspacePin/)
+})
+
 test('popup empty search state does not render the boxed plus mark', () => {
   assert.doesNotMatch(popupCss, /\.empty-search-state::before/)
   assert.doesNotMatch(popupCss, /#empty-state\.state-panel:not\(\.hidden\)::before/)

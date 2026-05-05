@@ -47,8 +47,19 @@ import {
   type PopupSearchResult
 } from './search.js'
 import {
-  parseSearchQuery
+  deleteSavedSearch,
+  getSavedSearchesForScope,
+  loadSavedSearchIndex,
+  parseSearchQuery,
+  saveSearch
 } from '../shared/search-query.js'
+import type { SavedSearch, SavedSearchIndex } from '../shared/search-query.js'
+import {
+  DEFAULT_NEW_TAB_WORKSPACE_ID,
+  getActiveNewTabWorkspace,
+  normalizeNewTabWorkspaceSettings,
+  toggleNewTabWorkspacePin
+} from '../shared/newtab-workspace-settings.js'
 import type {
   NaturalSearchPlan,
   NaturalSearchResultSet
@@ -71,6 +82,10 @@ const SMART_RECOMMENDATION_LIMIT = 3
 const SMART_LOADING_STEP_COUNT = 3
 const POPUP_SMART_DEFAULT_TIMEOUT_MS = 30000
 const POPUP_JINA_READER_ORIGIN = 'https://r.jina.ai/*'
+const POPUP_DEFAULT_WORKSPACE_STORAGE = {
+  activeWorkspaceId: DEFAULT_NEW_TAB_WORKSPACE_ID,
+  workspaces: []
+}
 const DEFAULT_POPUP_PREFERENCES = {
   naturalSearchEnabled: false
 }
@@ -224,6 +239,17 @@ function bindEvents() {
   dom.smartFooterSettings.addEventListener('click', openSettingsPage)
   dom.smartClassifier.addEventListener('click', handleSmartClassifierClick)
   dom.smartClassifier.addEventListener('input', handleSmartClassifierInput)
+  dom.savedSearches.addEventListener('click', (event) => {
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+
+    const actionButton = target.closest('[data-saved-search-action]')
+    if (actionButton) {
+      handleSavedSearchAction(actionButton)
+    }
+  })
   dom.searchInput.addEventListener('input', () => {
     setSearchQuery(dom.searchInput.value)
   })
@@ -316,6 +342,82 @@ async function savePopupPreferences() {
       naturalSearchEnabled: state.naturalSearchEnabled
     }
   })
+}
+
+async function hydrateSavedSearches() {
+  if (state.savedSearchesLoaded) {
+    return
+  }
+
+  try {
+    state.savedSearches = await loadSavedSearchIndex()
+    state.savedSearchesLoaded = true
+    state.savedSearchesError = ''
+  } catch {
+    state.savedSearchesLoaded = true
+    state.savedSearchesError = '保存搜索读取失败'
+  } finally {
+    renderSearchTools()
+  }
+}
+
+async function saveCurrentSearchQuery() {
+  const query = state.searchQuery.trim()
+  if (!query) {
+    showViewNotice('请输入查询后再保存')
+    dom.searchInput.focus()
+    return
+  }
+
+  try {
+    const index = await ensureSavedSearchIndex()
+    state.savedSearches = await saveSearch(index, {
+      name: createSavedSearchName(query),
+      query,
+      scope: 'both'
+    })
+    state.savedSearchesLoaded = true
+    state.savedSearchesError = ''
+    renderSearchTools()
+    showViewNotice('已保存搜索，可在 popup 复用')
+  } catch (error) {
+    state.savedSearchesError = error instanceof Error ? error.message : '保存搜索失败'
+    renderSearchTools()
+    showToast({ type: 'error', message: '保存搜索失败，请稍后重试。' })
+  }
+}
+
+async function deletePopupSavedSearch(searchId) {
+  try {
+    const index = await ensureSavedSearchIndex()
+    state.savedSearches = await deleteSavedSearch(index, String(searchId || ''))
+    state.savedSearchesLoaded = true
+    state.savedSearchesError = ''
+    renderSearchTools()
+    showViewNotice('已删除保存搜索')
+  } catch (error) {
+    state.savedSearchesError = error instanceof Error ? error.message : '删除保存搜索失败'
+    renderSearchTools()
+    showToast({ type: 'error', message: '删除保存搜索失败，请稍后重试。' })
+  }
+}
+
+async function ensureSavedSearchIndex(): Promise<SavedSearchIndex> {
+  if (state.savedSearches) {
+    return state.savedSearches
+  }
+
+  state.savedSearches = await loadSavedSearchIndex()
+  state.savedSearchesLoaded = true
+  return state.savedSearches
+}
+
+function createSavedSearchName(query) {
+  const parsed = parseSearchQuery(query)
+  const chipLabels = parsed.chips.map((chip) => chip.label.replace(/^[^：]+：/, '')).filter(Boolean)
+  const terms = parsed.textTerms.join(' ')
+  const label = [...chipLabels, terms].filter(Boolean).join(' · ')
+  return cleanSmartText(label || query, 60) || '未命名搜索'
 }
 
 async function openSettingsPage(target: Event | 'general' | 'ai-provider' = 'general') {
@@ -712,6 +814,7 @@ async function refreshData({ initial = false, preserveSearch = true } = {}) {
     state.searchSnapshotFullTextRunId += 1
     clearSearchCaches()
     await hydrateCurrentTabState()
+    void hydrateSavedSearches()
 
     const folderIds = new Set(extracted.folders.map((folder) => folder.id))
     const defaultExpanded = getDefaultExpandedFolders(state.bookmarksBarNode)
@@ -1264,6 +1367,68 @@ function renderSearchTools() {
   dom.searchChips.innerHTML = chips
     .map((chip) => `<span class="search-filter-chip ${escapeAttr(chip.kind)}">${escapeHtml(chip.label)}</span>`)
     .join('')
+  renderSavedSearches()
+}
+
+function renderSavedSearches() {
+  const savedSearches = state.savedSearches
+    ? getSavedSearchesForScope(state.savedSearches, 'popup')
+    : []
+  const normalizedQuery = normalizeQuery(state.searchQuery)
+  const canSaveCurrent = Boolean(normalizedQuery)
+  const hasCurrentSaved = canSaveCurrent && savedSearches.some((item) => normalizeQuery(item.query) === normalizedQuery)
+  const show = canSaveCurrent || savedSearches.length > 0 || state.savedSearchesError
+
+  dom.savedSearches.classList.toggle('hidden', !show)
+  if (!show) {
+    dom.savedSearches.innerHTML = ''
+    return
+  }
+
+  const status = state.savedSearchesError
+    ? `<span class="saved-search-status error">${escapeHtml(state.savedSearchesError)}</span>`
+    : !savedSearches.length
+      ? '<span class="saved-search-status">还没有保存搜索</span>'
+      : ''
+  const saveButton = canSaveCurrent
+    ? `
+      <button class="saved-search-save" type="button" data-saved-search-action="save-current" ${hasCurrentSaved ? 'disabled' : ''}>
+        ${hasCurrentSaved ? '已保存' : '保存搜索'}
+      </button>
+    `
+    : ''
+  const items = savedSearches.slice(0, 6).map(renderSavedSearchChip).join('')
+
+  dom.savedSearches.innerHTML = `
+    <div class="saved-search-head">
+      <span>保存搜索</span>
+      ${saveButton}
+    </div>
+    ${status}
+    ${items ? `<div class="saved-search-list">${items}</div>` : ''}
+  `
+}
+
+function renderSavedSearchChip(search: SavedSearch) {
+  const isActive = normalizeQuery(search.query) === normalizeQuery(state.searchQuery)
+  return `
+    <span class="saved-search-chip ${isActive ? 'active' : ''}">
+      <button
+        class="saved-search-apply"
+        type="button"
+        data-saved-search-action="apply"
+        data-saved-search-id="${escapeAttr(search.id)}"
+        title="${escapeAttr(search.query)}"
+      >${escapeHtml(search.name || search.query)}</button>
+      <button
+        class="saved-search-delete"
+        type="button"
+        data-saved-search-action="delete"
+        data-saved-search-id="${escapeAttr(search.id)}"
+        aria-label="删除保存搜索：${escapeAttr(search.name || search.query)}"
+      >×</button>
+    </span>
+  `
 }
 
 function getSearchInputPlaceholder() {
@@ -1593,21 +1758,47 @@ function renderSmartClassifier() {
 function renderSmartPageCard() {
   const title = getCurrentPageTitle()
   const favicon = String(state.currentTab?.favIconUrl || '')
+  const bookmark = state.currentPageBookmarkId
+    ? state.bookmarkMap.get(state.currentPageBookmarkId)
+    : null
 
   return `
-    <article class="smart-page-card">
+    <article class="smart-page-card ${bookmark ? 'bookmarked' : 'unbookmarked'}">
       <div class="smart-page-main">
         <span class="smart-page-icon" aria-hidden="true">
           ${favicon ? `<img src="${escapeAttr(favicon)}" alt="">` : escapeHtml(getSmartFallbackIconLabel(title))}
         </span>
         <div class="smart-page-copy">
           <p class="smart-page-title" title="${escapeAttr(title)}">${escapeHtml(title)}</p>
+          <p class="smart-page-status" title="${escapeAttr(bookmark?.path || '')}">
+            ${bookmark ? `已收藏 · ${escapeHtml(formatBookmarkPath(bookmark.path) || '未归档路径')}` : '未收藏 · 可快速保存到文件夹'}
+          </p>
         </div>
       </div>
-      <button class="smart-classify-button" type="button" data-smart-action="classify">
-        智能分类
-      </button>
+      ${bookmark ? renderBookmarkedCurrentPageActions(bookmark) : renderUnbookmarkedCurrentPageActions()}
     </article>
+  `
+}
+
+function renderBookmarkedCurrentPageActions(bookmark) {
+  const pinPending = isPopupActionPending('pin-newtab', bookmark.id)
+  return `
+    <div class="current-page-actions" aria-label="当前页快捷操作">
+      <button class="current-page-action" type="button" data-current-page-action="open-folder">所在文件夹</button>
+      <button class="current-page-action" type="button" data-current-page-action="edit">编辑</button>
+      <button class="current-page-action primary" type="button" data-current-page-action="pin-newtab" ${pinPending ? 'disabled' : ''}>
+        ${pinPending ? renderButtonLoadingLabel('固定中') : '固定到 newtab'}
+      </button>
+    </div>
+  `
+}
+
+function renderUnbookmarkedCurrentPageActions() {
+  return `
+    <div class="current-page-actions" aria-label="当前页快捷操作">
+      <button class="current-page-action primary" type="button" data-current-page-action="save">快速保存</button>
+      <button class="current-page-action" type="button" data-smart-action="classify">智能分类</button>
+    </div>
   `
 }
 
@@ -2585,6 +2776,18 @@ function renderToasts() {
 }
 
 function handleSmartClassifierClick(event) {
+  const savedSearchButton = event.target.closest('[data-saved-search-action]')
+  if (savedSearchButton) {
+    handleSavedSearchAction(savedSearchButton)
+    return
+  }
+
+  const quickActionButton = event.target.closest('[data-current-page-action]')
+  if (quickActionButton) {
+    handleCurrentPageQuickAction(quickActionButton.getAttribute('data-current-page-action'))
+    return
+  }
+
   const recommendationButton = event.target.closest('[data-smart-recommendation]')
   if (recommendationButton) {
     const nextRecommendationId = recommendationButton.getAttribute('data-smart-recommendation')
@@ -2634,6 +2837,65 @@ function handleSmartClassifierClick(event) {
 
   if (action === 'save') {
     saveSmartRecommendation()
+  }
+}
+
+function handleSavedSearchAction(button) {
+  const action = button.getAttribute('data-saved-search-action')
+  const searchId = button.getAttribute('data-saved-search-id')
+
+  if (action === 'save-current') {
+    void saveCurrentSearchQuery()
+    return
+  }
+
+  if (action === 'apply') {
+    const savedSearch = state.savedSearches
+      ? getSavedSearchesForScope(state.savedSearches, 'popup').find((item) => item.id === searchId)
+      : null
+    if (savedSearch) {
+      setSearchQuery(savedSearch.query, { immediate: true })
+      showViewNotice(`已应用保存搜索：${savedSearch.name}`)
+      dom.searchInput.focus()
+    }
+    return
+  }
+
+  if (action === 'delete') {
+    void deletePopupSavedSearch(searchId)
+  }
+}
+
+function handleCurrentPageQuickAction(action) {
+  const bookmarkId = state.currentPageBookmarkId
+
+  if (action === 'save') {
+    openSmartFolderDialog()
+    return
+  }
+
+  if (!bookmarkId) {
+    showToast({ type: 'error', message: '当前页面尚未收藏。' })
+    return
+  }
+
+  if (action === 'open-folder') {
+    const bookmark = state.bookmarkMap.get(bookmarkId)
+    if (bookmark?.parentId) {
+      applyFolderFilter(bookmark.parentId)
+      resetSmartClassification()
+      showViewNotice('已打开当前页所在文件夹')
+    }
+    return
+  }
+
+  if (action === 'edit') {
+    openEditDialog(bookmarkId)
+    return
+  }
+
+  if (action === 'pin-newtab') {
+    void pinCurrentPageToNewTab(bookmarkId)
   }
 }
 
@@ -3739,6 +4001,50 @@ async function saveCurrentPageViaWorker({ parentId = '', folderPath = '' } = {},
 function renderSmartSaveSurfaces() {
   renderSmartClassifier()
   renderSmartFolderModal()
+}
+
+async function pinCurrentPageToNewTab(bookmarkId) {
+  const bookmark = state.bookmarkMap.get(String(bookmarkId || ''))
+  if (!bookmark?.url || isPopupActionPending('pin-newtab', bookmark.id)) {
+    return
+  }
+
+  try {
+    setPopupActionPending('pin-newtab', bookmark.id, true)
+    renderSmartClassifier()
+
+    const stored = await getLocalStorage([STORAGE_KEYS.newTabWorkspaceSettings])
+    const currentSettings = normalizeNewTabWorkspaceSettings(
+      stored[STORAGE_KEYS.newTabWorkspaceSettings] || POPUP_DEFAULT_WORKSPACE_STORAGE,
+      { validBookmarkIds: state.bookmarkMap.keys() }
+    )
+    const workspace = getActiveNewTabWorkspace(currentSettings)
+    const nextSettings = toggleNewTabWorkspacePin(
+      currentSettings,
+      workspace.id,
+      bookmark.id,
+      { validBookmarkIds: state.bookmarkMap.keys() }
+    )
+
+    await setLocalStorage({ [STORAGE_KEYS.newTabWorkspaceSettings]: nextSettings })
+    const pinned = nextSettings.workspaces
+      .find((item) => item.id === workspace.id)
+      ?.pinnedIds.includes(bookmark.id)
+    showToast({
+      type: 'success',
+      message: pinned
+        ? `已固定到 ${workspace.name} newtab。`
+        : `已从 ${workspace.name} newtab 取消固定。`
+    })
+  } catch (error) {
+    showToast({
+      type: 'error',
+      message: error instanceof Error ? `固定失败：${error.message}` : '固定到 newtab 失败，请稍后重试。'
+    })
+  } finally {
+    setPopupActionPending('pin-newtab', bookmark.id, false)
+    renderSmartClassifier()
+  }
 }
 
 async function finishSmartSave({ message, closeModal = true }) {

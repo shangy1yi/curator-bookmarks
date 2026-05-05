@@ -315,3 +315,14 @@
 - 合并后验证：`git status --short --branch` 确认只新增 `Work documentation.md`
 - 是否需要回到 agent worktree 修复：否
 
+## Agent: agent/extension-modernization-20260506-popup
+
+- 负责范围：popup 保存搜索、当前页面快速操作、popup 相关测试与文档；未修改 options/newtab UI。
+- 修复/新增：在 popup 搜索区新增保存搜索列表，可保存当前查询、复用已保存查询、删除保存项；读取失败时显示可理解错误，不阻断搜索。
+- 修复/新增：当前页面卡片区分已收藏/未收藏；已收藏显示所在路径并提供打开所在文件夹、编辑、固定/取消固定到 newtab 当前 workspace；未收藏显示快速保存与智能分类入口。
+- UI/UX：保存搜索以轻量 chip 呈现，当前页操作压缩在原 smart card 内，空态和错误态保留恢复动作。
+- 性能：saved search 在书签首屏数据完成后异步读取；未引入 dashboard/options 预加载；newtab 固定仅写入现有 workspace storage。
+- 隐私影响：新增数据仅使用既有 `curatorBookmarkSavedSearches` 与 `curatorBookmarkNewTabWorkspaceSettings` 本地 storage；不上传书签、查询或当前页数据。
+- 文件：`src/popup/popup.html`、`src/popup/dom.ts`、`src/popup/state.ts`、`src/popup/popup.ts`、`src/popup/popup.css`、`tests/popup-search-empty-state.test.js`、`tests/popup-search-layout.test.js`、`Work documentation.md`。
+- 测试：`npm run typecheck` 通过；`npm run test:build && node --test .tmp-test/tests/popup-*.test.js` 通过，55 个 popup 相关测试中 50 通过、5 个因未构建 dist 跳过。
+- 风险：popup 直接写入 newtab workspace storage，集成时如 shared/newtab workspace schema 发生冲突，需要由集成方对齐；固定按钮当前采用 toggle 行为，文案成功态会区分固定或取消固定。
