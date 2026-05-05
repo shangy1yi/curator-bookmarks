@@ -7,7 +7,7 @@ import {
   findBookmarksBar
 } from '../shared/bookmark-tree.js'
 import { getLocalStorage, setLocalStorage } from '../shared/storage.js'
-import type { ExtractedBookmarkData, FolderRecord } from '../shared/types.js'
+import type { BookmarkRecord, ExtractedBookmarkData, FolderRecord } from '../shared/types.js'
 import type {
   BookmarkTagExtraction,
   BookmarkTagIndex,
@@ -127,6 +127,7 @@ const SETTINGS_SAVE_DEBOUNCE_MS = 260
 const FAVICON_ACCENT_SAVE_DEBOUNCE_MS = 900
 const EAGER_FAVICON_LIMIT = 40
 const HIGH_PRIORITY_FAVICON_LIMIT = 12
+const FAVICON_ACCENT_EXTRACTION_INITIAL_BUDGET = 48
 const BACKGROUND_MEDIA_DB_NAME = 'curatorNewTabBackgroundMedia'
 const BACKGROUND_MEDIA_STORE = 'media'
 const BACKGROUND_URL_CACHE_KEY = 'urlImage'
@@ -504,6 +505,7 @@ let bookmarkChangeRefreshTimer = 0
 let bookmarkChangeRefreshInFlight = false
 let bookmarkChangeRefreshQueued = false
 let dashboardFrameReadyTimeout = 0
+let preloadedBackgroundSettings: typeof DEFAULT_BACKGROUND_SETTINGS | null = null
 let bookmarkDragSlotRects = new Map<string, DOMRect>()
 let bookmarkDragSlotOrderIds: string[] = []
 let dashboardReturnFocusTarget: HTMLElement | null = null
@@ -789,7 +791,7 @@ function shouldFocusSearchFromKeydown(event: KeyboardEvent): boolean {
     return false
   }
 
-  return event.key === '/' || (event.key.length === 1 && Boolean(event.key.trim()))
+  return event.key === '/'
 }
 
 function bindTimeSettingsEvents(): void {
@@ -1152,6 +1154,8 @@ async function updateSelectedFolders(
   const previousScrollTop = preserveCandidateScroll && candidateList instanceof HTMLElement
     ? candidateList.scrollTop
     : 0
+  const previousSettings = state.folderSettings
+  const previousSections = [...state.folderSections]
 
   state.folderSettings = normalizeFolderSettings({
     ...state.folderSettings,
@@ -1160,7 +1164,21 @@ async function updateSelectedFolders(
   state.folderSections = buildNewTabFolderSections(state.rootNode, state.folderSettings)
   refreshDerivedBookmarkState()
 
-  await saveFolderSettings()
+  try {
+    await saveFolderSettings()
+  } catch (error) {
+    state.folderSettings = previousSettings
+    state.folderSections = previousSections
+    refreshDerivedBookmarkState()
+    render()
+    syncFolderSettingsControls()
+    applyFolderSettings()
+    updateClockText()
+    setSettingsSaveStatus('error', '来源保存失败，已恢复到上次已保存状态')
+    console.warn('新标签页来源设置保存失败，已回滚。', error)
+    return
+  }
+
   render()
   syncFolderSettingsControls()
   applyFolderSettings()
@@ -1431,6 +1449,7 @@ function openSettingsDrawer(options?: { focusFirstControl?: boolean }): void {
   settingsDrawer?.removeAttribute('inert')
   settingsTrigger?.setAttribute('aria-expanded', 'true')
   document.body.classList.add('settings-open')
+  setSettingsModalBackgroundInert(true)
   if (focusFirstControl) {
     window.requestAnimationFrame(() => {
       focusFirstSettingsDrawerControl()
@@ -1467,11 +1486,33 @@ function closeSettingsDrawer(): void {
   settingsDrawer?.setAttribute('inert', '')
   settingsTrigger?.setAttribute('aria-expanded', 'false')
   document.body.classList.remove('settings-open')
+  setSettingsModalBackgroundInert(false)
   window.setTimeout(() => {
     settingsDrawer?.classList.remove('is-closing')
     settingsBackdrop?.classList.remove('is-closing')
   }, 260)
   restoreSettingsDrawerFocus()
+}
+
+function setSettingsModalBackgroundInert(inert: boolean): void {
+  const backgroundElements = [
+    root,
+    settingsTrigger instanceof HTMLElement ? settingsTrigger : null,
+    dashboardTrigger instanceof HTMLElement ? dashboardTrigger : null
+  ]
+
+  for (const element of backgroundElements) {
+    if (!element) {
+      continue
+    }
+    if (inert) {
+      element.setAttribute('inert', '')
+      element.setAttribute('aria-hidden', 'true')
+    } else {
+      element.removeAttribute('inert')
+      element.removeAttribute('aria-hidden')
+    }
+  }
 }
 
 function isSettingsDrawerOpen(): boolean {
@@ -2696,7 +2737,7 @@ async function toggleActiveMenuBookmarkPin(): Promise<void> {
     state.pendingDeleteBookmarkId = ''
     await saveNewTabActivity()
     state.menuError = ''
-    state.menuStatus = pinned ? '已取消固定' : '已固定到常用'
+    state.menuStatus = pinned ? '已取消固定' : '已固定到 Curator 常用'
     render()
     updateClockText()
     renderBookmarkMenu({ focusFirst: false, focusAction: 'toggle-pin' })
@@ -2986,11 +3027,10 @@ async function refreshNewTab(): Promise<void> {
   render()
 
   try {
-    const [tree, stored] = await Promise.all([
+    const [tree, stored, preloadedBackground] = await Promise.all([
       getBookmarkTree(),
       getLocalStorage([
         STORAGE_KEYS.newTabCustomIcons,
-        STORAGE_KEYS.newTabBackgroundSettings,
         STORAGE_KEYS.newTabSearchSettings,
         STORAGE_KEYS.newTabIconSettings,
         STORAGE_KEYS.newTabFaviconAccentCache,
@@ -3000,7 +3040,8 @@ async function refreshNewTab(): Promise<void> {
         STORAGE_KEYS.newTabActivity,
         STORAGE_KEYS.bookmarkTagIndex,
         STORAGE_KEYS.contentSnapshotIndex
-      ])
+      ]),
+      backgroundPreloadPromise
     ])
     const rootNode = tree[0] || null
     const folderData = extractBookmarkData(rootNode)
@@ -3022,7 +3063,7 @@ async function refreshNewTab(): Promise<void> {
     state.customIcons = normalizeCustomIcons(stored[STORAGE_KEYS.newTabCustomIcons])
     state.faviconAccentCache = normalizeFaviconAccentCache(stored[STORAGE_KEYS.newTabFaviconAccentCache])
     state.activity = normalizeNewTabActivity(stored[STORAGE_KEYS.newTabActivity], state.allBookmarks)
-    state.backgroundSettings = normalizeBackgroundSettings(stored[STORAGE_KEYS.newTabBackgroundSettings])
+    state.backgroundSettings = preloadedBackground || state.backgroundSettings
     state.searchSettings = normalizeSearchSettings(stored[STORAGE_KEYS.newTabSearchSettings])
     state.iconSettings = normalizeIconSettings(stored[STORAGE_KEYS.newTabIconSettings])
     state.generalSettings = normalizeGeneralSettings(stored[STORAGE_KEYS.newTabGeneralSettings])
@@ -3048,16 +3089,19 @@ async function refreshNewTab(): Promise<void> {
   }
 }
 
-async function preloadBackgroundSettings(): Promise<void> {
+async function preloadBackgroundSettings(): Promise<typeof DEFAULT_BACKGROUND_SETTINGS | null> {
   try {
     const stored = await getLocalStorage([STORAGE_KEYS.newTabBackgroundSettings])
     state.backgroundSettings = normalizeBackgroundSettings(stored[STORAGE_KEYS.newTabBackgroundSettings])
+    preloadedBackgroundSettings = state.backgroundSettings
     setWallpaperPlaceholderColor(state.backgroundSettings.color)
     syncBackgroundSettingsControls()
-    await applyBackgroundSettings()
+    void applyBackgroundSettings()
+    return state.backgroundSettings
   } catch (error) {
     console.warn('新标签页背景预加载失败。', error)
     markWallpaperReady()
+    return preloadedBackgroundSettings
   }
 }
 
@@ -3738,6 +3782,8 @@ function createSearchWidget(): HTMLElement | null {
 
   const suggestionsHint = document.createElement('div')
   suggestionsHint.className = 'newtab-search-hint'
+  suggestionsHint.setAttribute('role', 'status')
+  suggestionsHint.setAttribute('aria-live', 'polite')
   suggestionsHint.hidden = true
 
   suggestionsPanel.append(suggestionsHeading, suggestions, suggestionsHint)
@@ -3979,7 +4025,7 @@ function createSearchWidget(): HTMLElement | null {
     const button = document.createElement('button')
     button.className = 'newtab-search-web-hint'
     button.type = 'button'
-    button.textContent = `未找到书签，按 Enter 用 ${getSearchEngineDisplayName()} 搜索`
+    button.textContent = `未找到书签；按 Enter 仅在本页用 ${getSearchEngineDisplayName()} 搜索网页`
     button.title = `用 ${getSearchEngineDisplayName()} 搜索「${query}」`
     button.setAttribute('aria-label', button.textContent)
     button.addEventListener('pointerdown', (event) => {
@@ -4271,7 +4317,7 @@ function normalizeNewTabContentSnapshotRecord(raw: unknown, fallbackBookmarkId: 
     hasFullText: source.hasFullText === true,
     fullTextBytes: Number(source.fullTextBytes) || 0,
     fullTextStorage,
-    fullText: fullTextStorage === 'local' ? normalizeNewTabSnapshotText(source.fullText) : undefined,
+    fullText: undefined,
     fullTextRef: fullTextStorage === 'idb' ? String(source.fullTextRef || snapshotId || '').trim() : undefined,
     warnings: normalizeNewTabSnapshotTextList(source.warnings, 8)
   }
@@ -4359,9 +4405,8 @@ function openBookmarkSuggestion(suggestion: SearchBookmarkSuggestion): void {
     return
   }
 
-  void recordBookmarkOpen(bookmark).finally(() => {
-    openSearchTarget(suggestion.url)
-  })
+  void recordBookmarkOpen(bookmark)
+  openSearchTarget(suggestion.url)
 }
 
 function createClockWidget(): HTMLElement | null {
@@ -4586,7 +4631,7 @@ function createEmptyFolderState(section: NewTabFolderSection): HTMLElement {
 
   const copy = document.createElement('p')
   copy.className = 'bookmark-folder-empty'
-  copy.textContent = '此文件夹还没有书签。你可以先添加一个书签，或改用已有的非空来源。'
+  copy.textContent = '此文件夹还没有书签。你可以先添加一个书签，或改用已有的非空来源；选择来源只改变展示，不会移动或删除书签。'
 
   const actions = document.createElement('div')
   actions.className = 'bookmark-folder-empty-actions'
@@ -4720,7 +4765,7 @@ function createPortalPanel(): HTMLElement | null {
 }
 
 function hasPortalOverviewSignal(overview: PortalOverview): boolean {
-  return overview.bookmarkCount > 0 || overview.folderCount > 0 || overview.openedTodayCount > 0
+  return overview.openedTodayCount > 0 || overview.addedTodayCount > 0
 }
 
 function createPortalOverview(
@@ -4747,15 +4792,26 @@ function createPortalOverview(
 
   const stats = document.createElement('div')
   stats.className = 'newtab-portal-stats'
-  stats.append(
-    createPortalStat('书签', overview.bookmarkCount),
-    createPortalStat('来源', overview.folderCount),
-    createPortalStat('今日打开', overview.openedTodayCount),
-    createPortalStat('今日新增', overview.addedTodayCount)
-  )
+  stats.append(...createPortalStats(overview))
+  if (stats.childElementCount) {
+    section.appendChild(stats)
+  }
 
-  section.append(heading, stats)
+  section.prepend(heading)
   return section
+}
+
+function createPortalStats(overview: PortalOverview): HTMLElement[] {
+  const stats: HTMLElement[] = []
+
+  if (overview.openedTodayCount > 0) {
+    stats.push(createPortalStat('今日打开', overview.openedTodayCount))
+  }
+  if (overview.addedTodayCount > 0) {
+    stats.push(createPortalStat('今日新增', overview.addedTodayCount))
+  }
+
+  return stats
 }
 
 function createPortalSummaryText(
@@ -4766,7 +4822,7 @@ function createPortalSummaryText(
   }
 ): string {
   if (options.hasQuickAccess) {
-    return '常用和最近入口已整理'
+    return 'Curator 常用和新近添加已整理'
   }
 
   if (overview.addedTodayCount > 0) {
@@ -4794,7 +4850,7 @@ function createPortalStat(label: string, value: number): HTMLElement {
 
 function createQuickAccessPanel(): HTMLElement | null {
   const { frequentItems, recentItems } = getPortalQuickAccessItems({
-    bookmarks: state.allBookmarks,
+    bookmarks: state.bookmarks,
     pinnedIds: state.activity.pinnedIds,
     records: state.activity.records,
     now: Date.now(),
@@ -4816,13 +4872,13 @@ function createQuickAccessPanel(): HTMLElement | null {
 
   const panel = document.createElement('section')
   panel.className = 'newtab-quick-access'
-  panel.setAttribute('aria-label', '常用和最近书签')
+  panel.setAttribute('aria-label', 'Curator 常用和新近添加书签')
 
   if (frequentQuickAccessItems.length) {
-    panel.appendChild(createQuickAccessGroup('常用', frequentQuickAccessItems))
+    panel.appendChild(createQuickAccessGroup('Curator 常用', frequentQuickAccessItems))
   }
   if (recentQuickAccessItems.length) {
-    panel.appendChild(createQuickAccessGroup('最近', recentQuickAccessItems))
+    panel.appendChild(createQuickAccessGroup('新近添加', recentQuickAccessItems))
   }
 
   return panel
@@ -4956,7 +5012,7 @@ function createBookmarkTile(
   icon.addEventListener('error', () => {
     iconShell.classList.add('favicon-missing')
   })
-  if (!customIcon) {
+  if (!customIcon && renderIndex < FAVICON_ACCENT_EXTRACTION_INITIAL_BUDGET) {
     icon.addEventListener('load', () => {
       handleFaviconLoaded(icon, item, String(bookmark.id), url)
     }, { once: true })
@@ -5092,9 +5148,8 @@ function bindBookmarkNavigation(
       return
     }
 
-    void recordBookmarkOpen(bookmark).finally(() => {
-      window.location.assign(url)
-    })
+    void recordBookmarkOpen(bookmark)
+    window.location.assign(url)
   })
 }
 
@@ -5200,13 +5255,32 @@ function refreshDerivedBookmarkState(): void {
   state.allBookmarks = buildAllBookmarks(state.rootNode)
   state.allBookmarkMap = new Map(state.allBookmarks.map((bookmark) => [String(bookmark.id), bookmark]))
   state.searchIndex = buildNewTabSearchIndex({
-    bookmarks: state.folderData?.bookmarks || extractBookmarkData(state.rootNode).bookmarks,
+    bookmarks: getVisibleBookmarkRecords(),
     tagIndex: state.bookmarkTagIndex,
     snapshotIndex: state.searchSnapshotIndex
   })
   state.preparedSearchIndex = prepareNewTabSearchIndex(state.searchIndex)
   searchSuggestionCache.clear()
   naturalSearchSuggestionCache.clear()
+}
+
+function getVisibleBookmarkRecords(): BookmarkRecord[] {
+  const folderData = state.folderData || extractBookmarkData(state.rootNode)
+  const records: BookmarkRecord[] = []
+  const seenIds = new Set<string>()
+
+  for (const bookmark of state.bookmarks) {
+    const bookmarkId = String(bookmark.id || '').trim()
+    const record = bookmarkId ? folderData.bookmarkMap.get(bookmarkId) : null
+    if (!record || seenIds.has(record.id)) {
+      continue
+    }
+
+    records.push(record)
+    seenIds.add(record.id)
+  }
+
+  return records
 }
 
 function getBookmarkById(bookmarkId: string): chrome.bookmarks.BookmarkTreeNode | null {
@@ -5399,11 +5473,11 @@ function renderBookmarkMenu({ focusFirst = true, focusAction = '' } = {}): void 
   actionList.setAttribute('aria-label', '书签操作')
   actionList.addEventListener('keydown', handleMenuActionsKeydown)
   const bookmarkLabel = getBookmarkActionLabelContext(bookmark)
-  const pinLabel = isActiveMenuBookmarkPinned() ? '取消固定书签' : '固定书签到常用'
+  const pinLabel = isActiveMenuBookmarkPinned() ? '取消固定书签' : '固定书签到 Curator 常用'
   const deleteLabel = state.pendingDeleteBookmarkId === String(bookmark.id) ? '确认删除书签' : '删除书签'
   actionList.append(
     createMenuAction(
-      isActiveMenuBookmarkPinned() ? '取消固定' : '固定到常用',
+      isActiveMenuBookmarkPinned() ? '取消固定' : '固定到 Curator 常用',
       'pin',
       toggleActiveMenuBookmarkPin,
       { actionId: 'toggle-pin', ariaLabel: `${pinLabel}：${bookmarkLabel}` }
@@ -7107,7 +7181,9 @@ function createFolderCandidateControls(): HTMLElement[] {
   if (!candidates.length) {
     const empty = document.createElement('p')
     empty.className = 'folder-source-empty'
-    empty.textContent = '没有匹配的文件夹'
+    empty.setAttribute('role', 'status')
+    empty.setAttribute('aria-live', 'polite')
+    empty.textContent = '没有匹配的文件夹。请清空搜索词，或选择其他来源文件夹。'
     return [empty]
   }
 
@@ -7358,9 +7434,39 @@ function scheduleIconSettingsSave(): void {
 function commitIconSettings(nextSettings: IconSettings): void {
   state.iconSettings = withDetectedIconPreset(nextSettings)
   scheduleIconSettingsSave()
-  scheduleRender({ updateClock: true })
+  applyIconSettingsLive()
   syncIconSettingsControls()
   updateAllSettingRangeVisuals()
+}
+
+function applyIconSettingsLive(): void {
+  const content = root?.querySelector<HTMLElement>('.newtab-content')
+  const page = root?.querySelector<HTMLElement>('.newtab-page')
+  if (!content) {
+    scheduleRender({ updateClock: true })
+    return
+  }
+
+  const gridSettings = {
+    ...state.iconSettings,
+    columns: getResponsiveIconColumns(state.iconSettings)
+  }
+  content.style.setProperty('--icon-page-width', `${getIconPageWidthPx(state.iconSettings.pageWidth)}px`)
+  content.style.setProperty('--icon-column-gap', `${getIconGapPx(state.iconSettings.columnGap)}px`)
+  content.style.setProperty('--icon-row-gap', `${getIconRowGapPx(state.iconSettings.rowGap)}px`)
+  content.style.setProperty('--icon-folder-gap', `${getFolderGapPx(state.iconSettings.folderGap)}px`)
+  content.style.setProperty('--icon-tile-width', `${getEffectiveIconTileWidthPx(state.iconSettings)}px`)
+  content.style.setProperty('--icon-shell-size', `${state.iconSettings.iconShellSize}px`)
+  content.style.setProperty('--icon-fixed-grid-width', `${getFixedIconGridWidthPx(gridSettings)}px`)
+  content.style.setProperty('--icon-columns', String(gridSettings.columns))
+  content.style.setProperty('--icon-title-lines', String(state.iconSettings.titleLines))
+  content.dataset.iconLayoutMode = state.iconSettings.layoutMode
+  content.dataset.iconShowTitles = String(state.iconSettings.showTitles)
+  content.dataset.iconVerticalCenter = String(state.iconSettings.verticalCenter)
+  if (page instanceof HTMLElement) {
+    page.dataset.iconVerticalCenter = String(state.iconSettings.verticalCenter)
+  }
+  scheduleAdaptiveNewTabLayoutUpdate()
 }
 
 function withDetectedIconPreset(settings: IconSettings): IconSettings {
@@ -7470,7 +7576,7 @@ async function saveSettingsWithFeedback(values: Record<string, unknown>): Promis
     await setLocalStorage(values)
     setSettingsSaveStatus('saved', '已保存')
   } catch (error) {
-    setSettingsSaveStatus('error', '保存失败')
+    setSettingsSaveStatus('error', '保存失败，本次调整仅临时生效；刷新后会恢复到上次已保存状态')
     throw error
   }
 }

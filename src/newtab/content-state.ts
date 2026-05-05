@@ -91,6 +91,7 @@ export interface NewTabPreparedSearchIndex {
   entries: NewTabSearchIndexEntry[]
   entriesById: Map<string, NewTabSearchIndexEntry>
   popupSearchEntries: NewTabPopupSearchSourceEntry[]
+  popupSearchBookmarks?: PopupSearchBookmark[]
   supportsPopupSearch: boolean
 }
 
@@ -602,9 +603,7 @@ export async function getNaturalSearchBookmarkSuggestionsFromIndex(
   } = await import('../popup/natural-search.js')
 
   const plan = buildLocalNaturalSearchPlan(query, options.now)
-  const popupBookmarks: PopupSearchBookmark[] = preparedIndex.popupSearchEntries.map((entry) =>
-    indexBookmarkForSearch(entry.bookmark, entry.tagRecord, entry.snapshotRecord, { includeFullText: false })
-  )
+  const popupBookmarks = getPreparedPopupSearchBookmarks(preparedIndex, indexBookmarkForSearch)
   const bookmarks = filterBookmarksByNaturalDateRange(popupBookmarks, plan)
   const resultSets: NaturalSearchResultSet[] = []
   const seenQueries = new Set<string>()
@@ -639,6 +638,22 @@ export async function getNaturalSearchBookmarkSuggestionsFromIndex(
     .map((result) => getSuggestionFromPopupResult(preparedIndex, result.id, result.score))
     .filter((suggestion): suggestion is SearchBookmarkSuggestion => Boolean(suggestion))
     .slice(0, limit)
+}
+
+function getPreparedPopupSearchBookmarks(
+  index: NewTabPreparedSearchIndex,
+  indexBookmarkForSearch: typeof import('../popup/search.js').indexBookmarkForSearch
+): PopupSearchBookmark[] {
+  if (index.popupSearchBookmarks) {
+    return index.popupSearchBookmarks
+  }
+
+  index.popupSearchBookmarks = index.popupSearchEntries.map((entry) =>
+    indexBookmarkForSearch(entry.bookmark, entry.tagRecord, entry.snapshotRecord, {
+      includeFullText: false
+    })
+  )
+  return index.popupSearchBookmarks
 }
 
 function getSuggestionFromPopupResult(

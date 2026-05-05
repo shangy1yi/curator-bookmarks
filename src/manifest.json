@@ -19,7 +19,7 @@
     "webNavigation",
     "webRequest"
   ],
-  "optional_host_permissions": [
+  "host_permissions": [
     "http://*/*",
     "https://*/*"
   ],
