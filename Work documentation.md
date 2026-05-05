@@ -603,3 +603,104 @@
 ### 已知风险
 
 - 新增 section key：`privacy`、`tags`，后续若调整 options sidebar 或 `SECTION_META` 必须保留这些入口。
+
+## Final Summary
+
+### 优化了哪些原有项目
+
+- Popup：搜索区新增保存搜索闭环，当前页面卡片改为收藏状态感知入口。
+- Newtab：`Ctrl/Cmd+K` 从直接打开 dashboard 调整为打开命令工作台，dashboard 仍保留独立入口。
+- Settings/options：侧栏信息架构补充隐私与权限、标签管理两个核心管理入口。
+- Shared：标签治理逻辑从 UI 中抽象为共享纯函数，供 options 和后续界面复用。
+- Tests：补充 popup 轻索引、newtab 健康、saved search、tag management、options navigation 的回归覆盖。
+
+### 新增/创新了哪些功能
+
+- Popup 保存搜索：保存、复用、删除常用查询。
+- Popup 当前页快速操作：已收藏/未收藏状态、打开所在文件夹、编辑、快速保存、智能分类。
+- Popup 固定到 newtab：当前页可固定/取消固定到 active workspace。
+- Newtab 命令工作台：可见入口和 `Ctrl/Cmd+K`，聚合书签搜索、workspace、speed dial、dashboard、设置和清理入口。
+- Options 标签管理中心：标签统计、频率、手动/AI 来源、示例书签、重命名、删除。
+- Options 隐私与权限中心：集中解释权限、本地优先、AI/Jina/可用性联网边界、备份敏感字段处理。
+
+### popup 变化
+
+- 新增 `saved-searches` 轻量 UI，异步读取 `curatorBookmarkSavedSearches`，不阻塞首屏。
+- 当前页 smart card 显示收藏状态和路径，并提供文件夹、编辑、newtab 固定、保存、智能分类操作。
+
+### newtab 变化
+
+- 新增命令工作台按钮；`Ctrl/Cmd+K` 打开命令工作台。
+- 命令工作台支持书签和管理命令搜索，保留键盘导航和空结果提示。
+- 健康摘要继续使用本地轻量指标，不读取全文作为首屏健康信号。
+
+### settings/options 变化
+
+- 新增 `#privacy` 和 `#tags` section。
+- 数据与备份说明补强恢复范围、API Key 排除和 Chrome 书签恢复边界。
+- 标签管理只操作本地标签索引，不直接改 Chrome 书签树。
+
+### 数据模型 / 索引 / 存储变化
+
+- 复用既有 `curatorBookmarkSavedSearches`。
+- 复用既有 `curatorBookmarkNewTabWorkspaceSettings`。
+- 复用既有 `curatorBookmarkTagIndex`。
+- 新增共享 `src/shared/tag-management.ts`，不新增持久化 key。
+
+### 权限 / 隐私 / 安全变化
+
+- 未新增 manifest 权限。
+- 新功能不引入广告、追踪或默认搜索引擎修改。
+- 隐私中心明确 AI/Jina/可用性检测等联网触发条件；API Key 仍不进入备份导出。
+
+### 功能完整度提升
+
+- 覆盖 popup 快速入口、newtab 工作台、settings 标签治理、隐私透明、搜索复用、书签健康入口。
+
+### UI 美观度提升
+
+- 保存搜索以 chip 呈现；newtab 命令工作台有独立可见入口；options 管理能力从侧栏可直接发现。
+
+### 性能优化
+
+- Popup 保存搜索异步加载。
+- Newtab 健康摘要继续使用本地轻量数据。
+- Options 标签统计仅在标签管理 section 激活/刷新时计算。
+
+### UX 体验优化
+
+- 常用查询可保存复用。
+- 当前页保存与整理路径更短。
+- 隐私/权限解释从分散文案变为集中入口。
+- 标签治理从单条编辑扩展到全局管理。
+
+### 测试、Lint、Typecheck、Build 结果
+
+- install：`npm install` 通过。
+- lint：项目 `lint` 脚本等同 `npm run typecheck`，已通过。
+- typecheck：`npm run typecheck` 通过。
+- test：`npm test` 通过，421 passed，5 skipped，0 failed。
+- version：`npm run check:version` 通过，`1.4.26`。
+- build：`npm run build` 通过，生成 `dist/`。
+
+### 需要用户手动测试的重点
+
+- Popup 保存搜索保存/复用/删除，以及当前页已收藏和未收藏两种状态。
+- Popup 固定到 newtab 当前 workspace 的 toggle 行为。
+- Newtab `Ctrl/Cmd+K` 命令工作台、书签命令、清理中心/设置跳转。
+- Options `隐私与权限` 和 `标签管理` 两个新 section。
+- 标签重命名/删除前后本地标签索引是否符合预期。
+
+### 已知风险或后续建议
+
+- Popup 固定到 newtab 直接写 workspace settings；后续如 workspace schema 改动需同步。
+- 标签删除是本地标签索引操作，建议用户大批量操作前先导出标签数据或完整备份。
+- 本轮未做浏览器实机截图验证，最终发布前建议加载 `dist/` 手动走 popup/newtab/options。
+
+### 当前集成分支
+
+- `integration/extension-modernization-20260506`
+
+### 是否合并 main
+
+- 否。等待用户手动测试和明确批准。

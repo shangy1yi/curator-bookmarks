@@ -505,7 +505,7 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
   assert.match(dashboardTrigger, /href="#dashboard"/)
   assert.match(dashboardTrigger, /aria-controls="newtab-dashboard-overlay"/)
   assert.match(dashboardTrigger, />\s*打开书签仪表盘\s*<\/span>/)
-  assert.match(html, /class="dashboard-shortcut-hint"[^>]*>\s*Ctrl\/Cmd\+K 快捷打开书签仪表盘\s*<\/span>/)
+  assert.match(html, /class="dashboard-shortcut-hint"[^>]*>\s*Ctrl\/Cmd\+K 打开命令工作台\s*<\/span>/)
   assert.match(dashboardOverlay, /\bhidden\b/)
   assert.match(dashboardOverlay, /role="dialog"/)
   assert.match(dashboardOverlay, /aria-modal="true"/)
@@ -965,8 +965,10 @@ test('newtab compact viewport preserves dashboard trigger label while clearing t
   assert.match(compactRule, /\.dashboard-trigger\s*\{[\s\S]*?min-width:\s*112px[\s\S]*?padding:\s*0\s+10px/)
   assert.match(compactRule, /\.dashboard-trigger span\s*\{[\s\S]*?font-size:\s*11px/)
   assert.match(compactRule, /\.dashboard-shortcut-hint\s*\{[\s\S]*?top:\s*58px[\s\S]*?max-width:\s*min\(226px,\s*calc\(100vw - 24px\)\)/)
-  assert.doesNotMatch(compactRule, /\.dashboard-trigger\s*\{[\s\S]*?width:\s*40px/)
-  assert.doesNotMatch(compactRule, /\.dashboard-trigger span\s*\{[\s\S]*?clip-path:\s*inset\(50%\)/)
+  const compactDashboardTriggerRule = compactRule.match(/\.dashboard-trigger\s*\{[\s\S]*?\}/)?.[0] || ''
+  const compactDashboardTriggerSpanRule = compactRule.match(/\.dashboard-trigger span\s*\{[\s\S]*?\}/)?.[0] || ''
+  assert.doesNotMatch(compactDashboardTriggerRule, /width:\s*40px/)
+  assert.doesNotMatch(compactDashboardTriggerSpanRule, /clip-path:\s*inset\(50%\)/)
 })
 
 test('newtab bookmark tiles match the frosted overview card surface', () => {
