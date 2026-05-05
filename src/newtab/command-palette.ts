@@ -99,16 +99,17 @@ export function buildCommandPaletteItems({
 }
 
 export function shouldOpenCommandPaletteFromKeydown(event: KeyboardEventLike): boolean {
+  void event
+  return false
+}
+
+export function shouldOpenDashboardFromKeydown(event: KeyboardEventLike): boolean {
   if (event.defaultPrevented || event.altKey || event.shiftKey || isEditableEventTarget(event.target)) {
     return false
   }
 
   const key = String(event.key || '')
-  if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === 'k') {
-    return true
-  }
-
-  return false
+  return (event.metaKey || event.ctrlKey) && key.toLowerCase() === 'k'
 }
 
 function createBookmarkCommand(entry: NewTabSearchIndexEntry): CommandPaletteItem {
@@ -130,8 +131,8 @@ function createStaticCommands(): CommandPaletteItem[] {
       id: 'settings:newtab',
       type: 'settings',
       title: '打开新标签页设置',
-      detail: '管理场景、模块、背景和搜索栏',
-      keywords: 'settings 设置 newtab 新标签页 场景 模块',
+      detail: '管理场景、固定入口、背景和搜索栏',
+      keywords: 'settings 设置 newtab 新标签页 场景 固定入口',
       score: 0
     },
     {

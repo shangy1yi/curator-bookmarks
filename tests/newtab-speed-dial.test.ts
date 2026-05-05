@@ -36,11 +36,7 @@ test('limits speed dial output and supports bookmark maps', () => {
 })
 
 test('returns clear empty state and pin action copy', () => {
-  assert.deepEqual(createSpeedDialEmptyState('工作').actions.map((action) => action.id), [
-    'search',
-    'bookmark-menu',
-    'settings'
-  ])
+  assert.doesNotMatch(createSpeedDialEmptyState('工作').detail, /搜索书签|右键固定|管理场景/)
   assert.equal(getSpeedDialPinActionCopy(false, '工作').label, '固定到工作')
   assert.equal(getSpeedDialPinActionCopy(true, '工作').status, '已从工作取消固定')
   assert.equal(isSpeedDialBookmarkPinned(['1', '2'], '2'), true)

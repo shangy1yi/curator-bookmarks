@@ -357,10 +357,12 @@ test('newtab modernized bookmark modules are visible and settings-controlled', (
   const css = readProjectFile('src/newtab/newtab.css')
 
   assert.match(html, /id="settings-workspaces-title"/)
-  assert.match(html, /id="settings-modules-title"/)
   assert.match(html, /id="workspace-settings-list"/)
-  assert.match(html, /id="newtab-module-settings-list"/)
-  assert.match(html, /id="newtab-privacy-notice"/)
+  assert.match(html, /id="newtab-speed-dial-setting"/)
+  assert.match(html, /id="newtab-health-setting"/)
+  assert.doesNotMatch(html, /模块与隐私/)
+  assert.doesNotMatch(html, /快捷提示/)
+  assert.doesNotMatch(html, /隐私说明/)
   assert.match(script, /STORAGE_KEYS\.newTabWorkspaceSettings/)
   assert.match(script, /STORAGE_KEYS\.newTabModuleSettings/)
   assert.match(script, /createWorkspaceSwitcher\(\)/)
@@ -369,6 +371,7 @@ test('newtab modernized bookmark modules are visible and settings-controlled', (
   assert.match(script, /createCommandPaletteOverlay\(\)/)
   assert.match(css, /\.newtab-speed-dial,[\s\S]*?\.newtab-bookmark-health\s*\{/)
   assert.match(css, /\.newtab-command-palette\s*\{/)
+  assert.doesNotMatch(script, /createCommandHintBar\(\)/)
 })
 
 test('newtab pinning uses active workspace instead of legacy activity pins', () => {
@@ -470,7 +473,7 @@ test('newtab exposes a lazy options dashboard iframe route', () => {
 
   assert.match(dashboardTrigger, /href="#dashboard"/)
   assert.match(dashboardTrigger, /aria-controls="newtab-dashboard-overlay"/)
-  assert.match(dashboardTrigger, />\s*书签仪表盘\s*<\/span>/)
+  assert.match(dashboardTrigger, />\s*打开书签仪表盘\s*<\/span>/)
   assert.match(dashboardOverlay, /\bhidden\b/)
   assert.match(dashboardOverlay, /role="dialog"/)
   assert.match(dashboardOverlay, /aria-modal="true"/)

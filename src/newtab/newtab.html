@@ -21,7 +21,7 @@
           <path d="M6.5 4.5h11a1.5 1.5 0 0 1 1.5 1.5v13l-7-3.8L5 19V6a1.5 1.5 0 0 1 1.5-1.5Z"></path>
           <path d="M8.5 8.5h7M8.5 11.5h5"></path>
         </svg>
-        <span>书签仪表盘</span>
+        <span>打开书签仪表盘</span>
       </a>
       <button
         id="newtab-settings-trigger"
@@ -105,6 +105,11 @@
               <input id="general-open-bookmarks-new-tab" class="setting-switch-input" type="checkbox">
               <span class="setting-switch" aria-hidden="true"></span>
             </label>
+            <div
+              id="newtab-health-setting"
+              class="newtab-module-settings-list"
+              aria-label="书签健康模块"
+            ></div>
           </div>
         </section>
 
@@ -172,6 +177,11 @@
         <section class="settings-section" aria-labelledby="settings-workspaces-title">
           <h2 id="settings-workspaces-title">场景与固定入口</h2>
           <div class="settings-card">
+            <div
+              id="newtab-speed-dial-setting"
+              class="newtab-module-settings-list"
+              aria-label="场景与固定入口模块"
+            ></div>
             <div class="workspace-settings-summary">
               <span>当前场景</span>
               <strong id="workspace-active-name">默认</strong>
@@ -181,18 +191,6 @@
               class="workspace-settings-list"
               aria-label="场景列表"
             ></div>
-          </div>
-        </section>
-
-        <section class="settings-section" aria-labelledby="settings-modules-title">
-          <h2 id="settings-modules-title">模块与隐私</h2>
-          <div class="settings-card">
-            <div
-              id="newtab-module-settings-list"
-              class="newtab-module-settings-list"
-              aria-label="新标签页模块"
-            ></div>
-            <div id="newtab-privacy-notice" class="newtab-privacy-notice"></div>
           </div>
         </section>
 

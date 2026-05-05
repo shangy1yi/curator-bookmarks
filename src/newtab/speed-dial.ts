@@ -26,10 +26,6 @@ export interface BuildSpeedDialInput {
 export interface SpeedDialEmptyState {
   title: string
   detail: string
-  actions: Array<{
-    id: 'search' | 'settings' | 'bookmark-menu'
-    label: string
-  }>
 }
 
 export function buildSpeedDialItems({
@@ -70,12 +66,7 @@ export function buildSpeedDialItems({
 export function createSpeedDialEmptyState(workspaceName = '当前场景'): SpeedDialEmptyState {
   return {
     title: `${workspaceName}还没有固定书签`,
-    detail: '从书签卡片菜单或命令面板固定常用链接后，它们会出现在这里。',
-    actions: [
-      { id: 'search', label: '搜索书签' },
-      { id: 'bookmark-menu', label: '在书签上右键固定' },
-      { id: 'settings', label: '管理场景' }
-    ]
+    detail: '从书签卡片菜单固定常用链接后，它们会出现在这里。'
   }
 }
 

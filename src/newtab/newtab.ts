@@ -123,12 +123,11 @@ import {
 } from './bookmark-health.js'
 import {
   buildCommandPaletteItems,
-  shouldOpenCommandPaletteFromKeydown,
+  shouldOpenDashboardFromKeydown,
   type CommandPaletteItem
 } from './command-palette.js'
 import {
   buildNewTabModuleSettingRows,
-  buildNewTabPrivacyNotice,
   DEFAULT_NEW_TAB_MODULE_SETTINGS,
   normalizeNewTabModuleSettings,
   type NewTabModuleSettingKey,
@@ -396,7 +395,7 @@ interface QuickAccessItem {
 
 type MenuActionIcon = 'trash' | 'refresh' | 'save' | 'plus' | 'copy' | 'pin'
 type SettingsSaveState = 'idle' | 'saving' | 'saved' | 'error'
-type SettingsDrawerSection = 'folder' | 'workspaces' | 'modules'
+type SettingsDrawerSection = 'folder' | 'workspaces'
 
 interface LastDeletedBookmarkState {
   bookmark: chrome.bookmarks.BookmarkTreeNode
@@ -782,9 +781,9 @@ function handleDocumentKeydown(event: KeyboardEvent): void {
     return
   }
 
-  if (state.moduleSettings.commandHints && shouldOpenCommandPaletteFromKeydown(event) && event.key !== '/') {
+  if (shouldOpenDashboardFromKeydown(event)) {
     event.preventDefault()
-    openCommandPalette()
+    openDashboardRoute()
     return
   }
 
@@ -968,7 +967,10 @@ function bindFolderSettingsEvents(): void {
     .getElementById('workspace-settings-list')
     ?.addEventListener('input', handleWorkspaceSettingsInput)
   document
-    .getElementById('newtab-module-settings-list')
+    .getElementById('newtab-speed-dial-setting')
+    ?.addEventListener('change', handleModuleSettingsChange)
+  document
+    .getElementById('newtab-health-setting')
     ?.addEventListener('change', handleModuleSettingsChange)
 }
 
@@ -1531,15 +1533,10 @@ function openWorkspaceSettings(): void {
   openSettingsDrawer({ focusFirstControl: false, section: 'workspaces' })
 }
 
-function openModuleSettings(): void {
-  openSettingsDrawer({ focusFirstControl: false, section: 'modules' })
-}
-
 function focusSettingsSection(section: SettingsDrawerSection): void {
   const titleIdBySection: Record<SettingsDrawerSection, string> = {
     folder: 'settings-folder-title',
-    workspaces: 'settings-workspaces-title',
-    modules: 'settings-modules-title'
+    workspaces: 'settings-workspaces-title'
   }
   const targetSection = document.getElementById(titleIdBySection[section])?.closest('.settings-section')
   targetSection?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -4608,11 +4605,6 @@ function createBookmarkSections(sections: NewTabFolderSection[]): HTMLElement {
     view.appendChild(health)
   }
 
-  const commandHints = createCommandHintBar()
-  if (commandHints) {
-    view.appendChild(commandHints)
-  }
-
   const portal = createPortalPanel()
   if (portal) {
     view.appendChild(portal)
@@ -4706,7 +4698,7 @@ function getActiveWorkspaceName(): string {
 }
 
 function createWorkspaceSwitcher(): HTMLElement | null {
-  if (!state.moduleSettings.workspaces) {
+  if (!state.moduleSettings.speedDial) {
     return null
   }
 
@@ -4802,28 +4794,7 @@ function createSpeedDialEmptyPanel(workspaceName: string): HTMLElement {
   const detail = document.createElement('span')
   detail.textContent = emptyState.detail
   copy.append(title, detail)
-
-  const actions = document.createElement('div')
-  actions.className = 'newtab-speed-dial-empty-actions'
-
-  for (const action of emptyState.actions) {
-    const button = document.createElement('button')
-    button.className = 'newtab-button secondary'
-    button.type = 'button'
-    button.textContent = action.label
-    button.addEventListener('click', () => {
-      if (action.id === 'search') {
-        document.querySelector<HTMLInputElement>('.newtab-search-input')?.focus()
-        return
-      }
-      if (action.id === 'settings') {
-        openWorkspaceSettings()
-      }
-    })
-    actions.appendChild(button)
-  }
-
-  empty.append(copy, actions)
+  empty.appendChild(copy)
   return empty
 }
 
@@ -4914,34 +4885,8 @@ function createBookmarkHealthPanel(): HTMLElement | null {
   return section
 }
 
-function createCommandHintBar(): HTMLElement | null {
-  if (!state.moduleSettings.commandHints) {
-    return null
-  }
-
-  const bar = document.createElement('section')
-  bar.className = 'newtab-command-hints'
-  bar.setAttribute('aria-label', '快捷操作提示')
-
-  const paletteButton = document.createElement('button')
-  paletteButton.type = 'button'
-  paletteButton.textContent = 'Ctrl / Cmd + K'
-  paletteButton.addEventListener('click', openCommandPalette)
-
-  const searchHint = document.createElement('span')
-  searchHint.textContent = '/ 搜索书签'
-
-  const privacyButton = document.createElement('button')
-  privacyButton.type = 'button'
-  privacyButton.textContent = '隐私与模块'
-  privacyButton.addEventListener('click', openModuleSettings)
-
-  bar.append(paletteButton, searchHint, privacyButton)
-  return bar
-}
-
 function createCommandPaletteOverlay(): HTMLElement | null {
-  if (!state.commandPaletteOpen || !state.moduleSettings.commandHints) {
+  if (!state.commandPaletteOpen) {
     return null
   }
 
@@ -5117,7 +5062,7 @@ async function executeCommandPaletteItem(item: CommandPaletteItem | undefined): 
 
   closeCommandPalette()
   if (item.type === 'settings') {
-    openSettingsDrawer({ focusFirstControl: false, section: 'modules' })
+    openSettingsDrawer({ focusFirstControl: false, section: 'workspaces' })
     return
   }
 
@@ -5139,6 +5084,7 @@ async function switchNewTabWorkspace(workspaceId: string): Promise<void> {
 
   state.workspaceSettings = nextSettings
   await saveNewTabWorkspaceSettings()
+  syncWorkspaceSettingsControls()
   render()
   updateClockText()
 }
@@ -7749,7 +7695,6 @@ function syncFolderSettingsControls(): void {
 function syncNewTabModernSettingsControls(): void {
   syncWorkspaceSettingsControls()
   syncModuleSettingsControls()
-  syncPrivacyNoticeControls()
 }
 
 function syncWorkspaceSettingsControls(): void {
@@ -7793,66 +7738,44 @@ function syncWorkspaceSettingsControls(): void {
 }
 
 function syncModuleSettingsControls(): void {
-  const list = document.getElementById('newtab-module-settings-list')
-  if (!(list instanceof HTMLElement)) {
-    return
+  const containerIdByKey: Record<NewTabModuleSettingKey, string> = {
+    speedDial: 'newtab-speed-dial-setting',
+    health: 'newtab-health-setting'
   }
 
-  const rows = buildNewTabModuleSettingRows(state.moduleSettings).map((setting) => {
-    const label = document.createElement('label')
-    label.className = 'setting-row'
-    label.dataset.moduleSettingRow = setting.key
-
-    const copy = document.createElement('span')
-    copy.className = 'setting-label-stack'
-    const title = document.createElement('span')
-    title.textContent = setting.label
-    const detail = document.createElement('small')
-    detail.textContent = setting.description
-    copy.append(title, detail)
-
-    const input = document.createElement('input')
-    input.className = 'setting-switch-input'
-    input.type = 'checkbox'
-    input.checked = setting.enabled
-    input.dataset.moduleSettingToggle = setting.key
-
-    const switchVisual = document.createElement('span')
-    switchVisual.className = 'setting-switch'
-    switchVisual.setAttribute('aria-hidden', 'true')
-
-    label.append(copy, input, switchVisual)
-    return label
-  })
-
-  list.replaceChildren(...rows)
+  for (const setting of buildNewTabModuleSettingRows(state.moduleSettings)) {
+    const container = document.getElementById(containerIdByKey[setting.key])
+    if (container instanceof HTMLElement) {
+      container.replaceChildren(createModuleSettingRow(setting))
+    }
+  }
 }
 
-function syncPrivacyNoticeControls(): void {
-  const container = document.getElementById('newtab-privacy-notice')
-  if (!(container instanceof HTMLElement)) {
-    return
-  }
+function createModuleSettingRow(setting: ReturnType<typeof buildNewTabModuleSettingRows>[number]): HTMLLabelElement {
+  const label = document.createElement('label')
+  label.className = 'setting-row'
+  label.dataset.moduleSettingRow = setting.key
 
-  container.replaceChildren()
-  if (!state.moduleSettings.privacyNotice) {
-    container.hidden = true
-    return
-  }
-  container.hidden = false
+  const copy = document.createElement('span')
+  copy.className = 'setting-label-stack'
+  const title = document.createElement('span')
+  title.textContent = setting.label
+  const detail = document.createElement('small')
+  detail.textContent = setting.description
+  copy.append(title, detail)
 
-  const notice = buildNewTabPrivacyNotice()
-  const title = document.createElement('strong')
-  title.textContent = notice.title
-  const summary = document.createElement('p')
-  summary.textContent = notice.summary
-  const list = document.createElement('ul')
-  for (const bullet of notice.bullets) {
-    const item = document.createElement('li')
-    item.textContent = bullet
-    list.appendChild(item)
-  }
-  container.append(title, summary, list)
+  const input = document.createElement('input')
+  input.className = 'setting-switch-input'
+  input.type = 'checkbox'
+  input.checked = setting.enabled
+  input.dataset.moduleSettingToggle = setting.key
+
+  const switchVisual = document.createElement('span')
+  switchVisual.className = 'setting-switch'
+  switchVisual.setAttribute('aria-hidden', 'true')
+
+  label.append(copy, input, switchVisual)
+  return label
 }
 
 function handleWorkspaceSettingsClick(event: Event): void {

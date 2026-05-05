@@ -1132,8 +1132,7 @@ body.background-mask-enabled .newtab-background-mask {
 
 .newtab-workspaces,
 .newtab-speed-dial,
-.newtab-bookmark-health,
-.newtab-command-hints {
+.newtab-bookmark-health {
   width: 100%;
   min-width: 0;
   margin-bottom: 14px;
@@ -1162,8 +1161,7 @@ body.background-mask-enabled .newtab-background-mask {
 }
 
 .newtab-workspace-pill,
-.newtab-workspace-manage,
-.newtab-command-hints button {
+.newtab-workspace-manage {
   display: inline-flex;
   max-width: min(180px, 100%);
   min-height: 28px;
@@ -1196,9 +1194,7 @@ body.background-mask-enabled .newtab-background-mask {
 .newtab-workspace-pill:hover,
 .newtab-workspace-pill:focus-visible,
 .newtab-workspace-manage:hover,
-.newtab-workspace-manage:focus-visible,
-.newtab-command-hints button:hover,
-.newtab-command-hints button:focus-visible {
+.newtab-workspace-manage:focus-visible {
   border-color: rgba(245, 245, 247, 0.22);
   background: rgba(245, 245, 247, 0.08);
   color: var(--text);
@@ -1352,13 +1348,6 @@ body.background-mask-enabled .newtab-background-mask {
   line-height: 1.45;
 }
 
-.newtab-speed-dial-empty-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: end;
-  gap: 6px;
-}
-
 .newtab-health-grid {
   display: grid;
   min-width: 0;
@@ -1423,22 +1412,6 @@ body.background-mask-enabled .newtab-background-mask {
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-}
-
-.newtab-command-hints {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  color: rgba(245, 245, 247, 0.46);
-  font-size: 11px;
-  font-weight: 620;
-  line-height: 1.2;
-}
-
-.newtab-command-hints span {
-  padding: 0 2px;
-  white-space: nowrap;
 }
 
 .newtab-command-palette {
@@ -2610,40 +2583,6 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   padding: 0 10px;
   border-radius: 6px;
   font-size: 11px;
-}
-
-.newtab-privacy-notice {
-  display: grid;
-  gap: 8px;
-  margin: 8px 0 0;
-  padding: 10px 14px;
-  border: 1px solid rgba(245, 245, 247, 0.1);
-  border-radius: 7px;
-  background: rgba(245, 245, 247, 0.035);
-}
-
-.newtab-privacy-notice[hidden] {
-  display: none;
-}
-
-.newtab-privacy-notice strong {
-  color: rgba(245, 245, 247, 0.86);
-  font-size: 12px;
-  line-height: 1.3;
-}
-
-.newtab-privacy-notice p,
-.newtab-privacy-notice ul {
-  margin: 0;
-  color: rgba(245, 245, 247, 0.48);
-  font-size: 10px;
-  line-height: 1.55;
-}
-
-.newtab-privacy-notice ul {
-  display: grid;
-  gap: 4px;
-  padding-left: 16px;
 }
 
 .setting-row {
@@ -4281,14 +4220,6 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   .newtab-speed-dial-empty {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
-  }
-
-  .newtab-speed-dial-empty-actions {
-    justify-content: start;
-  }
-
-  .newtab-command-hints {
-    flex-wrap: wrap;
   }
 
   .newtab-command-palette {
