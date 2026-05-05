@@ -855,6 +855,25 @@ test('smart bookmark analysis result actions expose bookmark-specific labels', (
   assert.match(optionsSource, /data-ai-apply="\$\{escapeAttr\(result\.id\)\}"[\s\S]*?aria-label="\$\{escapeAttr\(applyLabel\)\}"/)
 })
 
+test('availability and smart analysis runs notify when finished', () => {
+  const optionsSource = readProjectFile('src/options/options.ts')
+  const messagesSource = readProjectFile('src/shared/messages.ts')
+
+  assert.match(optionsSource, /requestRuntimeNotification/)
+  assert.match(optionsSource, /notifyAvailabilityRunFinished\(\{[\s\S]*?stopped: availabilityState\.stopRequested/)
+  assert.match(optionsSource, /async function notifyAvailabilityRunFinished/)
+  assert.match(optionsSource, /书签可用性检测已完成/)
+  assert.match(optionsSource, /书签可用性检测已停止/)
+  assert.match(optionsSource, /notifyAiNamingRunFinished\(\{[\s\S]*?stopped: aiNamingState\.stopRequested \|\| controller\.signal\.aborted/)
+  assert.match(optionsSource, /书签智能分析已完成/)
+  assert.match(optionsSource, /书签智能分析已停止/)
+  assert.match(optionsSource, /createOptionsNotification\(`availability-\$\{completedAt\}-/)
+  assert.match(optionsSource, /createOptionsNotification\(`ai-naming-\$\{completedAt\}-/)
+  assert.match(messagesSource, /type: 'notification:create'/)
+  assert.match(messagesSource, /export function requestRuntimeNotification/)
+  assert.doesNotMatch(optionsSource, /getNotificationPermissionLevel/)
+})
+
 test('availability checks use adaptive runner with user settings', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const optionsSource = readProjectFile('src/options/options.ts')

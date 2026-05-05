@@ -52,7 +52,11 @@ import {
   restoreCuratorBackup,
   type BackupRestoreMode
 } from '../shared/backup.js'
-import { cancelNavigationCheck, requestNavigationCheck } from '../shared/messages.js'
+import {
+  cancelNavigationCheck,
+  requestNavigationCheck,
+  requestRuntimeNotification
+} from '../shared/messages.js'
 import { renderDotMatrixLoader } from '../shared/dot-matrix-loader.js'
 import {
   extractAiErrorMessage,
@@ -2007,6 +2011,13 @@ async function runAvailabilityDetection({ probeEnabled }) {
     }
     availabilityState.lastCompletedAt = Date.now()
     availabilityState.lastRunOutcome = availabilityState.stopRequested ? 'stopped' : 'completed'
+    notifyAvailabilityRunFinished({
+      stopped: availabilityState.stopRequested,
+      startedAt: availabilityState.runStartedAt,
+      completedAt: availabilityState.lastCompletedAt
+    }).catch((error) => {
+      console.warn('[Curator] 书签可用性检测完成通知发送失败', error)
+    })
   } catch (error) {
     availabilityState.lastRunOutcome = ''
     availabilityState.lastError =
@@ -2101,6 +2112,30 @@ async function inspectBookmarkAvailability(
   }
 
   return buildFailureClassification(bookmark, attempts, probe, probeEnabled)
+}
+
+async function notifyAvailabilityRunFinished({
+  stopped = false,
+  startedAt = 0,
+  completedAt = Date.now()
+} = {}): Promise<void> {
+  const processed = Math.max(0, Number(availabilityState.checkedBookmarks) || 0)
+  const total = Math.max(processed, Number(availabilityState.eligibleBookmarks) || 0)
+  const title = stopped ? '书签可用性检测已停止' : '书签可用性检测已完成'
+  const message = stopped
+    ? `已检测 ${processed}/${total} 条，可访问 ${availabilityState.availableCount} 条，异常 ${availabilityState.reviewCount + availabilityState.failedCount} 条。`
+    : `共检测 ${processed}/${total} 条，可访问 ${availabilityState.availableCount} 条，重定向 ${availabilityState.redirectedCount} 条，异常 ${availabilityState.reviewCount + availabilityState.failedCount} 条。`
+  const elapsedCopy = formatElapsedTime(Math.max(0, Number(completedAt) - Number(startedAt || completedAt)))
+  const scopeMeta = getCurrentAvailabilityScopeMeta()
+
+  await createOptionsNotification(`availability-${completedAt}-${Math.random().toString(16).slice(2)}`, {
+    title,
+    message,
+    contextMessage: `范围：${scopeMeta.label}${elapsedCopy ? ` · 用时 ${elapsedCopy}` : ''}`,
+    priority: 1,
+    requireInteraction: false,
+    silent: false
+  })
 }
 
 async function waitForAvailabilityRun() {
@@ -6138,15 +6173,6 @@ async function notifyAiNamingRunFinished({
   startedAt = 0,
   completedAt = Date.now()
 } = {}): Promise<void> {
-  if (!chrome.notifications?.create) {
-    return
-  }
-
-  const permissionLevel = await getNotificationPermissionLevel().catch(() => 'denied')
-  if (permissionLevel !== 'granted') {
-    return
-  }
-
   const processed = Math.max(0, Number(aiNamingState.checkedBookmarks) || 0)
   const total = Math.max(processed, Number(aiNamingState.eligibleBookmarks) || 0)
   const title = stopped ? '书签智能分析已停止' : '书签智能分析已完成'
@@ -6157,8 +6183,6 @@ async function notifyAiNamingRunFinished({
   const scopeMeta = getCurrentAiNamingScopeMeta()
 
   await createOptionsNotification(`ai-naming-${completedAt}-${Math.random().toString(16).slice(2)}`, {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('src/assets/icon128.png'),
     title,
     message,
     contextMessage: `范围：${scopeMeta.label}${elapsedCopy ? ` · 用时 ${elapsedCopy}` : ''}`,
@@ -6168,39 +6192,20 @@ async function notifyAiNamingRunFinished({
   })
 }
 
-function getNotificationPermissionLevel(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!chrome.notifications?.getPermissionLevel) {
-      resolve('denied')
-      return
-    }
-
-    chrome.notifications.getPermissionLevel((level) => {
-      const error = chrome.runtime.lastError
-      if (error) {
-        reject(new Error(error.message))
-        return
-      }
-
-      resolve(String(level || 'denied'))
-    })
-  })
-}
-
 function createOptionsNotification(
   notificationId: string,
-  options: chrome.notifications.NotificationOptions<true>
+  options: {
+    title: string
+    message: string
+    contextMessage?: string
+    priority?: number
+    requireInteraction?: boolean
+    silent?: boolean
+  }
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    chrome.notifications.create(notificationId, options, () => {
-      const error = chrome.runtime.lastError
-      if (error) {
-        reject(new Error(error.message))
-        return
-      }
-
-      resolve()
-    })
+  return requestRuntimeNotification({
+    notificationId,
+    ...options
   })
 }
 

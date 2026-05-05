@@ -27,6 +27,17 @@ export interface InboxUndoLastMoveMessage {
   type: 'inbox:undo-last-move'
 }
 
+export interface RuntimeNotificationMessage {
+  type: 'notification:create'
+  notificationId: string
+  title: string
+  message: string
+  contextMessage?: string
+  priority?: number
+  requireInteraction?: boolean
+  silent?: boolean
+}
+
 export interface NavigationCheckResult {
   status: NavigationStatus
   finalUrl: string
@@ -77,6 +88,13 @@ export function requestBookmarkSave(payload: Omit<BookmarkSaveMessage, 'type'>):
 export function requestInboxUndoLastMove(): Promise<InboxUndoLastMoveResult> {
   const message: InboxUndoLastMoveMessage = { type: 'inbox:undo-last-move' }
   return sendRuntimeMessage<InboxUndoLastMoveResult>(message)
+}
+
+export function requestRuntimeNotification(
+  payload: Omit<RuntimeNotificationMessage, 'type'>
+): Promise<void> {
+  const message: RuntimeNotificationMessage = { type: 'notification:create', ...payload }
+  return sendRuntimeMessage<void>(message)
 }
 
 function sendRuntimeMessage<TResult>(message: unknown): Promise<TResult> {

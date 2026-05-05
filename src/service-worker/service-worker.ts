@@ -5,7 +5,8 @@ import type {
   InboxUndoLastMoveResult,
   NavigationCancelMessage,
   NavigationCheckMessage,
-  NavigationCheckResult
+  NavigationCheckResult,
+  RuntimeNotificationMessage
 } from '../shared/messages.js'
 import type { BookmarkRecord, FolderRecord, NavigationNetworkEvidence } from '../shared/types.js'
 import { extractBookmarkData } from '../shared/bookmark-tree.js'
@@ -268,6 +269,7 @@ type RuntimeMessage =
   | InboxUndoLastMoveMessage
   | NavigationCheckMessage
   | NavigationCancelMessage
+  | RuntimeNotificationMessage
 
 chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_ANALYZE_QUEUE_ALARM) {
@@ -350,6 +352,21 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     cancelNavigationCheck(message.checkId)
     sendResponse({ ok: true })
     return undefined
+  }
+
+  if (message?.type === 'notification:create') {
+    showRuntimeNotification(message)
+      .then(() => {
+        sendResponse({ ok: true })
+      })
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : '后台通知发送失败。'
+        })
+      })
+
+    return true
   }
 
   if (message?.type !== 'availability:navigate') {
@@ -1307,6 +1324,38 @@ function showInboxNotification({
       buttons
     }, () => {
       void chrome.runtime.lastError
+      resolve()
+    })
+  })
+}
+
+function showRuntimeNotification(message: RuntimeNotificationMessage): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!chrome.notifications?.create) {
+      resolve()
+      return
+    }
+
+    const notificationId = truncateText(message.notificationId || `curator-notification-${Date.now()}`, 240)
+    const title = truncateText(message.title || 'Curator', 120) || 'Curator'
+    const notificationMessage = truncateText(message.message || '', 240)
+    const contextMessage = truncateText(message.contextMessage || '', 120)
+    chrome.notifications.create(notificationId, {
+      type: 'basic',
+      iconUrl: 'src/assets/icon128.png',
+      title,
+      message: notificationMessage,
+      contextMessage: contextMessage || undefined,
+      priority: Number.isFinite(message.priority) ? Number(message.priority) : 1,
+      requireInteraction: Boolean(message.requireInteraction),
+      silent: Boolean(message.silent)
+    }, () => {
+      const error = chrome.runtime.lastError
+      if (error) {
+        reject(new Error(error.message))
+        return
+      }
+
       resolve()
     })
   })

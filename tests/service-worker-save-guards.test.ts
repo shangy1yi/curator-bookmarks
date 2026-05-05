@@ -92,3 +92,15 @@ test('availability background navigation closes at DOM readiness before page pre
   assert.match(domReadyBody, /后台标签页已完成 DOM 就绪检测/)
   assert.match(source, /chrome\.webNavigation\.onCompleted\.addListener/)
 })
+
+test('runtime notification messages are created by the service worker', () => {
+  const source = readProjectFile('src/service-worker/service-worker.ts')
+  const messagesSource = readProjectFile('src/shared/messages.ts')
+
+  assert.match(messagesSource, /export interface RuntimeNotificationMessage/)
+  assert.match(source, /\| RuntimeNotificationMessage/)
+  assert.match(source, /if \(message\?\.type === 'notification:create'\)/)
+  assert.match(source, /showRuntimeNotification\(message\)/)
+  assert.match(source, /function showRuntimeNotification\(message: RuntimeNotificationMessage\)/)
+  assert.match(source, /chrome\.notifications\.create\(notificationId,[\s\S]*?iconUrl: 'src\/assets\/icon128\.png'/)
+})
