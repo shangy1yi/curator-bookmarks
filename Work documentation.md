@@ -580,3 +580,50 @@
 ### 是否合并 main
 
 - 否。等待用户手动测试和明确批准。
+
+## Follow-up Fix Summary - 2026-05-05
+
+### 用户测试反馈修复
+
+- 将 Speed Dial 与 Workspace 合并为一个“Speed Dial 与场景”开关，不再分别暴露两个模块开关。
+- 在“场景与固定入口”中切换场景后，`当前` 按钮状态和当前场景摘要会立即同步刷新。
+- 删除“模块与隐私”设置分类；“书签健康”移动到“通用”设置下。
+- 删除“快捷提示”和“隐私说明”两个 newtab 功能、开关、文案和常驻提示条。
+- `Ctrl/Cmd+K` 改为直接打开书签仪表盘；`/` 仍只聚焦搜索。
+- newtab 顶部入口文案改为“打开书签仪表盘”。
+- Speed Dial 空状态中去除“搜索书签”“在书签上右键固定”“管理场景”三个按钮。
+- options 书签仪表盘每个书签卡片新增“添加进 Speed Dial”按钮。
+- 嵌入 newtab 的仪表盘通过 `curator:newtab-add-speed-dial` 消息把书签加入当前场景 Speed Dial；已在当前场景固定时不会反向取消固定。
+
+### 本轮集成分支提交
+
+- `f8ba311 fix(newtab): apply follow-up settings polish`
+- `4232678 feat(dashboard): add speed dial card action`
+- `2e9dba9 fix(newtab): handle dashboard speed dial messages`
+
+### 本轮验证结果
+
+- `npm run typecheck` 通过。
+- `node --test .tmp-test/tests/newtab-module-settings.test.js .tmp-test/tests/newtab-command-palette.test.js .tmp-test/tests/newtab-content-state.test.js .tmp-test/tests/newtab-speed-dial.test.js .tmp-test/tests/dashboard-selection-a11y.test.js` 通过；82 tests，82 pass。
+- `npm run lint` 通过。
+- `npm test` 通过；407 tests，407 pass，0 fail。
+- `npm run build` 通过；Vite 6.4.2 成功生成 `dist/`。
+- `npm run check:version` 通过；Version check passed: 1.4.25。
+
+### 更新后的手动测试重点
+
+- 打开 newtab settings，确认没有“模块与隐私”分类；“书签健康”在“通用”下；“快捷提示”和“隐私说明”不再出现。
+- 在“场景与固定入口”切换不同场景，确认 `当前` 标记和当前场景摘要同步变化。
+- 关闭“Speed Dial 与场景”开关，确认 Workspace 切换和 Speed Dial 一起隐藏；重新开启后一起恢复。
+- 按 `Ctrl/Cmd+K`，确认直接打开书签仪表盘，而不是命令面板或快捷提示。
+- 按 `/`，确认仍聚焦 newtab 搜索框。
+- 清空某个场景的固定书签，确认 Speed Dial 空状态不再显示“搜索书签”“在书签上右键固定”“管理场景”三个按钮。
+- 在书签仪表盘卡片点击“添加进 Speed Dial”，返回 newtab 后确认该书签加入当前场景的 Speed Dial，重复点击不应取消固定。
+
+### 当前集成分支
+
+- `integration/newtab-modernization`
+
+### 是否合并 main
+
+- 否。等待用户手动测试和明确批准。
