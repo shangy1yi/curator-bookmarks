@@ -1,7 +1,5 @@
 <p align="center">
-
   <img src="src/assets/icon128.png" alt="Curator Bookmark" width="96" height="96">
-
 </p>
 
   
