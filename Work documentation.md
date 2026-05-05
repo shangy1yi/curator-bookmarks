@@ -234,3 +234,44 @@
 
 - 2026-05-05：创建全新 integration worktree 与分支；完成现有代码审查和外部调研；创建本文档初版。
 
+## Agent: agent/newtab-command-palette
+
+### 负责范围
+
+- Command Palette / 快捷操作的命令模型、过滤排序和快捷键判定。
+
+### 修复或优化的原有功能
+
+- 将搜索、固定、workspace 切换和整理入口统一成可测试命令列表，避免 UI 层重复拼命令。
+
+### 新增功能
+
+- 新增 bookmark open、pin/unpin、workspace switch、settings、dashboard、duplicates、folder cleanup 等命令类型。
+- 新增 Ctrl/Cmd+K 或 `/` 打开命令面板的安全判定。
+
+### UI / UX 改进
+
+- 支持中文/英文关键词匹配；快捷键不会劫持 input、textarea、select 或 contenteditable。
+
+### 性能改进
+
+- 复用已构建 newtab search index；按需生成有限命令列表，不新增依赖。
+
+### 影响范围
+
+- 涉及文件：`src/newtab/command-palette.ts`、`tests/newtab-command-palette.test.ts`。
+- 涉及模块：newtab command palette。
+
+### 实现思路
+
+- 把命令统一成 `CommandPaletteItem`，通过 `keywords` 和 normalized query 打分。
+- 让精确标题、前缀标题、标题包含优先于一般关键词匹配。
+
+### 测试方式
+
+- 已运行：`node -e "require('node:fs').rmSync('.tmp-test', { recursive: true, force: true })" && ./node_modules/.bin/tsc -p tsconfig.test.json && node --test .tmp-test/tests/newtab-command-palette.test.js`，3 项通过。
+- 手动测试建议：打开 newtab 后用 Ctrl/Cmd+K 搜索书签、固定书签、切换 workspace，并确认普通输入框中不会触发。
+
+### 已知风险
+
+- 当前分支不含命令面板 DOM；需要 integration 分支接入 overlay 和执行动作。
