@@ -61,6 +61,30 @@ test('shortcut and AI provider action buttons expose settings-specific labels', 
   }
 })
 
+test('smart bookmark analysis stop aborts the active fetch batch before merging results', () => {
+  const optionsSource = readProjectFile('src/options/options.ts')
+  const sharedStateSource = readProjectFile('src/options/shared-options/state.ts')
+  const stopBody = getFunctionBody(optionsSource, 'requestAiNamingStop')
+  const runBody = getFunctionBody(optionsSource, 'runAiNamingSuggestions')
+
+  assert.match(sharedStateSource, /abortController: null as AbortController \| null/)
+  assert.match(stopBody, /aiNamingState\.abortController\?\.abort\(\)/)
+  assert.match(runBody, /const controller = new AbortController\(\)/)
+  assert.match(runBody, /aiNamingState\.abortController = controller/)
+  assert.match(runBody, /buildAiNamingPreparedItem\(bookmark, settings\.timeoutMs, \{[\s\S]*?signal: controller\.signal/)
+  assert.match(runBody, /requestAiNamingBatch\(preparedItems, \{[\s\S]*?signal: controller\.signal/)
+  assert.match(
+    runBody,
+    /if \(aiNamingState\.stopRequested \|\| controller\.signal\.aborted\) \{[\s\S]*?break/
+  )
+  assert.match(runBody, /stopped: aiNamingState\.stopRequested \|\| controller\.signal\.aborted/)
+  assert.match(runBody, /if \(aiNamingState\.abortController === controller\) \{[\s\S]*?aiNamingState\.abortController = null/)
+  assert.match(
+    optionsSource,
+    /async function buildAiNamingPreparedItem\([\s\S]*?throwIfAborted\(options\.signal\)[\s\S]*?getAiMetadataForBookmark\(bookmark, timeoutMs, options\)[\s\S]*?throwIfAborted\(options\.signal\)/
+  )
+})
+
 test('options folder listbox options expose role and aria-selected state', () => {
   const optionsHtml = readProjectFile('src/options/options.html')
   const optionsSource = readProjectFile('src/options/options.ts')

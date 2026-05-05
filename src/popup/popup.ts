@@ -89,6 +89,11 @@ let aiSettingsModulePromise: Promise<typeof import('../options/sections/ai-setti
 let aiResponseModulePromise: Promise<typeof import('../shared/ai-response.js')> | null = null
 let recycleBinModulePromise: Promise<typeof import('../shared/recycle-bin.js')> | null = null
 
+function abortNaturalSearchRequest() {
+  state.naturalSearchAbortController?.abort()
+  state.naturalSearchAbortController = null
+}
+
 function loadNaturalSearchModule(): Promise<typeof import('./natural-search.js')> {
   naturalSearchModulePromise ||= import('./natural-search.js')
   return naturalSearchModulePromise
@@ -751,6 +756,7 @@ async function refreshData({ initial = false, preserveSearch = true } = {}) {
       state.naturalSearchPending = false
       state.naturalSearchError = ''
       state.naturalSearchPlan = null
+      abortNaturalSearchRequest()
       state.searchHighlightQuery = ''
       dom.searchInput.value = ''
     }
@@ -895,6 +901,7 @@ async function toggleNaturalLanguageSearch() {
   state.naturalSearchPending = false
   state.naturalSearchError = ''
   state.naturalSearchPlan = null
+  abortNaturalSearchRequest()
   state.searchHighlightQuery = ''
   state.searchRunId += 1
   render()
@@ -942,6 +949,7 @@ function runSearch() {
     state.searchPending = false
     state.naturalSearchPending = false
     state.naturalSearchPlan = null
+    abortNaturalSearchRequest()
     return
   }
 
@@ -952,6 +960,7 @@ function runSearch() {
     return
   }
 
+  abortNaturalSearchRequest()
   state.naturalSearchPending = false
   state.naturalSearchPlan = null
 
@@ -1022,6 +1031,9 @@ function runSearch() {
 }
 
 async function runNaturalSearch(query, normalizedQuery, runId) {
+  abortNaturalSearchRequest()
+  const controller = new AbortController()
+  state.naturalSearchAbortController = controller
   const cacheKey = getSearchCacheKey(`natural:${getNaturalSearchDateBucket()}:${normalizedQuery}`)
   const planCacheKey = getNaturalSearchPlanCacheKey(normalizedQuery)
   const cachedResults = state.searchCache.get(cacheKey)
@@ -1066,7 +1078,9 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
       state.activeResultIndex = 0
     }
 
-    const plan = await resolveNaturalSearchPlan(query, normalizedQuery, naturalSearch)
+    const plan = await resolveNaturalSearchPlan(query, normalizedQuery, naturalSearch, {
+      signal: controller.signal
+    })
     if (state.searchRunId !== runId) {
       return
     }
@@ -1100,7 +1114,11 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
     )
     render()
   } catch (error) {
-    if (state.searchRunId !== runId || (error instanceof Error && error.message === 'search-cancelled')) {
+    if (
+      state.searchRunId !== runId ||
+      isAbortError(error) ||
+      (error instanceof Error && error.message === 'search-cancelled')
+    ) {
       return
     }
 
@@ -1109,6 +1127,10 @@ async function runNaturalSearch(query, normalizedQuery, runId) {
     state.searchResults = []
     state.loadError = error instanceof Error ? error.message : '自然语言搜索失败，请重试。'
     render()
+  } finally {
+    if (state.naturalSearchAbortController === controller) {
+      state.naturalSearchAbortController = null
+    }
   }
 }
 
@@ -1140,7 +1162,8 @@ async function resolveCachedNaturalSearchPlan(
 async function resolveNaturalSearchPlan(
   query,
   normalizedQuery,
-  naturalSearch: typeof import('./natural-search.js')
+  naturalSearch: typeof import('./natural-search.js'),
+  options: { signal?: AbortSignal | null } = {}
 ): Promise<NaturalSearchPlan> {
   const cacheKey = getNaturalSearchPlanCacheKey(normalizedQuery)
   const localPlan = naturalSearch.buildLocalNaturalSearchPlan(query)
@@ -1165,7 +1188,7 @@ async function resolveNaturalSearchPlan(
   }
 
   try {
-    plan = await requestNaturalSearchAiPlan(query, localPlan, settings, naturalSearch)
+    plan = await requestNaturalSearchAiPlan(query, localPlan, settings, naturalSearch, options)
     state.naturalSearchError = ''
   } catch (error) {
     state.naturalSearchError = normalizeNaturalSearchError(error)
@@ -4156,11 +4179,14 @@ async function requestNaturalSearchAiPlan(
   query,
   localPlan: NaturalSearchPlan,
   settings,
-  naturalSearch: typeof import('./natural-search.js')
+  naturalSearch: typeof import('./natural-search.js'),
+  options: { signal?: AbortSignal | null } = {}
 ): Promise<NaturalSearchPlan> {
+  throwIfAborted(options.signal)
   validateSmartAiSettings(settings)
   await ensureSmartClassifyPermissions(settings, { interactive: false })
 
+  throwIfAborted(options.signal)
   const aiResponse = await loadAiResponseModule()
   const endpoint = aiResponse.getAiEndpoint(settings)
   const requestBody = buildNaturalSearchRequestBody({ settings, query, localPlan })
@@ -4170,8 +4196,10 @@ async function requestNaturalSearchAiPlan(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${settings.apiKey}`
     },
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify(requestBody),
+    signal: options.signal
   }, settings.timeoutMs)
+  throwIfAborted(options.signal)
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
@@ -4823,6 +4851,17 @@ function formatPermissionOrigin(origin) {
 
 function fetchWithSmartTimeout(url, options = {}, timeoutMs = POPUP_SMART_DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController()
+  const externalSignal = (options as { signal?: AbortSignal | null }).signal
+  const abortCurrentFetch = () => {
+    controller.abort()
+  }
+
+  if (externalSignal?.aborted) {
+    controller.abort()
+  } else {
+    externalSignal?.addEventListener('abort', abortCurrentFetch, { once: true })
+  }
+
   const timeoutId = window.setTimeout(() => {
     controller.abort()
   }, Math.max(1000, Number(timeoutMs) || POPUP_SMART_DEFAULT_TIMEOUT_MS))
@@ -4832,7 +4871,18 @@ function fetchWithSmartTimeout(url, options = {}, timeoutMs = POPUP_SMART_DEFAUL
     signal: controller.signal
   }).finally(() => {
     clearTimeout(timeoutId)
+    externalSignal?.removeEventListener('abort', abortCurrentFetch)
   })
+}
+
+function throwIfAborted(signal?: AbortSignal | null) {
+  if (signal?.aborted) {
+    throw new DOMException('操作已取消。', 'AbortError')
+  }
+}
+
+function isAbortError(error) {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 function getOriginPermissionPattern(url) {
