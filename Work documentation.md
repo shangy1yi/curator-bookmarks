@@ -277,3 +277,12 @@
 ### 已知风险
 
 - 当前分支不含 UI 接入；需要 integration 分支把 settings 和首屏切换器接上。
+
+## Integration Log: agent/newtab-workspaces
+
+- 合并时间：2026-05-05
+- 合并结果：成功
+- 冲突文件：无
+- 冲突解决方式：无需解决
+- 合并后验证：暂未运行；等待所有 agent 分支合并后统一运行。
+- 是否需要回到 agent worktree 修复：否
