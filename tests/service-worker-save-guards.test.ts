@@ -79,3 +79,16 @@ test('auto analyze queue failure schedules wake from remaining queue state', () 
   assert.match(failureBody, /scheduleNextAutoAnalyzeQueueWake\(nextQueue\)/)
   assert.doesNotMatch(failureBody, /scheduleAutoAnalyzeQueueAlarm\(AUTO_ANALYZE_QUEUE_RETRY_MS\)/)
 })
+
+test('availability background navigation closes at DOM readiness before page preload warnings', () => {
+  const source = readProjectFile('src/service-worker/service-worker.ts')
+  const domReadyBody = source.match(
+    /chrome\.webNavigation\.onDOMContentLoaded\.addListener\(\(details\) => \{[\s\S]*?\n\}\)\n\nchrome\.webNavigation\.onErrorOccurred/
+  )?.[0] || ''
+
+  assert.match(domReadyBody, /getPendingState\(details\)/)
+  assert.match(domReadyBody, /isAboutBlank\(details\.url\)/)
+  assert.match(domReadyBody, /finalizeNavigationCheck\(details\.tabId/)
+  assert.match(domReadyBody, /后台标签页已完成 DOM 就绪检测/)
+  assert.match(source, /chrome\.webNavigation\.onCompleted\.addListener/)
+})

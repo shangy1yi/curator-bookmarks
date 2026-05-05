@@ -98,11 +98,7 @@ export function buildFailureClassification(
     finalUrl: attempts.at(-1)?.finalUrl || bookmark.url
   }
   const navigationEvidence = summarizeNavigationEvidence(attempts)
-  const navigationSummary = attempts
-    .map((attempt, index) => {
-      return `${index === 0 ? '首轮' : '重试'}：${attempt.detail}`
-    })
-    .join('；')
+  const navigationSummary = formatNavigationAttemptSummary(attempts)
   const requestProbe = classifyNavigationNetworkEvidenceFromAttempts(attempts)
   const effectiveProbe = chooseEffectiveProbe(probe, requestProbe)
   const effectiveProbeEnabled = probeEnabled || Boolean(effectiveProbe)
@@ -112,7 +108,10 @@ export function buildFailureClassification(
       ...baseResult,
       status: 'review',
       badgeText: '低置信异常',
-      detail: `${navigationSummary}。未完成第二层网络探测，暂归为低置信异常，不建议直接删除。`
+      detail: joinEvidenceDetail(
+        navigationSummary,
+        '未完成第二层网络探测，暂归为低置信异常，不建议直接删除'
+      )
     }
   }
 
@@ -121,7 +120,10 @@ export function buildFailureClassification(
       ...baseResult,
       status: 'review',
       badgeText: '低置信异常',
-      detail: `${navigationSummary}。但网络探测(${effectiveProbe.method})返回可访问，站点可能仍可用，暂归为低置信异常，建议人工确认。`
+      detail: joinEvidenceDetail(
+        navigationSummary,
+        `网络探测(${effectiveProbe.method})返回可访问，站点可能仍可用；暂归为低置信异常，建议人工确认`
+      )
     }
   }
 
@@ -130,7 +132,10 @@ export function buildFailureClassification(
       ...baseResult,
       status: 'review',
       badgeText: '受限/低置信',
-      detail: `${navigationSummary}。网络探测(${effectiveProbe.method})返回 ${effectiveProbe.label}，站点可能需要登录、地区许可或反爬验证，暂归为低置信异常。`
+      detail: joinEvidenceDetail(
+        navigationSummary,
+        `网络探测(${effectiveProbe.method})返回 ${effectiveProbe.label}，站点可能需要登录、地区许可或反爬验证；暂归为低置信异常`
+      )
     }
   }
 
@@ -139,7 +144,10 @@ export function buildFailureClassification(
       ...baseResult,
       status: 'review',
       badgeText: '临时异常',
-      detail: `${navigationSummary}。网络探测(${effectiveProbe.method})返回 ${effectiveProbe.label}，更像临时服务异常，不建议直接删除。`
+      detail: joinEvidenceDetail(
+        navigationSummary,
+        `网络探测(${effectiveProbe.method})返回 ${effectiveProbe.label}，更像临时服务异常，不建议直接删除`
+      )
     }
   }
 
@@ -148,7 +156,10 @@ export function buildFailureClassification(
       ...baseResult,
       status: 'failed',
       badgeText: '高置信异常',
-      detail: `${navigationSummary}。网络探测(${effectiveProbe.method})返回 ${effectiveProbe.label}，较大概率是失效链接。`
+      detail: joinEvidenceDetail(
+        navigationSummary,
+        `网络探测(${effectiveProbe.method})返回 ${effectiveProbe.label}，较大概率是失效链接`
+      )
     }
   }
 
@@ -158,7 +169,10 @@ export function buildFailureClassification(
         ...baseResult,
         status: 'failed',
         badgeText: '高置信异常',
-        detail: `${navigationSummary}。网络探测也失败：${effectiveProbe.detail}，多层结果都指向连接层故障，已按高置信异常归类。`
+        detail: joinEvidenceDetail(
+          navigationSummary,
+          `网络探测也失败：${stripEvidencePunctuation(effectiveProbe.detail)}，多层结果都指向连接层故障，已按高置信异常归类`
+        )
       }
     }
 
@@ -166,7 +180,10 @@ export function buildFailureClassification(
       ...baseResult,
       status: 'review',
       badgeText: '低置信异常',
-      detail: `${navigationSummary}。网络探测也失败：${effectiveProbe.detail}，证据仍不足以直接删除，暂归为低置信异常。`
+      detail: joinEvidenceDetail(
+        navigationSummary,
+        `网络探测也失败：${stripEvidencePunctuation(effectiveProbe.detail)}，证据仍不足以直接删除，暂归为低置信异常`
+      )
     }
   }
 
@@ -176,7 +193,10 @@ export function buildFailureClassification(
         ...baseResult,
         status: 'failed',
         badgeText: '高置信异常',
-        detail: `${navigationSummary}。${effectiveProbe.detail}，且后台导航连续给出强失败信号，已按高置信异常归类。`
+        detail: joinEvidenceDetail(
+          navigationSummary,
+          `${stripEvidencePunctuation(effectiveProbe.detail)}，且后台导航连续给出强失败信号，已按高置信异常归类`
+        )
       }
     }
 
@@ -184,7 +204,10 @@ export function buildFailureClassification(
       ...baseResult,
       status: 'review',
       badgeText: '低置信异常',
-      detail: `${navigationSummary}。${effectiveProbe.detail} 证据仍不足以直接删除，暂归为低置信异常。`
+      detail: joinEvidenceDetail(
+        navigationSummary,
+        `${stripEvidencePunctuation(effectiveProbe.detail)}；证据仍不足以直接删除，暂归为低置信异常`
+      )
     }
   }
 
@@ -192,8 +215,36 @@ export function buildFailureClassification(
     ...baseResult,
     status: 'review',
     badgeText: '低置信异常',
-    detail: `${navigationSummary}。${effectiveProbe.detail} 暂归为低置信异常，建议人工确认。`
+    detail: joinEvidenceDetail(
+      navigationSummary,
+      `${stripEvidencePunctuation(effectiveProbe.detail)}；暂归为低置信异常，建议人工确认`
+    )
   }
+}
+
+function formatNavigationAttemptSummary(attempts: NavigationAttempt[]): string {
+  return attempts
+    .map((attempt, index) => {
+      const label = index === 0 ? '首轮' : '重试'
+      const detail = stripEvidencePunctuation(attempt.detail || '后台导航未返回明确结果')
+      return `${label}：${detail}`
+    })
+    .join('；')
+}
+
+function joinEvidenceDetail(...fragments: string[]): string {
+  const normalized = fragments
+    .map((fragment) => stripEvidencePunctuation(fragment))
+    .filter(Boolean)
+
+  return normalized.length ? `${normalized.join('。')}。` : ''
+}
+
+function stripEvidencePunctuation(value: string): string {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[。！？.!?]+$/g, '')
 }
 
 function chooseEffectiveProbe(

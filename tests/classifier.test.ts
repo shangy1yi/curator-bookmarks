@@ -277,6 +277,24 @@ test('builds failure classifications from navigation and probe evidence', () => 
     buildFailureClassification(bookmark, attempts, { kind: 'ok', method: 'GET', label: '探测可达', detail: '' }, true).status,
     'review'
   )
+  assert.equal(
+    buildFailureClassification(
+      bookmark,
+      [{ ...navigationAttempt('', 'available'), detail: '后台标签页已完成页面导航。' }],
+      { kind: 'ok', method: 'GET', label: '探测可达', detail: '网络探测(GET)可达。' },
+      true
+    ).detail,
+    '首轮：后台标签页已完成页面导航。网络探测(GET)返回可访问，站点可能仍可用；暂归为低置信异常，建议人工确认。'
+  )
+  assert.doesNotMatch(
+    buildFailureClassification(
+      bookmark,
+      [{ ...navigationAttempt('', 'available'), detail: '后台标签页已完成页面导航。' }],
+      { kind: 'ok', method: 'GET', label: '探测可达', detail: '网络探测(GET)可达。' },
+      true
+    ).detail,
+    /。。|。但/
+  )
 
   assert.equal(
     buildFailureClassification(

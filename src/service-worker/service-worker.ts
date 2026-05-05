@@ -701,6 +701,24 @@ chrome.webNavigation.onCompleted.addListener((details) => {
   })
 })
 
+chrome.webNavigation.onDOMContentLoaded.addListener((details) => {
+  const state = getPendingState(details)
+  if (!state) {
+    return
+  }
+
+  if (!state.navigationStarted && isAboutBlank(details.url)) {
+    return
+  }
+
+  finalizeNavigationCheck(details.tabId, {
+    status: 'available',
+    finalUrl: details.url || state.lastUrl || state.requestedUrl,
+    detail: '后台标签页已完成 DOM 就绪检测。',
+    errorCode: ''
+  })
+})
+
 chrome.webNavigation.onErrorOccurred.addListener((details) => {
   const state = getPendingState(details)
   if (!state) {

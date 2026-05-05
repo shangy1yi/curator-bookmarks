@@ -263,10 +263,19 @@ test('dashboard selection motion reuses the transform path for every list size',
   assert.match(source, /data-dashboard-selection-motion[\s\S]*?useCompositeMotion\s*\?\s*'composite'\s*:\s*'layout'/)
   assert.match(source, /function transitionDashboardSelectionBarVisibility\([\s\S]*?getBoundingClientRect\(\)\.top[\s\S]*?beginDashboardSelectionCompositeMotion\(\)[\s\S]*?classList\.toggle\('hidden',\s*shouldHideSelection\)[\s\S]*?animateDashboardSelectionCardRegionShift/)
   assert.match(finishMotionBody, /dashboardVirtualResizeDeferredForSelection/)
-  assert.match(finishMotionBody, /commitDashboardVirtualResize\(\{\s*showMask:\s*false\s*\}\)/)
+  assert.match(finishMotionBody, /commitDashboardVirtualResize\(\{\s*showMask:\s*false,\s*preserveRenderedWindow:\s*true\s*\}\)/)
   assert.doesNotMatch(finishMotionBody, /resetDashboardVirtualRenderCache\(\{\s*preserveItems:\s*true\s*\}\)/)
   assert.doesNotMatch(finishMotionBody, /scheduleDashboardVirtualRender\(\)/)
   assert.doesNotMatch(finishMotionBody, /beginStableDashboardResultsUpdate\(\)/)
+
+  const resizeBody = source.match(
+    /function commitDashboardVirtualResize\([\s\S]*?\n\}\n\nfunction beginDashboardSelectionCompositeMotion/
+  )?.[0] || ''
+  assert.match(resizeBody, /if\s*\(preserveRenderedWindow\)\s*\{[\s\S]*?updateDashboardVirtualMetrics\(\)[\s\S]*?return/)
+  assert.doesNotMatch(
+    resizeBody.match(/if\s*\(preserveRenderedWindow\)\s*\{[\s\S]*?return/)?.[0] || '',
+    /renderDashboardCards\(|resetDashboardVirtualRenderCache\(/
+  )
 })
 
 test('dashboard selection inputs avoid duplicate click and input rerenders', () => {

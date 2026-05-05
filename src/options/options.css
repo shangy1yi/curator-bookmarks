@@ -2094,10 +2094,11 @@ a {
   width: 23px;
   height: 23px;
   object-fit: contain;
+  z-index: 1;
 }
 
 .dashboard-favicon-shell img + span {
-  opacity: 0.18;
+  display: none;
 }
 
 .dashboard-card-copy {

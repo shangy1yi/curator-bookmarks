@@ -80,17 +80,18 @@ test('dashboard cards render bookmark-specific action labels', () => {
   assert.match(dashboardSource, /data-dashboard-action="delete-one"[\s\S]*?aria-label="\$\{escapeAttr\(deleteLabel\)\}"/)
 })
 
-test('dashboard cards actively load site favicons before falling back to Chrome cache', () => {
+test('dashboard cards use stable Chrome favicon URLs without swapping visible sources', () => {
   const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
   const optionsSource = readProjectFile('src/options/options.ts')
 
-  assert.match(dashboardSource, /function getPrimaryDashboardFaviconUrl\(url: string\): string/)
-  assert.match(dashboardSource, /return `\$\{parsedUrl\.origin\}\/favicon\.ico`/)
   assert.match(dashboardSource, /export function getDashboardFaviconFallbackUrl\(url: string\): string/)
   assert.match(dashboardSource, /chrome-extension:\/\/\$\{runtimeId\}\/_favicon\/\?pageUrl=\$\{encodeURIComponent\(url\)\}&size=32/)
-  assert.match(dashboardSource, /data-dashboard-favicon-source="primary"/)
+  assert.match(dashboardSource, /data-dashboard-favicon-source="chrome"/)
   assert.match(dashboardSource, /data-dashboard-favicon-page-url="\$\{escapeAttr\(item\.url\)\}"/)
-  assert.match(dashboardSource, /function handleDashboardFaviconError\(image: HTMLImageElement, callbacks: DashboardCallbacks\): void/)
+  assert.match(dashboardSource, /function handleDashboardFaviconError\(image: HTMLImageElement, _callbacks: DashboardCallbacks\): void/)
+  assert.match(dashboardSource, /function handleDashboardFaviconError\([\s\S]*?image\.remove\(\)/)
+  assert.doesNotMatch(dashboardSource, /\/favicon\.ico/)
+  assert.doesNotMatch(dashboardSource, /image\.src\s*=/)
   assert.match(optionsSource, /handleDashboardError\(event, dashboardCallbacks\), true/)
   assert.match(optionsSource, /getFaviconFallbackUrl: getDashboardFaviconFallbackUrl/)
 
