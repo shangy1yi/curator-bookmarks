@@ -557,6 +557,7 @@
 - typecheck：`npm run typecheck` 通过。
 - test：`npm test` 通过；404 tests，399 pass，5 skipped，0 fail。
 - build：`npm run build` 通过；Vite 6.4.2 成功生成 `dist/`。
+- version：`npm run check:version` 通过；Version check passed: 1.4.25。
 
 ### 需要用户手动测试的重点
 
