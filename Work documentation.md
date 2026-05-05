@@ -388,3 +388,55 @@
 - 冲突解决方式：保留已有 workspace/speed-dial agent 小节和 integration log，并追加 command-palette agent 小节。
 - 合并后验证：暂未运行；等待所有 agent 分支合并后统一运行。
 - 是否需要回到 agent worktree 修复：否
+
+## Agent: agent/newtab-health-settings
+
+### 负责范围
+
+- Bookmark Health / 整理提醒、newtab 模块显示设置、隐私透明说明 helper。
+
+### 修复或优化的原有功能
+
+- 将 options 中已有的重复、标签、摘要和 Inbox 整理价值提炼为 newtab 可见的轻量提醒模型。
+
+### 新增功能
+
+- 新增 `buildNewTabBookmarkHealth()`，基于本地书签、tag index、snapshot index 和 newtab activity 输出健康卡片。
+- 新增 `newTabModuleSettings` storage key 和模块设置 normalize / rows helper。
+- 新增隐私说明 helper，明确本地优先、不追踪、不出售数据、不修改默认搜索引擎、不新增 history 权限。
+
+### UI / UX 改进
+
+- 本分支为首屏整理提醒和 settings 隐私透明区提供数据基础。
+
+### 性能改进
+
+- 只用已加载的本地数据轻量统计，不访问网络，不读取浏览历史。
+
+### 影响范围
+
+- 涉及文件：`src/shared/constants.ts`、`src/newtab/bookmark-health.ts`、`src/newtab/module-settings.ts`、`tests/newtab-bookmark-health.test.ts`、`tests/newtab-module-settings.test.ts`。
+- 涉及模块：newtab health、module settings、privacy notice。
+
+### 实现思路
+
+- 通过 duplicateKey 统计重复分组，通过路径识别 Inbox / 待整理，通过 tag/snapshot 识别缺少标签和摘要。
+- 模块设置采用 opt-out 默认，保证新功能用户可感知，同时保留控制权。
+
+### 测试方式
+
+- 已运行：`node -e "require('node:fs').rmSync('.tmp-test', { recursive: true, force: true })" && ./node_modules/.bin/tsc -p tsconfig.test.json && node --test .tmp-test/tests/newtab-bookmark-health.test.js .tmp-test/tests/newtab-module-settings.test.js`，6 项通过。
+- 手动测试建议：准备 Inbox、重复、缺标签/摘要书签后打开 newtab，确认健康卡片计数与 options 深链入口合理。
+
+### 已知风险
+
+- 当前分支不含 UI 接入；需要 integration 分支把 health cards 和 settings 开关接入。
+
+## Integration Log: agent/newtab-health-settings
+
+- 合并时间：2026-05-05
+- 合并结果：有冲突，已解决
+- 冲突文件：`Work documentation.md`、`src/shared/constants.ts`
+- 冲突解决方式：文档保留已有 agent 小节和 integration log 并追加 health-settings 小节；`constants.ts` 同时保留 `newTabWorkspaceSettings` 与 `newTabModuleSettings`。
+- 合并后验证：暂未运行；等待 UI 集成完成后统一运行。
+- 是否需要回到 agent worktree 修复：否
