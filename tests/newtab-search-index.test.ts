@@ -374,6 +374,40 @@ test('prepares reusable search lookup structures without changing popup matching
   assert.equal(prepared.entries, index)
   assert.equal(prepared.supportsPopupSearch, true)
   assert.equal(prepared.popupSearchEntries.length, 1)
+  assert.equal(prepared.popupSearchBookmarks, undefined)
   assert.equal(prepared.entriesById.get('tagged'), index[0])
   assert.deepEqual(getSearchBookmarkSuggestionsFromIndex('pinia', prepared, 6).map((item) => item.id), ['tagged'])
+})
+
+test('natural newtab search builds popup search entries lazily and reuses them', async () => {
+  const index = buildNewTabSearchIndex({
+    bookmarks: [
+      bookmark({
+        id: 'react',
+        title: 'React Table Guide',
+        normalizedTitle: 'react table guide',
+        path: 'Bookmarks Bar / Frontend'
+      })
+    ]
+  })
+  const prepared = prepareNewTabSearchIndex(index)
+
+  assert.equal(prepared.popupSearchBookmarks, undefined)
+
+  assert.deepEqual(
+    (await getNaturalSearchBookmarkSuggestionsFromIndex('帮我找 React 表格', prepared, 6))
+      .map((item) => item.id),
+    ['react']
+  )
+
+  const firstPreparedBookmarks = prepared.popupSearchBookmarks
+  assert.ok(firstPreparedBookmarks)
+  assert.equal(firstPreparedBookmarks?.length, 1)
+
+  assert.deepEqual(
+    (await getNaturalSearchBookmarkSuggestionsFromIndex('React Table', prepared, 6))
+      .map((item) => item.id),
+    ['react']
+  )
+  assert.equal(prepared.popupSearchBookmarks, firstPreparedBookmarks)
 })

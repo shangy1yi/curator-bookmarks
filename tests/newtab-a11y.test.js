@@ -22,17 +22,30 @@ test('newtab keeps local polite status regions for short feedback', () => {
   assert.match(newtabHtml, /id="settings-save-status"[\s\S]*aria-live="polite"/)
   assert.match(newtabSource, /toast\.setAttribute\('role', 'status'\)/)
   assert.match(newtabSource, /toast\.setAttribute\('aria-live', 'polite'\)/)
+  assert.match(newtabSource, /suggestionsHint\.setAttribute\('role', 'status'\)/)
+  assert.match(newtabSource, /suggestionsHint\.setAttribute\('aria-live', 'polite'\)/)
+  assert.match(newtabSource, /empty\.setAttribute\('role', 'status'\)/)
+  assert.match(newtabSource, /empty\.setAttribute\('aria-live', 'polite'\)/)
   assert.match(newtabSource, /function getBookmarkActionLabelContext\(bookmark/)
   assert.match(newtabSource, /title\.length > 48 \? `\$\{title\.slice\(0, 47\)\.trim\(\)\}…` : title/)
   assert.match(newtabSource, /undo\.setAttribute\('aria-label', `撤销删除：\$\{bookmarkLabel\}`\)/)
   assert.match(newtabSource, /recycle\.setAttribute\('aria-label', `打开回收站查看：\$\{bookmarkLabel\}`\)/)
 })
 
+test('newtab search settings explain that web search does not hijack browser search', () => {
+  const newtabHtml = readProjectFile('src/newtab/newtab.html')
+  const newtabSource = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(newtabHtml, /class="setting-trust-note"/)
+  assert.match(newtabHtml, /不会修改 Chrome 默认搜索引擎或启动页/)
+  assert.match(newtabSource, /未找到书签；按 Enter 仅在本页用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页/)
+})
+
 test('newtab bookmark edit menu actions expose bookmark-specific labels', () => {
   const newtabSource = readProjectFile('src/newtab/newtab.ts')
 
   assert.match(newtabSource, /const bookmarkLabel = getBookmarkActionLabelContext\(bookmark\)/)
-  assert.match(newtabSource, /const pinLabel = isActiveMenuBookmarkPinned\(\) \? '取消固定书签' : '固定书签到常用'/)
+  assert.match(newtabSource, /const pinLabel = isActiveMenuBookmarkPinned\(\) \? '取消固定书签' : '固定书签到 Curator 常用'/)
   assert.match(newtabSource, /const deleteLabel = state\.pendingDeleteBookmarkId === String\(bookmark\.id\) \? '确认删除书签' : '删除书签'/)
   assert.match(newtabSource, /actionId: 'toggle-pin', ariaLabel: `\$\{pinLabel\}：\$\{bookmarkLabel\}`/)
   assert.match(newtabSource, /actionId: 'copy-url',[\s\S]*?ariaLabel: `复制书签链接：\$\{bookmarkLabel\}`/)

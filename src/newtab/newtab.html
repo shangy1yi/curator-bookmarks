@@ -91,8 +91,8 @@
             </label>
             <label class="setting-row">
               <span class="setting-label-stack">
-                <span>显示常用和最近</span>
-                <small>共同展示固定、高频，以及最近添加的书签。</small>
+                <span>显示 Curator 常用和新近添加</span>
+                <small>仅基于当前来源内的固定、本页打开记录和添加时间，不读取浏览历史。</small>
               </span>
               <input id="general-show-quick-access" class="setting-switch-input" type="checkbox" checked>
               <span class="setting-switch" aria-hidden="true"></span>
@@ -437,6 +437,7 @@
         <section class="settings-section" aria-labelledby="settings-search-title">
           <h2 id="settings-search-title">搜索栏</h2>
           <div class="settings-card">
+            <p class="setting-trust-note">仅影响 Curator 新标签页内搜索，不会修改 Chrome 默认搜索引擎或启动页；搜索栏可随时关闭。</p>
             <label class="setting-row">
               <span class="setting-label-stack">
                 <span>启用</span>

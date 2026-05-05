@@ -814,15 +814,15 @@ body.background-mask-enabled .newtab-background-mask {
 .newtab-search-web-hint {
   display: block;
   width: 100%;
-  min-height: 34px;
+  min-height: 30px;
   overflow: hidden;
-  padding: 7px 8px;
+  padding: 6px 8px;
   border-radius: 7px;
-  background: transparent;
-  color: rgba(245, 245, 247, 0.76);
+  background: rgba(245, 245, 247, 0.035);
+  color: rgba(245, 245, 247, 0.6);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 11px;
+  font-weight: 620;
   line-height: 1.25;
   text-align: left;
   text-overflow: ellipsis;
@@ -831,9 +831,13 @@ body.background-mask-enabled .newtab-background-mask {
 
 .newtab-search-web-hint:hover,
 .newtab-search-web-hint:focus-visible {
-  background: rgba(245, 245, 247, 0.085);
+  background: rgba(245, 245, 247, 0.07);
   color: var(--text);
   outline: none;
+}
+
+.newtab-search-web-hint:focus-visible {
+  box-shadow: 0 0 0 2px rgba(245, 245, 247, 0.12);
 }
 
 .newtab-page.has-search .newtab-content,
@@ -1233,20 +1237,21 @@ body.background-mask-enabled .newtab-background-mask {
 .newtab-quick-group {
   display: grid;
   min-width: 0;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: stretch;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
 }
 
 .newtab-quick-heading {
   display: flex;
-  min-height: var(--portal-card-min-height);
+  min-height: auto;
   align-items: center;
+  padding: 0 2px;
   color: rgba(245, 245, 247, 0.48);
   font-size: 11px;
   font-weight: 750;
   letter-spacing: 0;
-  line-height: 1;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
@@ -1853,7 +1858,7 @@ body.bookmark-dragging .bookmark-tile:not(.dragging):focus-visible .bookmark-tit
   top: 0;
   right: 0;
   z-index: 30;
-  width: 198px;
+  width: 116px;
   height: 96px;
   pointer-events: none;
 }
@@ -1887,17 +1892,19 @@ body.bookmark-dragging .bookmark-tile:not(.dragging):focus-visible .bookmark-tit
 
 .dashboard-trigger {
   right: 66px;
-  min-width: 124px;
-  padding: 0 12px;
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
   text-decoration: none;
 }
 
 .dashboard-trigger span {
-  color: currentColor;
-  font-size: 12px;
-  font-weight: 720;
-  letter-spacing: 0;
-  line-height: 1;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
@@ -2135,6 +2142,17 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   box-shadow: none;
 }
 
+.setting-trust-note {
+  margin: 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(245, 245, 247, 0.1);
+  border-radius: 7px;
+  background: rgba(245, 245, 247, 0.035);
+  color: rgba(245, 245, 247, 0.56);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
 .setting-row {
   display: grid;
   min-height: 50px;
@@ -2308,6 +2326,10 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   border-color: rgba(245, 245, 247, 0.24);
   background: rgba(255, 255, 255, 0.06);
   outline: none;
+}
+
+.folder-candidate-card:focus-visible {
+  box-shadow: 0 0 0 2px rgba(245, 245, 247, 0.16);
 }
 
 .folder-candidate-card.selected {
@@ -2734,43 +2756,10 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 }
 
 .setting-floating-field {
-  --accent-color: #a3e583;
   position: relative;
   display: block;
   width: 180px;
-  margin: 6px 0;
-}
-
-.setting-floating-field::before,
-.setting-floating-field::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  z-index: 4;
-  width: 100%;
-  pointer-events: none;
-}
-
-.setting-floating-field::before {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.42);
-  transition: border-bottom-color 200ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-}
-
-.setting-floating-field::after {
-  border-bottom: 2px solid var(--accent-color);
-  transform: scaleX(0);
-  transition: transform 250ms cubic-bezier(0, 0, 0.2, 1) 0ms;
-  will-change: transform;
-}
-
-.setting-floating-field:focus-within::before {
-  border-bottom-color: var(--accent-color);
-}
-
-.setting-floating-field:focus-within::after {
-  transform: scaleX(1);
+  margin: 0;
 }
 
 .setting-native-select option {
@@ -2903,13 +2892,12 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   min-width: 0;
   max-width: none;
   min-height: 0;
-  max-height: 36px;
   height: 36px;
   overflow: visible;
   padding: 0 12px;
-  border: 0;
-  border-radius: 5px 5px 0 0;
-  background-color: #050506;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 7px;
+  background: rgba(245, 245, 247, 0.045);
   color: #e8e8e8;
   font: inherit;
   font-size: 14px;
@@ -2917,10 +2905,12 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   line-height: 36px;
   text-overflow: clip;
   white-space: nowrap;
-  box-shadow: 0 2px 5px rgba(35, 35, 35, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
   transition:
-    background-color 200ms cubic-bezier(0.25, 0.8, 0.25, 1),
-    color 200ms cubic-bezier(0.25, 0.8, 0.25, 1);
+    border-color var(--ease-standard),
+    background-color var(--ease-standard),
+    box-shadow var(--ease-standard),
+    color var(--ease-standard);
 }
 
 .setting-text-input::placeholder,
@@ -2931,25 +2921,23 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
   transition: opacity 250ms cubic-bezier(0, 0, 0.2, 1) 0ms;
 }
 
-.setting-floating-field .setting-text-input:focus-visible,
-.setting-floating-field .setting-url-input:focus-visible,
-.setting-floating-field .setting-text-input:active,
-.setting-floating-field .setting-url-input:active {
-  outline: none;
-}
-
 .setting-floating-field:focus-within .setting-text-input,
 .setting-floating-field:focus-within .setting-url-input,
 .setting-floating-field .setting-text-input:focus-visible,
 .setting-floating-field .setting-url-input:focus-visible,
 .setting-floating-field .setting-text-input:active,
 .setting-floating-field .setting-url-input:active {
-  background-color: #050506;
+  border-color: rgba(245, 245, 247, 0.34);
+  background: rgba(245, 245, 247, 0.07);
+  outline: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 0 0 2px rgba(245, 245, 247, 0.1);
 }
 
 .setting-floating-field:focus-within .setting-text-input::placeholder,
 .setting-floating-field:focus-within .setting-url-input::placeholder {
-  opacity: 0;
+  opacity: 0.5;
 }
 
 .setting-link {
@@ -3791,12 +3779,12 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] {
 
   .newtab-quick-group {
     grid-template-columns: 1fr;
-    gap: 5px;
+    gap: 10px;
   }
 
   .newtab-quick-heading {
-    min-height: 16px;
-    padding-top: 0;
+    min-height: auto;
+    padding: 0 2px;
   }
 
   .newtab-quick-list {

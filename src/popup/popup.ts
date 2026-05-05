@@ -4765,7 +4765,14 @@ function pickDeepestFolder(folders) {
     })[0] || null
 }
 
-function requestPermissions(query) {
+async function requestPermissions(query) {
+  try {
+    if (await containsPermissions(query)) {
+      return true
+    }
+  } catch {
+  }
+
   return new Promise((resolve, reject) => {
     chrome.permissions.request(query, (granted) => {
       const error = chrome.runtime.lastError

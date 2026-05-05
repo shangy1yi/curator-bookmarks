@@ -14,3 +14,10 @@ test('shortcut settings do not expose the browser action activation command', ()
   assert.equal(Object.hasOwn(manifest.commands || {}, '_execute_action'), false)
   assert.doesNotMatch(optionsSource, /_execute_action|打开 Popup/)
 })
+
+test('manifest requests full site access at install time', () => {
+  const manifest = JSON.parse(readProjectFile('src/manifest.json'))
+
+  assert.deepEqual(manifest.host_permissions, ['http://*/*', 'https://*/*'])
+  assert.equal(Object.hasOwn(manifest, 'optional_host_permissions'), false)
+})

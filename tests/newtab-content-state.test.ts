@@ -341,10 +341,11 @@ test('resolves portal layout from overview and quick access visibility', () => {
   }), 'hidden')
 })
 
-test('newtab settings expose one combined quick access switch', () => {
+test('newtab settings expose one combined local quick access switch', () => {
   const html = readProjectFile('src/newtab/newtab.html')
 
-  assert.match(html, /显示常用和最近/)
+  assert.match(html, /显示 Curator 常用和新近添加/)
+  assert.match(html, /仅基于当前来源内的固定、本页打开记录和添加时间，不读取浏览历史。/)
   assert.match(html, /id="general-show-quick-access"/)
   assert.doesNotMatch(html, /id="general-show-frequent"/)
   assert.doesNotMatch(html, /id="general-show-recent"/)
@@ -609,7 +610,7 @@ test('newtab empty folder state offers actionable next steps', () => {
   const css = readProjectFile('src/newtab/newtab.css')
 
   assert.match(script, /function createEmptyFolderState\(section: NewTabFolderSection\): HTMLElement/)
-  assert.match(script, /此文件夹还没有书签。你可以先添加一个书签，或改用已有的非空来源。/)
+  assert.match(script, /此文件夹还没有书签。你可以先添加一个书签，或改用已有的非空来源；选择来源只改变展示，不会移动或删除书签。/)
   assert.match(script, /addButton\.dataset\.addBookmarkFolderId = section\.id/)
   assert.match(script, /添加书签到这里/)
   assert.match(script, /选择现有来源/)
@@ -725,6 +726,12 @@ test('newtab settings drawer is inert while closed', () => {
   assert.match(script, /settingsDrawer\?\.setAttribute\('inert', ''\)/)
   assert.match(script, /settingsDrawer\?\.setAttribute\('aria-hidden', 'false'\)[\s\S]*?settingsDrawer\?\.removeAttribute\('inert'\)/)
   assert.match(script, /settingsDrawer\?\.setAttribute\('aria-hidden', 'true'\)[\s\S]*?settingsDrawer\?\.setAttribute\('inert', ''\)/)
+  assert.match(script, /function setSettingsModalBackgroundInert\(inert: boolean\): void/)
+  assert.match(script, /root,[\s\S]*settingsTrigger instanceof HTMLElement[\s\S]*dashboardTrigger instanceof HTMLElement/)
+  assert.match(script, /element\.setAttribute\('inert', ''\)[\s\S]*?element\.setAttribute\('aria-hidden', 'true'\)/)
+  assert.match(script, /element\.removeAttribute\('inert'\)[\s\S]*?element\.removeAttribute\('aria-hidden'\)/)
+  assert.match(script, /document\.body\.classList\.add\('settings-open'\)[\s\S]*?setSettingsModalBackgroundInert\(true\)/)
+  assert.match(script, /document\.body\.classList\.remove\('settings-open'\)[\s\S]*?setSettingsModalBackgroundInert\(false\)/)
 })
 
 test('newtab advanced icon layout exposes a default reset control', () => {
@@ -852,8 +859,8 @@ test('newtab dashboard glass layer only styles the iframe shell', () => {
   assert.match(newtabCss, /\.newtab-dashboard-frame\s*\{[\s\S]*?visibility:\s*hidden/)
   assert.match(newtabCss, /\.newtab-dashboard-overlay\[data-dashboard-ready="true"\]\s+\.newtab-dashboard-frame\s*\{[\s\S]*?opacity:\s*1/)
   assert.match(newtabCss, /\.newtab-dashboard-overlay\[data-dashboard-ready="true"\]\s+\.newtab-dashboard-loading\s*\{[\s\S]*?opacity:\s*0/)
-  assert.match(newtabCss, /\.dashboard-trigger\s*\{[\s\S]*?min-width:\s*124px/)
-  assert.match(newtabCss, /\.dashboard-trigger span\s*\{[\s\S]*?white-space:\s*nowrap/)
+  assert.match(newtabCss, /\.dashboard-trigger\s*\{[\s\S]*?width:\s*40px[\s\S]*?min-width:\s*40px[\s\S]*?padding:\s*0/)
+  assert.match(newtabCss, /\.dashboard-trigger span\s*\{[\s\S]*?clip-path:\s*inset\(50%\)[\s\S]*?white-space:\s*nowrap/)
   assert.match(newtabCss, /@media \(prefers-reduced-motion: reduce\)/)
 
   assert.doesNotMatch(
@@ -970,6 +977,7 @@ test('newtab folder candidate cards keep long text inside their frame', () => {
   const sourcePanelRule = getCssRuleBody(css, '.folder-source-panel')
   const candidateListRule = getCssRuleBodies(css, '.folder-candidate-list').join('\n')
   const cardRules = getCssRuleBodies(css, '.folder-candidate-card').join('\n')
+  const focusRules = getCssRuleBodies(css, '.folder-candidate-card:focus-visible').join('\n')
   const copyRules = getCssRuleBodies(css, '.folder-candidate-copy').join('\n')
   const titleRule = getCssRuleBody(css, '.folder-candidate-copy strong')
   const metaRule = getCssRuleBody(css, '.folder-candidate-copy span')
@@ -995,6 +1003,90 @@ test('newtab folder candidate cards keep long text inside their frame', () => {
   assert.match(metaRule, /overflow-wrap:\s*anywhere/)
   assert.match(metaRule, /word-break:\s*break-word/)
   assert.match(badgeRule, /align-self:\s*start/)
+  assert.match(focusRules, /box-shadow:\s*0 0 0 2px rgba\(245,\s*245,\s*247,\s*0\.16\)/)
+})
+
+test('newtab search and quick access stay scoped to selected source folders', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+
+  assert.match(script, /bookmarks:\s*state\.bookmarks/)
+  assert.match(script, /bookmarks:\s*getVisibleBookmarkRecords\(\)/)
+  assert.match(script, /function getVisibleBookmarkRecords\(\): BookmarkRecord\[\]/)
+  assert.match(script, /folderData\.bookmarkMap\.get\(bookmarkId\)/)
+  assert.doesNotMatch(script, /bookmarks:\s*state\.allBookmarks,[\s\S]*?pinnedIds: state\.activity\.pinnedIds/)
+  assert.doesNotMatch(script, /bookmarks:\s*state\.folderData\?\.bookmarks \|\| extractBookmarkData\(state\.rootNode\)\.bookmarks/)
+})
+
+test('newtab source selection rolls back when folder settings fail to save', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const updateSelectedFoldersBody = script.match(
+    /async function updateSelectedFolders\([\s\S]*?\n\}\n\nasync function/
+  )?.[0] || ''
+
+  assert.ok(updateSelectedFoldersBody, 'updateSelectedFolders should exist')
+  assert.match(updateSelectedFoldersBody, /const previousSettings = state\.folderSettings/)
+  assert.match(updateSelectedFoldersBody, /const previousSections = \[\.\.\.state\.folderSections\]/)
+  assert.match(updateSelectedFoldersBody, /try \{[\s\S]*?await saveFolderSettings\(\)/)
+  assert.match(updateSelectedFoldersBody, /catch \(error\) \{[\s\S]*?state\.folderSettings = previousSettings/)
+  assert.match(updateSelectedFoldersBody, /state\.folderSections = previousSections/)
+  assert.match(updateSelectedFoldersBody, /setSettingsSaveStatus\('error', '来源保存失败，已恢复到上次已保存状态'\)/)
+})
+
+test('newtab avoids heavy startup and navigation work on the main path', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const refreshBody = getFunctionBody(script, 'refreshNewTab')
+  const preloadBody = getFunctionBody(script, 'preloadBackgroundSettings')
+  const snapshotBody = getFunctionBody(script, 'normalizeNewTabContentSnapshotRecord')
+  const navigationBody = getFunctionBody(script, 'bindBookmarkNavigation')
+  const iconCommitBody = getFunctionBody(script, 'commitIconSettings')
+  const iconLiveBody = getFunctionBody(script, 'applyIconSettingsLive')
+
+  assert.match(script, /const FAVICON_ACCENT_EXTRACTION_INITIAL_BUDGET = 48/)
+  assert.match(script, /renderIndex < FAVICON_ACCENT_EXTRACTION_INITIAL_BUDGET/)
+  assert.match(refreshBody, /backgroundPreloadPromise/)
+  assert.doesNotMatch(refreshBody, /STORAGE_KEYS\.newTabBackgroundSettings/)
+  assert.match(preloadBody, /return state\.backgroundSettings/)
+  assert.doesNotMatch(preloadBody, /await applyBackgroundSettings\(\)/)
+  assert.match(snapshotBody, /fullText:\s*undefined/)
+  assert.doesNotMatch(snapshotBody, /normalizeNewTabSnapshotText\(source\.fullText\)/)
+  assert.match(navigationBody, /void recordBookmarkOpen\(bookmark\)[\s\S]*?window\.location\.assign\(url\)/)
+  assert.doesNotMatch(navigationBody, /recordBookmarkOpen\(bookmark\)\.finally/)
+  assert.match(iconCommitBody, /applyIconSettingsLive\(\)/)
+  assert.doesNotMatch(iconCommitBody, /scheduleRender\(\{ updateClock: true \}\)/)
+  assert.match(iconLiveBody, /content\.style\.setProperty\('--icon-page-width'/)
+  assert.match(iconLiveBody, /content\.dataset\.iconLayoutMode = state\.iconSettings\.layoutMode/)
+  assert.match(iconLiveBody, /page\.dataset\.iconVerticalCenter = String\(state\.iconSettings\.verticalCenter\)/)
+})
+
+test('newtab global keyboard search shortcut avoids hijacking normal typing', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const keydownBody = getFunctionBody(script, 'handleDocumentKeydown')
+  const shouldFocusBody = getFunctionBody(script, 'shouldFocusSearchFromKeydown')
+
+  assert.match(shouldFocusBody, /return event\.key === '\/'/)
+  assert.doesNotMatch(shouldFocusBody, /event\.key\.length === 1 && Boolean\(event\.key\.trim\(\)\)/)
+  assert.match(keydownBody, /if \(event\.key === '\/'\) \{[\s\S]*?input\.select\(\)[\s\S]*?return/)
+  assert.match(keydownBody, /if \(event\.key\.length === 1\) \{[\s\S]*?input\.value = event\.key/)
+})
+
+test('newtab portal overview stays quiet without today signals', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const hasSignalBody = getFunctionBody(script, 'hasPortalOverviewSignal')
+  const statsBody = getFunctionBody(script, 'createPortalStats')
+
+  assert.match(hasSignalBody, /overview\.openedTodayCount > 0 \|\| overview\.addedTodayCount > 0/)
+  assert.doesNotMatch(hasSignalBody, /overview\.bookmarkCount > 0/)
+  assert.doesNotMatch(hasSignalBody, /overview\.folderCount > 0/)
+  assert.match(statsBody, /const stats: HTMLElement\[\] = \[\]/)
+  assert.doesNotMatch(statsBody, /createPortalStat\('书签', overview\.bookmarkCount\)/)
+  assert.doesNotMatch(statsBody, /createPortalStat\('来源', overview\.folderCount\)/)
+})
+
+test('newtab save errors explain temporary state instead of implying persistence', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const saveBody = getFunctionBody(script, 'saveSettingsWithFeedback')
+
+  assert.match(saveBody, /保存失败，本次调整仅临时生效；刷新后会恢复到上次已保存状态/)
 })
 
 test('newtab search suggestions wait for arrow navigation before selecting a bookmark', () => {
@@ -1016,8 +1108,10 @@ test('newtab search suggestions explain bookmark enter behavior and empty web se
   assert.match(script, /input\.setAttribute\('aria-controls', 'newtab-search-suggestions'\)/)
   assert.match(script, /suggestions\.setAttribute\('role', 'listbox'\)/)
   assert.match(script, /suggestionsHint\.className = 'newtab-search-hint'/)
+  assert.match(script, /suggestionsHint\.setAttribute\('role', 'status'\)/)
+  assert.match(script, /suggestionsHint\.setAttribute\('aria-live', 'polite'\)/)
   assert.match(script, /createSearchWebFallbackButton\(trimmedQuery\)/)
-  assert.match(script, /未找到书签，按 Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索/)
+  assert.match(script, /未找到书签；按 Enter 仅在本页用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页/)
   assert.match(script, /suggestionsHint\.textContent = `按 ↓ 选择书签，选中后 Enter 打开；Cmd\/Ctrl\+Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页`/)
   assert.match(script, /button\.addEventListener\('click', \(\) => \{[\s\S]*?submitSearch\(query\)/)
   assert.match(css, /\.newtab-search-hint\s*\{/)
