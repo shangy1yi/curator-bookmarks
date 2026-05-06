@@ -1,7 +1,7 @@
 {
   "name": "curator-bookmarks",
   "private": true,
-  "version": "1.4.28",
+  "version": "1.4.29",
   "description": "Curator — Chrome 本地书签管理扩展",
   "license": "MIT",
   "keywords": [

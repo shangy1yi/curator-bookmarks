@@ -192,14 +192,28 @@
             <div class="setting-row">
               <span class="setting-label-stack">
                 <span>背景类型</span>
-                <small>可选择纯色、本地图片/视频或远程图片链接。</small>
+                <small>可选择精选图库、纯色、本地图片/视频或远程图片链接。</small>
               </span>
               <select id="background-type" class="setting-select setting-native-select" aria-label="背景类型">
+                <option value="featured" selected>精选图库</option>
                 <option value="image">图片</option>
                 <option value="video">视频</option>
                 <option value="urls">图片链接</option>
-                <option value="color" selected>纯色</option>
+                <option value="color">纯色</option>
               </select>
+            </div>
+            <div id="background-featured-row" class="setting-row">
+              <span class="setting-label-stack">
+                <span>精选图库</span>
+                <small>NASA、Rijksmuseum、The Met 与 Smithsonian 精选图片，默认每日轮换并自动缓存。</small>
+              </span>
+              <select id="background-featured-id" class="setting-select setting-native-select" aria-label="精选图库图片">
+                <option value="">每日精选</option>
+              </select>
+            </div>
+            <div id="background-featured-credit-row" class="setting-row background-featured-credit-row">
+              <span>图片来源</span>
+              <a id="background-featured-credit" class="background-featured-credit" href="https://images.nasa.gov/" target="_blank" rel="noreferrer">NASA Image and Video Library</a>
             </div>
             <label id="background-color-row" class="setting-row">
               <span>背景颜色</span>

@@ -452,6 +452,28 @@ test('newtab URL backgrounds auto-cache without a manual permission button', () 
   assert.doesNotMatch(script, /function requestOriginPermission|function hasOriginPermission|chrome\.permissions\.request/)
 })
 
+test('newtab defaults to a cached featured multi-source gallery background', () => {
+  const html = readProjectFile('src/newtab/newtab.html')
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const css = readProjectFile('src/newtab/newtab.css')
+  const normalizeBody = getFunctionBody(script, 'normalizeBackgroundSettings')
+  const currentUrlBody = getFunctionBody(script, 'isCurrentBackgroundUrl')
+
+  assert.match(html, /<option value="featured" selected>精选图库<\/option>/)
+  assert.match(html, /id="background-featured-id"[^>]+aria-label="精选图库图片"/)
+  assert.match(html, /NASA、Rijksmuseum、The Met 与 Smithsonian 精选图片，默认每日轮换并自动缓存。/)
+  assert.match(script, /from '\.\/background-gallery\.js'/)
+  assert.match(script, /type:\s*'featured'/)
+  assert.match(script, /SUPPORTED_BACKGROUND_TYPES = new Set\(\['featured', 'image', 'video', 'urls', 'color'\]\)/)
+  assert.match(normalizeBody, /featuredId:\s*getFeaturedBackgroundItemById\(settings\.featuredId\)\?\.id \|\| ''/)
+  assert.match(script, /async function applyBackgroundSettings\(\): Promise<void> \{[\s\S]*?if \(isRemoteBackgroundType\(settings\.type\)\)[\s\S]*?getRemoteBackgroundImageUrl\(settings\)/)
+  assert.match(currentUrlBody, /isRemoteBackgroundType\(state\.backgroundSettings\.type\)/)
+  assert.match(currentUrlBody, /getRemoteBackgroundImageUrl\(state\.backgroundSettings\) === imageUrl/)
+  assert.match(script, /function isBackgroundImageResponse\(contentType: unknown, imageUrl: string\): boolean/)
+  assert.match(script, /url\.hostname === 'ids\.si\.edu'/)
+  assert.match(css, /\.background-featured-credit/)
+})
+
 test('newtab search vertical offset uses adaptive runtime bounds', () => {
   const html = readProjectFile('src/newtab/newtab.html')
   const css = readProjectFile('src/newtab/newtab.css')
@@ -652,11 +674,11 @@ test('newtab url wallpaper loading does not block the main view', () => {
 
   assert.match(
     script,
-    /if \(settings\.type === 'urls'\) \{[\s\S]*?markWallpaperReady\(\)[\s\S]*?void applyUrlBackgroundImage\(imageUrl, applyToken, mediaSignature\)/
+    /if \(isRemoteBackgroundType\(settings\.type\)\) \{[\s\S]*?markWallpaperReady\(\)[\s\S]*?void applyUrlBackgroundImage\(imageUrl, applyToken, mediaSignature\)/
   )
   assert.doesNotMatch(
     script,
-    /if \(settings\.type === 'urls'\) \{[\s\S]*?await applyUrlBackgroundImage\(imageUrl, applyToken, mediaSignature\)/
+    /if \(isRemoteBackgroundType\(settings\.type\)\) \{[\s\S]*?await applyUrlBackgroundImage\(imageUrl, applyToken, mediaSignature\)/
   )
   assert.match(script, /preserveCurrentUntilReady: true/)
   assert.match(script, /waitForBackgroundImageReady\(imageUrl, applyToken\)/)

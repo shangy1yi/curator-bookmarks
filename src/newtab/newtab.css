@@ -3019,6 +3019,26 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   opacity: 0.5;
 }
 
+.background-featured-credit-row {
+  min-height: 38px;
+}
+
+.background-featured-credit {
+  max-width: 170px;
+  color: rgba(245, 245, 247, 0.62);
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: right;
+  text-decoration: none;
+}
+
+.background-featured-credit:hover,
+.background-featured-credit:focus-visible {
+  color: rgba(245, 245, 247, 0.92);
+  text-decoration: underline;
+  outline: none;
+}
+
 .search-engine-setting-row {
   align-items: start;
   grid-template-columns: minmax(0, 1fr);

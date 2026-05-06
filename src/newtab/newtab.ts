@@ -95,6 +95,13 @@ import {
   type FaviconAccentColor
 } from './favicon-cache.js'
 import {
+  FEATURED_BACKGROUND_ITEMS,
+  getDefaultFeaturedBackgroundItem,
+  getFeaturedBackgroundItemById,
+  selectFeaturedBackgroundItem,
+  type FeaturedBackgroundItem
+} from './background-gallery.js'
+import {
   BACKGROUND_URL_FETCH_TIMEOUT_MS,
   BACKGROUND_URL_MAX_BYTES,
   applyBookmarkMoveOperationsToChildren,
@@ -173,16 +180,17 @@ const BACKGROUND_URL_CACHE_QUALITY = 0.86
 const BACKGROUND_IMAGE_READY_TIMEOUT_MS = 2200
 const BACKGROUND_VIDEO_READY_TIMEOUT_MS = 2800
 const DEFAULT_BACKGROUND_SETTINGS = {
-  type: 'color',
+  type: 'featured',
   color: '#000000',
   imageName: '',
   videoName: '',
   url: '',
+  featuredId: '',
   maskEnabled: false,
   maskStyle: 'dark',
   maskBlur: 12
 }
-const SUPPORTED_BACKGROUND_TYPES = new Set(['image', 'video', 'urls', 'color'])
+const SUPPORTED_BACKGROUND_TYPES = new Set(['featured', 'image', 'video', 'urls', 'color'])
 const SUPPORTED_BACKGROUND_MASK_STYLES = new Set(['dark', 'frosted', 'light'])
 const DEFAULT_SEARCH_SETTINGS = {
   enabled: true,
@@ -564,6 +572,7 @@ const backgroundPreloadPromise = preloadBackgroundSettings()
 
 document.addEventListener('DOMContentLoaded', () => {
   bindEvents()
+  hydrateFeaturedBackgroundOptions()
   renderIconPresetCards()
   void backgroundPreloadPromise
   void hydrateNewTabSavedSearches()
@@ -887,6 +896,7 @@ function bindTimeSettingsEvents(): void {
 
 function bindBackgroundSettingsEvents(): void {
   document.getElementById('background-type')?.addEventListener('change', handleBackgroundSettingsChange)
+  document.getElementById('background-featured-id')?.addEventListener('change', handleBackgroundSettingsChange)
   document.getElementById('background-color')?.addEventListener('input', handleBackgroundSettingsChange)
   document.getElementById('background-url')?.addEventListener('input', handleBackgroundSettingsChange)
   document.getElementById('background-mask-enabled')?.addEventListener('change', handleBackgroundSettingsChange)
@@ -1373,7 +1383,7 @@ function handleBackgroundSettingsChange(): void {
   state.backgroundSettings = nextSettings
   backgroundSettingsMutationVersion += 1
   preloadedBackgroundSettings = nextSettings
-  setWallpaperPlaceholderColor(nextSettings.color)
+  setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(nextSettings))
   void saveBackgroundSettings().catch((error) => {
     console.warn('新标签页背景设置保存失败。', error)
   })
@@ -3165,7 +3175,7 @@ async function preloadBackgroundSettings(): Promise<typeof DEFAULT_BACKGROUND_SE
     if (backgroundMutationVersionAtStart === backgroundSettingsMutationVersion) {
       state.backgroundSettings = nextSettings
       preloadedBackgroundSettings = nextSettings
-      setWallpaperPlaceholderColor(state.backgroundSettings.color)
+      setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(state.backgroundSettings))
       syncBackgroundSettingsControls()
       void applyBackgroundSettings()
     }
@@ -6699,6 +6709,7 @@ function normalizeBackgroundSettings(rawSettings: unknown): typeof DEFAULT_BACKG
     imageName: String(settings.imageName || '').trim(),
     videoName: String(settings.videoName || '').trim(),
     url: String(settings.url || '').trim(),
+    featuredId: getFeaturedBackgroundItemById(settings.featuredId)?.id || '',
     maskEnabled: settings.maskEnabled === true,
     maskStyle: SUPPORTED_BACKGROUND_MASK_STYLES.has(String(settings.maskStyle))
       ? String(settings.maskStyle)
@@ -6710,6 +6721,7 @@ function normalizeBackgroundSettings(rawSettings: unknown): typeof DEFAULT_BACKG
 function readBackgroundSettingsFromControls(): typeof DEFAULT_BACKGROUND_SETTINGS {
   const typeInput = document.getElementById('background-type')
   const colorInput = document.getElementById('background-color')
+  const featuredInput = document.getElementById('background-featured-id')
   const urlInput = document.getElementById('background-url')
   const maskEnabledInput = document.getElementById('background-mask-enabled')
   const maskStyleInput = document.getElementById('background-mask-style')
@@ -6721,6 +6733,9 @@ function readBackgroundSettingsFromControls(): typeof DEFAULT_BACKGROUND_SETTING
     imageName: state.backgroundSettings.imageName,
     videoName: state.backgroundSettings.videoName,
     url: urlInput instanceof HTMLInputElement ? urlInput.value : state.backgroundSettings.url,
+    featuredId: featuredInput instanceof HTMLSelectElement
+      ? featuredInput.value
+      : state.backgroundSettings.featuredId,
     maskEnabled: maskEnabledInput instanceof HTMLInputElement
       ? maskEnabledInput.checked
       : state.backgroundSettings.maskEnabled,
@@ -6737,8 +6752,12 @@ function syncBackgroundSettingsControls(): void {
   const settings = state.backgroundSettings
   const typeInput = document.getElementById('background-type')
   const colorInput = document.getElementById('background-color')
+  const featuredInput = document.getElementById('background-featured-id')
   const urlInput = document.getElementById('background-url')
   const colorRow = document.getElementById('background-color-row')
+  const featuredRow = document.getElementById('background-featured-row')
+  const featuredCreditRow = document.getElementById('background-featured-credit-row')
+  const featuredCredit = document.getElementById('background-featured-credit')
   const imageRow = document.getElementById('background-image-row')
   const videoRow = document.getElementById('background-video-row')
   const urlRow = document.getElementById('background-url-row')
@@ -6759,8 +6778,24 @@ function syncBackgroundSettingsControls(): void {
   if (colorInput instanceof HTMLInputElement) {
     colorInput.value = settings.color
   }
+  if (featuredInput instanceof HTMLSelectElement) {
+    hydrateFeaturedBackgroundOptions()
+    featuredInput.value = settings.featuredId
+  }
   if (urlInput instanceof HTMLInputElement) {
     urlInput.value = settings.url
+  }
+  if (featuredRow instanceof HTMLElement) {
+    featuredRow.hidden = settings.type !== 'featured'
+  }
+  if (featuredCreditRow instanceof HTMLElement) {
+    featuredCreditRow.hidden = settings.type !== 'featured'
+  }
+  if (featuredCredit instanceof HTMLAnchorElement) {
+    const featuredItem = getActiveFeaturedBackgroundItem(settings)
+    featuredCredit.textContent = `${featuredItem.title} · ${featuredItem.credit}`
+    featuredCredit.href = featuredItem.sourceUrl
+    featuredCredit.title = `${featuredItem.license} · ${featuredItem.sourceUrl}`
   }
   if (colorRow instanceof HTMLElement) {
     colorRow.hidden = settings.type !== 'color'
@@ -6835,11 +6870,11 @@ function shouldClearBackgroundUrlCache(
   previousSettings: typeof DEFAULT_BACKGROUND_SETTINGS,
   nextSettings: typeof DEFAULT_BACKGROUND_SETTINGS
 ): boolean {
-  if (previousSettings.type !== nextSettings.type) {
+  if (!isRemoteBackgroundType(previousSettings.type) || !isRemoteBackgroundType(nextSettings.type)) {
     return true
   }
 
-  return normalizeBackgroundImageUrl(previousSettings.url) !== normalizeBackgroundImageUrl(nextSettings.url)
+  return getRemoteBackgroundImageUrl(previousSettings) !== getRemoteBackgroundImageUrl(nextSettings)
 }
 
 function getBackgroundMediaSignature(settings: typeof DEFAULT_BACKGROUND_SETTINGS): string {
@@ -6848,7 +6883,9 @@ function getBackgroundMediaSignature(settings: typeof DEFAULT_BACKGROUND_SETTING
     normalizeHexColor(settings.color, DEFAULT_BACKGROUND_SETTINGS.color),
     settings.imageName,
     settings.videoName,
-    normalizeBackgroundImageUrl(settings.url)
+    normalizeBackgroundImageUrl(settings.url),
+    settings.type === 'featured' ? settings.featuredId : '',
+    settings.type === 'featured' ? getActiveFeaturedBackgroundItem(settings).id : ''
   ].join('|')
 }
 
@@ -6895,17 +6932,24 @@ function hasAppliedBackgroundMedia(settings: typeof DEFAULT_BACKGROUND_SETTINGS)
   if (settings.type === 'video') {
     return Boolean(document.querySelector('.newtab-background-video'))
   }
-  if (settings.type === 'image' || settings.type === 'urls') {
+  if (settings.type === 'image' || settings.type === 'urls' || settings.type === 'featured') {
     return Boolean(document.body.style.backgroundImage)
   }
   return true
 }
 
-function setWallpaperPlaceholderColor(color = state.backgroundSettings.color): void {
+function setWallpaperPlaceholderColor(color = getBackgroundPlaceholderColor(state.backgroundSettings)): void {
   document.documentElement.style.setProperty(
     '--wallpaper-placeholder-bg',
     normalizeHexColor(color, DEFAULT_BACKGROUND_SETTINGS.color)
   )
+}
+
+function getBackgroundPlaceholderColor(settings: typeof DEFAULT_BACKGROUND_SETTINGS): string {
+  if (settings.type === 'featured') {
+    return getActiveFeaturedBackgroundItem(settings).accentColor
+  }
+  return settings.color
 }
 
 function markWallpaperReady(): void {
@@ -6921,7 +6965,7 @@ async function applyBackgroundSettings(): Promise<void> {
   const settings = state.backgroundSettings
   const mediaSignature = getBackgroundMediaSignature(settings)
   applyBackgroundMaskSettings(settings)
-  setWallpaperPlaceholderColor(settings.color)
+  setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(settings))
 
   if (
     mediaSignature === lastAppliedBackgroundMediaSignature &&
@@ -6943,8 +6987,8 @@ async function applyBackgroundSettings(): Promise<void> {
 
   document.documentElement.style.setProperty('--bg', settings.color)
 
-  if (settings.type === 'urls') {
-    const imageUrl = normalizeBackgroundImageUrl(settings.url)
+  if (isRemoteBackgroundType(settings.type)) {
+    const imageUrl = getRemoteBackgroundImageUrl(settings)
     if (imageUrl) {
       markWallpaperReady()
       void applyUrlBackgroundImage(imageUrl, applyToken, mediaSignature)
@@ -7179,8 +7223,8 @@ async function cacheBackgroundUrlImage(imageUrl: string): Promise<void> {
 }
 
 function isCurrentBackgroundUrl(imageUrl: string): boolean {
-  return state.backgroundSettings.type === 'urls' &&
-    normalizeBackgroundImageUrl(state.backgroundSettings.url) === imageUrl
+  return isRemoteBackgroundType(state.backgroundSettings.type) &&
+    getRemoteBackgroundImageUrl(state.backgroundSettings) === imageUrl
 }
 
 async function setBackgroundImageFromBlob(
@@ -7252,6 +7296,28 @@ function normalizeBackgroundImageUrl(value: string): string {
   } catch {
     return ''
   }
+}
+
+function isRemoteBackgroundType(type: unknown): boolean {
+  return type === 'urls' || type === 'featured'
+}
+
+function getRemoteBackgroundImageUrl(settings: typeof DEFAULT_BACKGROUND_SETTINGS): string {
+  if (settings.type === 'featured') {
+    return getActiveFeaturedBackgroundItem(settings).imageUrl
+  }
+
+  if (settings.type === 'urls') {
+    return normalizeBackgroundImageUrl(settings.url)
+  }
+
+  return ''
+}
+
+function getActiveFeaturedBackgroundItem(settings = state.backgroundSettings): FeaturedBackgroundItem {
+  return getFeaturedBackgroundItemById(settings.featuredId) ||
+    selectFeaturedBackgroundItem(formatNewTabLocalDate(Date.now())) ||
+    getDefaultFeaturedBackgroundItem()
 }
 
 function escapeCssUrl(value: string): string {
@@ -7455,7 +7521,7 @@ async function fetchBackgroundUrlImage(imageUrl: string): Promise<Blob> {
 
     const blob = await response.blob()
     const contentType = response.headers.get('content-type') || blob.type
-    if (!blob.size || !contentType.toLowerCase().startsWith('image/')) {
+    if (!blob.size || !isBackgroundImageResponse(contentType, imageUrl)) {
       throw new Error('链接返回的内容不是图片。')
     }
 
@@ -7521,6 +7587,27 @@ async function createOptimizedBackgroundImageBlob(blob: Blob): Promise<Blob> {
     return optimizedBlob
   } finally {
     bitmap.close()
+  }
+}
+
+function isBackgroundImageResponse(contentType: unknown, imageUrl: string): boolean {
+  const normalizedType = String(contentType || '').toLowerCase()
+  if (normalizedType.startsWith('image/')) {
+    return true
+  }
+
+  return isKnownImageUrlWithoutContentType(imageUrl)
+}
+
+function isKnownImageUrlWithoutContentType(imageUrl: string): boolean {
+  try {
+    const url = new URL(imageUrl)
+    if (url.hostname === 'ids.si.edu' && /^\/ids\/(?:deliveryService|download)$/i.test(url.pathname)) {
+      return true
+    }
+    return /\.(?:jpe?g|png|webp)(?:$|[?#])/i.test(url.pathname)
+  } catch {
+    return false
   }
 }
 
@@ -8520,6 +8607,21 @@ function renderIconPresetCards(): void {
     card.append(preview, name, desc, detail)
     row.appendChild(card)
   }
+}
+
+function hydrateFeaturedBackgroundOptions(): void {
+  const input = document.getElementById('background-featured-id')
+  if (!(input instanceof HTMLSelectElement) || input.dataset.hydrated === 'true') {
+    return
+  }
+
+  input.append(...FEATURED_BACKGROUND_ITEMS.map((item) => {
+    const option = document.createElement('option')
+    option.value = item.id
+    option.textContent = item.title
+    return option
+  }))
+  input.dataset.hydrated = 'true'
 }
 
 function submitSearch(value: string, openAllEnabled = false): void {
