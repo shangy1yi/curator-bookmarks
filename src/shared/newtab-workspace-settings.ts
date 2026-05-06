@@ -1,5 +1,5 @@
 export const DEFAULT_NEW_TAB_WORKSPACE_ID = 'default'
-export const MAX_NEW_TAB_WORKSPACES = 8
+export const MAX_NEW_TAB_WORKSPACES = 1
 export const MAX_WORKSPACE_PINNED_BOOKMARKS = 16
 
 export interface NewTabWorkspace {
@@ -29,28 +29,7 @@ export interface WorkspaceMutationOptions {
 export const DEFAULT_NEW_TAB_WORKSPACES: NewTabWorkspace[] = [
   {
     id: DEFAULT_NEW_TAB_WORKSPACE_ID,
-    name: '默认',
-    pinnedIds: [],
-    createdAt: 0,
-    updatedAt: 0
-  },
-  {
-    id: 'work',
-    name: '工作',
-    pinnedIds: [],
-    createdAt: 0,
-    updatedAt: 0
-  },
-  {
-    id: 'study',
-    name: '学习',
-    pinnedIds: [],
-    createdAt: 0,
-    updatedAt: 0
-  },
-  {
-    id: 'personal',
-    name: '个人',
+    name: 'Speed Dial',
     pinnedIds: [],
     createdAt: 0,
     updatedAt: 0
@@ -83,32 +62,31 @@ export function normalizeNewTabWorkspaceSettings(
     }
     seenIds.add(normalized.id)
     normalizedWorkspaces.push(normalized)
-    if (normalizedWorkspaces.length >= MAX_NEW_TAB_WORKSPACES) {
-      break
-    }
-  }
-
-  for (const workspace of DEFAULT_NEW_TAB_WORKSPACES) {
-    if (seenIds.has(workspace.id)) {
-      continue
-    }
-    seenIds.add(workspace.id)
-    normalizedWorkspaces.push({
-      ...workspace,
-      pinnedIds: workspace.id === DEFAULT_NEW_TAB_WORKSPACE_ID ? fallbackLegacyPins : [],
-      createdAt: now,
-      updatedAt: now
-    })
   }
 
   const activeWorkspaceId = normalizeWorkspaceId(source.activeWorkspaceId)
-  const resolvedActiveId = normalizedWorkspaces.some((workspace) => workspace.id === activeWorkspaceId)
-    ? activeWorkspaceId
-    : DEFAULT_NEW_TAB_WORKSPACE_ID
+  const orderedWorkspaces = [
+    ...normalizedWorkspaces.filter((workspace) => workspace.id === activeWorkspaceId),
+    ...normalizedWorkspaces.filter((workspace) => workspace.id !== activeWorkspaceId)
+  ]
+  const pinnedIds = normalizeWorkspacePinnedIds([
+    ...orderedWorkspaces.flatMap((workspace) => workspace.pinnedIds),
+    ...fallbackLegacyPins
+  ], validIds)
+  const createdAt = orderedWorkspaces[0]?.createdAt || now
+  const updatedAt = Math.max(
+    ...orderedWorkspaces.map((workspace) => workspace.updatedAt || 0),
+    createdAt
+  )
 
   return {
-    activeWorkspaceId: resolvedActiveId,
-    workspaces: normalizedWorkspaces.slice(0, MAX_NEW_TAB_WORKSPACES)
+    activeWorkspaceId: DEFAULT_NEW_TAB_WORKSPACE_ID,
+    workspaces: [{
+      ...DEFAULT_NEW_TAB_WORKSPACES[0],
+      pinnedIds,
+      createdAt,
+      updatedAt
+    }]
   }
 }
 
@@ -122,15 +100,10 @@ export function setActiveNewTabWorkspace(
   settings: NewTabWorkspaceSettings,
   workspaceId: string
 ): NewTabWorkspaceSettings {
-  const id = normalizeWorkspaceId(workspaceId)
-  if (!settings.workspaces.some((workspace) => workspace.id === id)) {
-    return settings
-  }
-
-  return {
-    ...settings,
-    activeWorkspaceId: id
-  }
+  void workspaceId
+  return settings.activeWorkspaceId === DEFAULT_NEW_TAB_WORKSPACE_ID
+    ? settings
+    : { ...settings, activeWorkspaceId: DEFAULT_NEW_TAB_WORKSPACE_ID }
 }
 
 export function toggleNewTabWorkspacePin(
@@ -143,7 +116,7 @@ export function toggleNewTabWorkspacePin(
   }: WorkspaceMutationOptions = {}
 ): NewTabWorkspaceSettings {
   const validIds = createValidIdSet(validBookmarkIds)
-  const targetWorkspaceId = normalizeWorkspaceId(workspaceId) || settings.activeWorkspaceId
+  void workspaceId
   const targetBookmarkId = normalizeBookmarkId(bookmarkId)
   if (!targetBookmarkId || (validIds && !validIds.has(targetBookmarkId))) {
     return settings
@@ -151,7 +124,7 @@ export function toggleNewTabWorkspacePin(
 
   let changed = false
   const workspaces = settings.workspaces.map((workspace) => {
-    if (workspace.id !== targetWorkspaceId) {
+    if (workspace.id !== DEFAULT_NEW_TAB_WORKSPACE_ID) {
       return workspace
     }
 
@@ -182,7 +155,7 @@ export function updateNewTabWorkspace(
   }: WorkspaceMutationOptions = {}
 ): NewTabWorkspaceSettings {
   const id = normalizeWorkspaceId(workspaceId)
-  if (!id) {
+  if (!id || id !== DEFAULT_NEW_TAB_WORKSPACE_ID) {
     return settings
   }
 
@@ -196,7 +169,7 @@ export function updateNewTabWorkspace(
     changed = true
     return {
       ...workspace,
-      name: normalizeWorkspaceName(updates.name ?? workspace.name, workspace.name),
+      name: DEFAULT_NEW_TAB_WORKSPACES[0].name,
       pinnedIds: Array.isArray(updates.pinnedIds)
         ? normalizeWorkspacePinnedIds(updates.pinnedIds, validIds)
         : workspace.pinnedIds,
@@ -246,7 +219,7 @@ function normalizeWorkspace(rawWorkspace: unknown, validIds: Set<string> | null,
   const createdAt = normalizeTimestamp(source.createdAt) || now
   return {
     id,
-    name: normalizeWorkspaceName(source.name, fallback?.name || '场景'),
+    name: normalizeWorkspaceName(source.name, fallback?.name || DEFAULT_NEW_TAB_WORKSPACES[0].name),
     pinnedIds: normalizeWorkspacePinnedIds(source.pinnedIds, validIds),
     createdAt,
     updatedAt: normalizeTimestamp(source.updatedAt) || createdAt

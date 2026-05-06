@@ -48,7 +48,7 @@ test('exposes stable module setting rows and visible module order', () => {
     'speedDial',
     'health'
   ])
-  assert.equal(rows[0].label, 'Speed Dial 与场景')
+  assert.equal(rows[0].label, 'Speed Dial')
   assert.equal(rows[0].enabled, false)
   assert.equal(rows[1].enabled, false)
   assert.deepEqual(getVisibleNewTabModules({

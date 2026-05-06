@@ -125,9 +125,12 @@ function renderTagUsageCard(stat: BookmarkTagUsageStat): string {
           <p>手动 ${stat.manualCount} · AI ${stat.aiCount} · 最近更新 ${escapeHtml(latest)}</p>
         </div>
       </div>
-      <ul class="tag-management-examples" aria-label="${escapeAttr(stat.tag)} 标签示例书签">
-        ${examples || '<li>暂无示例书签</li>'}
-      </ul>
+      <div class="tag-management-card-examples">
+        <span>示例书签</span>
+        <ul class="tag-management-examples" aria-label="${escapeAttr(stat.tag)} 标签示例书签">
+          ${examples || '<li>暂无示例书签</li>'}
+        </ul>
+      </div>
     </article>
   `
 }

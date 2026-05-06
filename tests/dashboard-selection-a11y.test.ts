@@ -5,7 +5,10 @@ import { test } from 'node:test'
 
 import {
   applyNewTabSpeedDialStateMessage,
+  buildDashboardFaviconWarmupItems,
+  createDashboardFaviconWarmupQueue,
   createNewTabToggleSpeedDialMessage,
+  type DashboardFaviconWarmupItem,
   getDashboardFaviconFallbackUrl,
   getDashboardCardActionLabel,
   getDashboardSelectionLabel,
@@ -133,20 +136,41 @@ test('dashboard Speed Dial action uses the shared newtab toggle message contract
   assert.doesNotMatch(dashboardSource, /请在新标签页打开仪表盘后添加到 Speed Dial/)
 })
 
-test('dashboard cards use stable Chrome favicon URLs without swapping visible sources', () => {
+test('dashboard cards keep letter fallback visible until favicon image load succeeds', () => {
   const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
   const optionsSource = readProjectFile('src/options/options.ts')
+  const optionsCss = readProjectFile('src/options/options.css')
 
   assert.match(dashboardSource, /export function getDashboardFaviconFallbackUrl\(url: string\): string/)
-  assert.match(dashboardSource, /chrome-extension:\/\/\$\{runtimeId\}\/_favicon\/\?pageUrl=\$\{encodeURIComponent\(url\)\}&size=32/)
-  assert.match(dashboardSource, /data-dashboard-favicon-source="chrome"/)
-  assert.match(dashboardSource, /data-dashboard-favicon-page-url="\$\{escapeAttr\(item\.url\)\}"/)
+  assert.match(dashboardSource, /buildDashboardFaviconUrl\(endpointUrl, url, \{ size: DASHBOARD_FAVICON_SIZE \}\)/)
+  assert.match(dashboardSource, /faviconUrl\.searchParams\.set\('cache', '1'\)/)
+  assert.match(dashboardSource, /data-dashboard-favicon-source="cache"/)
+  assert.doesNotMatch(dashboardSource, /data-dashboard-favicon-source="chrome"/)
+  assert.match(dashboardSource, /data-dashboard-favicon-page-url="\$\{escapeAttr\(normalizedPageUrl\)\}"/)
+  assert.match(dashboardSource, /const chromeDataUrl = await fetchDashboardFaviconAsDataUrl\(chromeFaviconUrl/)
+  assert.match(dashboardSource, /upsertDashboardRemoteFavicon\(item\.pageUrl, chromeDataUrl\)/)
+  assert.match(dashboardSource, /const image = await preloadDashboardFavicon\(chromeFaviconUrl\)/)
+  assert.match(dashboardSource, /readDashboardImageAsDataUrl\(image\)/)
+  assert.match(dashboardSource, /dashboard-favicon-shell \$\{faviconMarkup \? 'has-favicon' : ''\}/)
+  assert.match(dashboardSource, /export function handleDashboardLoad\(event: Event\): void/)
+  assert.match(dashboardSource, /function handleDashboardFaviconLoad\(image: HTMLImageElement\): void/)
+  assert.match(dashboardSource, /shell\?\.classList\.add\('has-favicon'\)/)
+  assert.match(dashboardSource, /function syncCompletedDashboardFaviconImages\(\): void/)
+  assert.match(dashboardSource, /image\.complete[\s\S]*?handleDashboardFaviconLoad\(image\)/)
   assert.match(dashboardSource, /function handleDashboardFaviconError\(image: HTMLImageElement, _callbacks: DashboardCallbacks\): void/)
-  assert.match(dashboardSource, /function handleDashboardFaviconError\([\s\S]*?image\.remove\(\)/)
-  assert.doesNotMatch(dashboardSource, /\/favicon\.ico/)
-  assert.doesNotMatch(dashboardSource, /image\.src\s*=/)
+  assert.match(dashboardSource, /function markDashboardFaviconImageFailed\(image: HTMLImageElement\): void[\s\S]*?image\.remove\(\)/)
+  assert.match(dashboardSource, /shell\?\.classList\.remove\('has-favicon'\)/)
+  assert.match(dashboardSource, /getDashboardBestFaviconCandidate\(html, pageResponse\.url \|\| pageUrl\)[\s\S]*?new URL\('\/favicon\.ico'/)
+  assert.match(dashboardSource, /const DASHBOARD_FAVICON_FETCH_VERSION = 2/)
+  assert.match(dashboardSource, /function resolveDashboardFaviconMimeType\(/)
+  assert.match(dashboardSource, /inferDashboardFaviconMimeTypeFromBlob/)
   assert.match(optionsSource, /handleDashboardError\(event, dashboardCallbacks\), true/)
-  assert.match(optionsSource, /getFaviconFallbackUrl: getDashboardFaviconFallbackUrl/)
+  assert.match(optionsSource, /handleDashboardLoad, true/)
+  assert.doesNotMatch(optionsSource, /getFaviconFallbackUrl: getDashboardFaviconFallbackUrl/)
+  assert.match(optionsCss, /\.dashboard-favicon-shell img\s*\{[\s\S]*?opacity:\s*0/)
+  assert.match(optionsCss, /\.dashboard-favicon-shell\.has-favicon img\s*\{[\s\S]*?opacity:\s*1/)
+  assert.match(optionsCss, /\.dashboard-favicon-shell\.has-favicon > span\s*\{[\s\S]*?display:\s*none/)
+  assert.doesNotMatch(optionsCss, /\.dashboard-favicon-shell img \+ span\s*\{[\s\S]*?display:\s*none/)
 
   const originalChrome = globalThis.chrome
   globalThis.chrome = {
@@ -159,7 +183,7 @@ test('dashboard cards use stable Chrome favicon URLs without swapping visible so
   try {
     assert.equal(
       getDashboardFaviconFallbackUrl('https://example.com/docs'),
-      'chrome-extension://extension-id/_favicon/?pageUrl=https%3A%2F%2Fexample.com%2Fdocs&size=32'
+      'chrome-extension://extension-id/_favicon/?pageUrl=https%3A%2F%2Fexample.com%2Fdocs&size=32&cache=1'
     )
   } finally {
     if (originalChrome === undefined) {
@@ -168,6 +192,136 @@ test('dashboard cards use stable Chrome favicon URLs without swapping visible so
       globalThis.chrome = originalChrome
     }
   }
+})
+
+test('dashboard favicon warmup skips cached records but still retries chrome favicon after remote failures', () => {
+  const cache = {
+    'https://cached.example/': {
+      pageUrl: 'https://cached.example/',
+      iconUrl: 'data:image/png;base64,AAAA',
+      updatedAt: Date.now()
+    },
+    'https://failed.example/': {
+      pageUrl: 'https://failed.example/',
+      iconUrl: '',
+      updatedAt: 0,
+      failedAt: Date.now(),
+      version: 2
+    },
+    'https://stale-failure.example/': {
+      pageUrl: 'https://stale-failure.example/',
+      iconUrl: '',
+      updatedAt: 0,
+      failedAt: Date.now()
+    }
+  }
+  const items = buildDashboardFaviconWarmupItems({
+    faviconEndpointUrl: 'chrome-extension://extension-id/_favicon/',
+    remoteCache: cache,
+    bookmarks: [
+      { id: '1', url: 'https://cached.example/' },
+      { id: '2', url: 'https://failed.example/' },
+      { id: '3', url: 'chrome://extensions/' },
+      { id: '4', url: 'https://fresh.example/docs' },
+      { id: '5', url: 'https://stale-failure.example/' }
+    ],
+    size: 32
+  })
+
+  assert.deepEqual(items.map((item) => item.pageUrl), [
+    'https://failed.example/',
+    'https://fresh.example/docs',
+    'https://stale-failure.example/'
+  ])
+})
+
+async function flushWarmupMicrotasks(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+test('dashboard favicon warmup preloads full bookmark set with bounded concurrency', async () => {
+  const items = buildDashboardFaviconWarmupItems({
+    faviconEndpointUrl: 'chrome-extension://extension-id/_favicon/',
+    bookmarks: [
+      { id: '1', url: 'https://example.com/a' },
+      { id: '2', url: 'https://example.com/a' },
+      { id: '3', url: '' },
+      { id: '4', url: 'https://example.net/b' }
+    ],
+    size: 32
+  })
+  assert.deepEqual(items.map((item) => item.pageUrl), [
+    'https://example.com/a',
+    'https://example.net/b'
+  ])
+  assert.equal(new URL(items[0].faviconUrl).searchParams.get('cache'), '1')
+
+  const idleCallbacks: Array<() => void> = []
+  const pendingLoads: Array<{
+    item: DashboardFaviconWarmupItem
+    resolve: () => void
+  }> = []
+  const warmed: string[] = []
+  let activeLoads = 0
+  let peakActiveLoads = 0
+  const queue = createDashboardFaviconWarmupQueue({
+    faviconEndpointUrl: 'chrome-extension://extension-id/_favicon/',
+    bookmarks: Array.from({ length: 4 }, (_, index) => ({
+      id: String(index + 1),
+      url: `https://example.com/${index + 1}`
+    })),
+    maxConcurrent: 2,
+    batchSize: 3,
+    batchDelayMs: 1,
+    waitForIdle: (callback) => {
+      idleCallbacks.push(callback)
+    },
+    loadFavicon: async (_url, item) => {
+      activeLoads += 1
+      peakActiveLoads = Math.max(peakActiveLoads, activeLoads)
+      await new Promise<void>((resolve) => {
+        pendingLoads.push({
+          item,
+          resolve: () => {
+            activeLoads -= 1
+            resolve()
+          }
+        })
+      })
+    },
+    onWarm: (item) => {
+      warmed.push(item.id)
+    }
+  })
+
+  queue.start()
+  idleCallbacks.shift()?.()
+  await flushWarmupMicrotasks()
+  assert.equal(pendingLoads.length, 2)
+  assert.equal(queue.getSnapshot().activeCount, 2)
+  assert.equal(queue.getSnapshot().pendingCount, 2)
+
+  pendingLoads.shift()?.resolve()
+  await flushWarmupMicrotasks()
+  assert.deepEqual(pendingLoads.map((load) => load.item.id), ['2', '3'])
+  assert.equal(peakActiveLoads, 2)
+
+  pendingLoads.splice(0).forEach((load) => load.resolve())
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await flushWarmupMicrotasks()
+  pendingLoads.splice(0).forEach((load) => load.resolve())
+  await flushWarmupMicrotasks()
+
+  assert.deepEqual(warmed, ['1', '2', '3', '4'])
+  assert.deepEqual(queue.getSnapshot(), {
+    pendingCount: 0,
+    activeCount: 0,
+    warmedCount: 4,
+    failedCount: 0,
+    canceled: false
+  })
 })
 
 test('dashboard cards expose keyboard-triggerable move and delete actions', () => {

@@ -124,11 +124,6 @@ import {
   hasActionableBookmarkHealth
 } from './bookmark-health.js'
 import {
-  buildCommandPaletteItems,
-  shouldOpenCommandPaletteFromKeydown,
-  type CommandPaletteItem
-} from './command-palette.js'
-import {
   buildNewTabModuleSettingRows,
   DEFAULT_NEW_TAB_MODULE_SETTINGS,
   normalizeNewTabModuleSettings,
@@ -144,7 +139,6 @@ import {
 import {
   getActiveNewTabWorkspace,
   normalizeNewTabWorkspaceSettings,
-  setActiveNewTabWorkspace,
   toggleNewTabWorkspacePin,
   updateNewTabWorkspace,
   type NewTabWorkspaceSettings
@@ -397,7 +391,7 @@ interface QuickAccessItem {
 
 type MenuActionIcon = 'trash' | 'refresh' | 'save' | 'plus' | 'copy' | 'pin'
 type SettingsSaveState = 'idle' | 'saving' | 'saved' | 'error'
-type SettingsDrawerSection = 'folder' | 'workspaces'
+type SettingsDrawerSection = 'folder'
 
 interface LastDeletedBookmarkState {
   bookmark: chrome.bookmarks.BookmarkTreeNode
@@ -486,9 +480,6 @@ const state = {
   folderSettings: { ...DEFAULT_FOLDER_SETTINGS } as NewTabFolderSettings,
   moduleSettings: { ...DEFAULT_NEW_TAB_MODULE_SETTINGS } as NewTabModuleSettings,
   workspaceSettings: normalizeNewTabWorkspaceSettings(null) as NewTabWorkspaceSettings,
-  commandPaletteOpen: false,
-  commandPaletteQuery: '',
-  commandPaletteActiveIndex: 0,
   activity: {
     pinnedIds: [],
     records: {}
@@ -509,7 +500,6 @@ const state = {
 }
 
 const root = document.getElementById('newtab-root')
-const commandTrigger = document.getElementById('newtab-command-trigger')
 const dashboardTrigger = document.getElementById('newtab-dashboard-trigger')
 const dashboardOverlay = document.getElementById('newtab-dashboard-overlay')
 const dashboardFrame = document.getElementById('newtab-dashboard-frame') as HTMLIFrameElement | null
@@ -545,6 +535,7 @@ let bookmarkChangeRefreshInFlight = false
 let bookmarkChangeRefreshQueued = false
 let dashboardFrameReadyTimeout = 0
 let preloadedBackgroundSettings: typeof DEFAULT_BACKGROUND_SETTINGS | null = null
+let backgroundSettingsMutationVersion = 0
 let bookmarkDragSlotRects = new Map<string, DOMRect>()
 let bookmarkDragSlotOrderIds: string[] = []
 let dashboardReturnFocusTarget: HTMLElement | null = null
@@ -565,9 +556,6 @@ function bindEvents(): void {
   bindIconSettingsEvents()
   bindTimeSettingsEvents()
   bindSettingsRangeVisuals()
-  commandTrigger?.addEventListener('click', () => {
-    openCommandPalette()
-  })
   dashboardTrigger?.addEventListener('click', (event) => {
     event.preventDefault()
     openDashboardRoute()
@@ -758,11 +746,6 @@ function updateSettingRangeVisual(input: HTMLInputElement): void {
 }
 
 function handleDocumentKeydown(event: KeyboardEvent): void {
-  if (state.commandPaletteOpen) {
-    handleCommandPaletteKeydown(event)
-    return
-  }
-
   if (event.key === 'Tab' && trapDashboardOverlayFocus(event)) {
     return
   }
@@ -787,9 +770,9 @@ function handleDocumentKeydown(event: KeyboardEvent): void {
     return
   }
 
-  if (shouldOpenCommandPaletteFromKeydown(event)) {
+  if (shouldOpenDashboardFromKeydown(event)) {
     event.preventDefault()
-    openCommandPalette()
+    openDashboardRoute()
     return
   }
 
@@ -845,6 +828,26 @@ function shouldFocusSearchFromKeydown(event: KeyboardEvent): boolean {
   }
 
   return event.key === '/'
+}
+
+function shouldOpenDashboardFromKeydown(event: KeyboardEvent): boolean {
+  if (event.defaultPrevented || event.altKey || event.shiftKey || isEditableEventTarget(event.target)) {
+    return false
+  }
+
+  return Boolean(event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k'
+}
+
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  return target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target.isContentEditable ||
+    target.getAttribute('contenteditable') === 'true'
 }
 
 function bindTimeSettingsEvents(): void {
@@ -963,12 +966,6 @@ function bindFolderSettingsEvents(): void {
   document
     .getElementById('folder-selected-list')
     ?.addEventListener('click', handleSelectedFolderClick)
-  document
-    .getElementById('workspace-settings-list')
-    ?.addEventListener('click', handleWorkspaceSettingsClick)
-  document
-    .getElementById('workspace-settings-list')
-    ?.addEventListener('input', handleWorkspaceSettingsInput)
   document
     .getElementById('newtab-speed-dial-setting')
     ?.addEventListener('change', handleModuleSettingsChange)
@@ -1350,6 +1347,8 @@ function handleBackgroundSettingsChange(): void {
     state.backgroundUrlCacheStatus = ''
   }
   state.backgroundSettings = nextSettings
+  backgroundSettingsMutationVersion += 1
+  preloadedBackgroundSettings = nextSettings
   setWallpaperPlaceholderColor(nextSettings.color)
   void saveBackgroundSettings().catch((error) => {
     console.warn('新标签页背景设置保存失败。', error)
@@ -1403,6 +1402,8 @@ async function handleBackgroundFileChange(
       imageName: mediaType === 'image' ? file.name : state.backgroundSettings.imageName,
       videoName: mediaType === 'video' ? file.name : state.backgroundSettings.videoName
     })
+    backgroundSettingsMutationVersion += 1
+    preloadedBackgroundSettings = state.backgroundSettings
     await saveBackgroundSettings()
     if (shouldClearBackgroundUrlCache(previousSettings, state.backgroundSettings)) {
       await clearBackgroundUrlCache()
@@ -1475,14 +1476,9 @@ function openFolderSourceSettings(): void {
   syncFolderSettingsControls()
 }
 
-function openWorkspaceSettings(): void {
-  openSettingsDrawer({ focusFirstControl: false, section: 'workspaces' })
-}
-
 function focusSettingsSection(section: SettingsDrawerSection): void {
   const titleIdBySection: Record<SettingsDrawerSection, string> = {
-    folder: 'settings-folder-title',
-    workspaces: 'settings-workspaces-title'
+    folder: 'settings-folder-title'
   }
   const targetSection = document.getElementById(titleIdBySection[section])?.closest('.settings-section')
   targetSection?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -1523,7 +1519,6 @@ function closeSettingsDrawer(): void {
 function setSettingsModalBackgroundInert(inert: boolean): void {
   const backgroundElements = [
     root,
-    commandTrigger instanceof HTMLElement ? commandTrigger : null,
     settingsTrigger instanceof HTMLElement ? settingsTrigger : null,
     dashboardTrigger instanceof HTMLElement ? dashboardTrigger : null
   ]
@@ -2764,7 +2759,7 @@ async function toggleActiveMenuBookmarkPin(): Promise<void> {
   try {
     state.pendingDeleteBookmarkId = ''
     await saveNewTabWorkspaceSettings()
-    const copy = getSpeedDialPinActionCopy(pinned, workspace.name)
+    const copy = getSpeedDialPinActionCopy(pinned)
     state.menuError = ''
     state.menuStatus = copy.status
     render()
@@ -3058,6 +3053,7 @@ async function saveAddedBookmark(): Promise<void> {
 }
 
 async function refreshNewTab(): Promise<void> {
+  const backgroundMutationVersionAtStart = backgroundSettingsMutationVersion
   state.loading = true
   state.error = ''
   state.bookmarkReorderError = ''
@@ -3065,7 +3061,7 @@ async function refreshNewTab(): Promise<void> {
   render()
 
   try {
-    const [tree, stored, preloadedBackground] = await Promise.all([
+    const [tree, stored] = await Promise.all([
       getBookmarkTree(),
       getLocalStorage([
         STORAGE_KEYS.newTabCustomIcons,
@@ -3108,7 +3104,9 @@ async function refreshNewTab(): Promise<void> {
       legacyPinnedIds: state.activity.pinnedIds
     })
     state.moduleSettings = normalizeNewTabModuleSettings(stored[STORAGE_KEYS.newTabModuleSettings])
-    state.backgroundSettings = preloadedBackground || state.backgroundSettings
+    if (backgroundMutationVersionAtStart === backgroundSettingsMutationVersion) {
+      state.backgroundSettings = preloadedBackgroundSettings || state.backgroundSettings
+    }
     state.searchSettings = normalizeSearchSettings(stored[STORAGE_KEYS.newTabSearchSettings])
     state.iconSettings = normalizeIconSettings(stored[STORAGE_KEYS.newTabIconSettings])
     state.generalSettings = normalizeGeneralSettings(stored[STORAGE_KEYS.newTabGeneralSettings])
@@ -3136,14 +3134,18 @@ async function refreshNewTab(): Promise<void> {
 }
 
 async function preloadBackgroundSettings(): Promise<typeof DEFAULT_BACKGROUND_SETTINGS | null> {
+  const backgroundMutationVersionAtStart = backgroundSettingsMutationVersion
   try {
     const stored = await getLocalStorage([STORAGE_KEYS.newTabBackgroundSettings])
-    state.backgroundSettings = normalizeBackgroundSettings(stored[STORAGE_KEYS.newTabBackgroundSettings])
-    preloadedBackgroundSettings = state.backgroundSettings
-    setWallpaperPlaceholderColor(state.backgroundSettings.color)
-    syncBackgroundSettingsControls()
-    void applyBackgroundSettings()
-    return state.backgroundSettings
+    const nextSettings = normalizeBackgroundSettings(stored[STORAGE_KEYS.newTabBackgroundSettings])
+    if (backgroundMutationVersionAtStart === backgroundSettingsMutationVersion) {
+      state.backgroundSettings = nextSettings
+      preloadedBackgroundSettings = nextSettings
+      setWallpaperPlaceholderColor(state.backgroundSettings.color)
+      syncBackgroundSettingsControls()
+      void applyBackgroundSettings()
+    }
+    return nextSettings
   } catch (error) {
     console.warn('新标签页背景预加载失败。', error)
     markWallpaperReady()
@@ -3500,7 +3502,6 @@ async function toggleDashboardBookmarkSpeedDial(bookmarkId: string): Promise<voi
 
   try {
     await saveNewTabWorkspaceSettings()
-    syncWorkspaceSettingsControls()
     render()
     postDashboardSpeedDialState()
     updateClockText()
@@ -4602,16 +4603,6 @@ function createBookmarkSections(sections: NewTabFolderSection[]): HTMLElement {
   view.dataset.iconVerticalCenter = String(state.iconSettings.verticalCenter)
   view.setAttribute('aria-busy', state.reorderingBookmarks ? 'true' : 'false')
 
-  const commandPalette = createCommandPaletteOverlay()
-  if (commandPalette) {
-    view.appendChild(commandPalette)
-  }
-
-  const workspaceSwitcher = createWorkspaceSwitcher()
-  if (workspaceSwitcher) {
-    view.appendChild(workspaceSwitcher)
-  }
-
   const speedDial = createSpeedDialPanel()
   if (speedDial) {
     view.appendChild(speedDial)
@@ -4710,53 +4701,6 @@ function getActiveWorkspacePinnedIds(): string[] {
   return getActiveNewTabWorkspace(state.workspaceSettings).pinnedIds
 }
 
-function getActiveWorkspaceName(): string {
-  return getActiveNewTabWorkspace(state.workspaceSettings).name
-}
-
-function createWorkspaceSwitcher(): HTMLElement | null {
-  if (!state.moduleSettings.speedDial) {
-    return null
-  }
-
-  const activeWorkspace = getActiveNewTabWorkspace(state.workspaceSettings)
-  const section = document.createElement('section')
-  section.className = 'newtab-workspaces'
-  section.setAttribute('aria-label', '书签场景')
-
-  const label = document.createElement('span')
-  label.className = 'newtab-workspaces-label'
-  label.textContent = '场景'
-
-  const list = document.createElement('div')
-  list.className = 'newtab-workspace-list'
-  list.setAttribute('role', 'listbox')
-  list.setAttribute('aria-label', '切换书签场景')
-
-  for (const workspace of state.workspaceSettings.workspaces) {
-    const button = document.createElement('button')
-    button.className = 'newtab-workspace-pill'
-    button.type = 'button'
-    button.dataset.workspaceId = workspace.id
-    button.setAttribute('role', 'option')
-    button.setAttribute('aria-selected', String(workspace.id === activeWorkspace.id))
-    button.textContent = workspace.name
-    button.addEventListener('click', () => {
-      void switchNewTabWorkspace(workspace.id)
-    })
-    list.appendChild(button)
-  }
-
-  const manageButton = document.createElement('button')
-  manageButton.className = 'newtab-workspace-manage'
-  manageButton.type = 'button'
-  manageButton.textContent = '管理'
-  manageButton.addEventListener('click', openWorkspaceSettings)
-
-  section.append(label, list, manageButton)
-  return section
-}
-
 function createSpeedDialPanel(): HTMLElement | null {
   if (!state.moduleSettings.speedDial) {
     return null
@@ -4769,19 +4713,19 @@ function createSpeedDialPanel(): HTMLElement | null {
   })
   const section = document.createElement('section')
   section.className = 'newtab-speed-dial'
-  section.setAttribute('aria-label', `${activeWorkspace.name} Speed Dial`)
+  section.setAttribute('aria-label', 'Speed Dial')
 
   const header = document.createElement('div')
   header.className = 'newtab-module-heading'
   const title = document.createElement('h2')
   title.textContent = 'Speed Dial'
   const meta = document.createElement('span')
-  meta.textContent = `${activeWorkspace.name} · ${items.length} 个固定入口`
+  meta.textContent = `${items.length} 个固定入口`
   header.append(title, meta)
   section.appendChild(header)
 
   if (!items.length) {
-    section.appendChild(createSpeedDialEmptyPanel(activeWorkspace.name))
+    section.appendChild(createSpeedDialEmptyPanel())
     return section
   }
 
@@ -4799,8 +4743,8 @@ function createSpeedDialPanel(): HTMLElement | null {
   return section
 }
 
-function createSpeedDialEmptyPanel(workspaceName: string): HTMLElement {
-  const emptyState = createSpeedDialEmptyState(workspaceName)
+function createSpeedDialEmptyPanel(): HTMLElement {
+  const emptyState = createSpeedDialEmptyState()
   const empty = document.createElement('div')
   empty.className = 'newtab-speed-dial-empty'
 
@@ -4901,235 +4845,6 @@ function createBookmarkHealthPanel(): HTMLElement | null {
 
   section.append(header, list)
   return section
-}
-
-function createCommandPaletteOverlay(): HTMLElement | null {
-  if (!state.commandPaletteOpen) {
-    return null
-  }
-
-  const items = getCurrentCommandPaletteItems()
-  const overlay = document.createElement('section')
-  overlay.className = 'newtab-command-palette'
-  overlay.setAttribute('role', 'dialog')
-  overlay.setAttribute('aria-modal', 'true')
-  overlay.setAttribute('aria-label', '命令工作台')
-
-  const panel = document.createElement('div')
-  panel.className = 'newtab-command-palette-panel'
-
-  const heading = document.createElement('div')
-  heading.className = 'newtab-command-palette-heading'
-  const title = document.createElement('strong')
-  title.textContent = '命令工作台'
-  const hint = document.createElement('span')
-  hint.textContent = '搜索书签，或输入“设置”“仪表盘”“清理”“重复”。'
-  heading.append(title, hint)
-
-  const input = document.createElement('input')
-  input.className = 'newtab-command-palette-input'
-  input.type = 'search'
-  input.placeholder = '搜索书签、固定入口、切换场景或打开整理工具'
-  input.value = state.commandPaletteQuery
-  input.setAttribute('aria-label', '搜索命令')
-  input.setAttribute('aria-controls', 'newtab-command-palette-results')
-  input.setAttribute('aria-activedescendant', items.length ? getCommandPaletteItemElementId(state.commandPaletteActiveIndex) : '')
-  input.addEventListener('input', () => {
-    state.commandPaletteQuery = input.value
-    state.commandPaletteActiveIndex = 0
-    scheduleRender()
-  })
-
-  const list = document.createElement('div')
-  list.id = 'newtab-command-palette-results'
-  list.className = 'newtab-command-palette-results'
-  list.setAttribute('role', 'listbox')
-
-  items.forEach((item, index) => {
-    const button = document.createElement('button')
-    button.className = 'newtab-command-palette-item'
-    button.id = getCommandPaletteItemElementId(index)
-    button.type = 'button'
-    button.dataset.commandId = item.id
-    button.dataset.commandType = item.type
-    button.setAttribute('role', 'option')
-    button.setAttribute('aria-selected', String(index === state.commandPaletteActiveIndex))
-    button.addEventListener('click', () => {
-      void executeCommandPaletteItem(item)
-    })
-
-    const title = document.createElement('strong')
-    title.textContent = item.title
-    const detail = document.createElement('span')
-    detail.textContent = item.detail
-    button.append(title, detail)
-    list.appendChild(button)
-  })
-
-  if (!items.length) {
-    const empty = document.createElement('p')
-    empty.className = 'newtab-command-palette-empty'
-    empty.textContent = '没有匹配命令。试试书签标题、URL、场景名或“重复”“整理”。'
-    list.appendChild(empty)
-  }
-
-  panel.append(heading, input, list)
-  overlay.appendChild(panel)
-  overlay.addEventListener('pointerdown', (event) => {
-    if (event.target === overlay) {
-      closeCommandPalette()
-    }
-  })
-
-  window.requestAnimationFrame(() => {
-    const activeInput = document.querySelector<HTMLInputElement>('.newtab-command-palette-input')
-    activeInput?.focus()
-    activeInput?.setSelectionRange(activeInput.value.length, activeInput.value.length)
-  })
-
-  return overlay
-}
-
-function getCurrentCommandPaletteItems(): CommandPaletteItem[] {
-  return buildCommandPaletteItems({
-    query: state.commandPaletteQuery,
-    searchIndex: state.searchIndex,
-    pinnedIds: getActiveWorkspacePinnedIds(),
-    workspaces: state.workspaceSettings.workspaces,
-    activeWorkspaceId: state.workspaceSettings.activeWorkspaceId,
-    limit: 12
-  })
-}
-
-function getCommandPaletteItemElementId(index: number): string {
-  return `newtab-command-palette-item-${Math.max(0, index)}`
-}
-
-function openCommandPalette(): void {
-  closeBookmarkMenu()
-  closeAddBookmarkMenu()
-  closeSettingsDrawer()
-  if (state.dashboardOpen) {
-    closeDashboardRoute()
-  }
-  state.commandPaletteOpen = true
-  state.commandPaletteQuery = ''
-  state.commandPaletteActiveIndex = 0
-  commandTrigger?.setAttribute('aria-expanded', 'true')
-  render()
-}
-
-function closeCommandPalette(): void {
-  state.commandPaletteOpen = false
-  state.commandPaletteQuery = ''
-  state.commandPaletteActiveIndex = 0
-  commandTrigger?.setAttribute('aria-expanded', 'false')
-  render()
-  if (commandTrigger instanceof HTMLElement) {
-    commandTrigger.focus()
-  }
-}
-
-function handleCommandPaletteKeydown(event: KeyboardEvent): void {
-  if (!state.commandPaletteOpen) {
-    return
-  }
-
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    closeCommandPalette()
-    return
-  }
-
-  const items = getCurrentCommandPaletteItems()
-  if (!items.length) {
-    return
-  }
-
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-    event.preventDefault()
-    const direction = event.key === 'ArrowDown' ? 1 : -1
-    state.commandPaletteActiveIndex =
-      (state.commandPaletteActiveIndex + direction + items.length) % items.length
-    scheduleRender()
-    return
-  }
-
-  if (event.key === 'Home' || event.key === 'End') {
-    event.preventDefault()
-    state.commandPaletteActiveIndex = event.key === 'Home' ? 0 : items.length - 1
-    scheduleRender()
-    return
-  }
-
-  if (event.key === 'Enter') {
-    event.preventDefault()
-    void executeCommandPaletteItem(items[state.commandPaletteActiveIndex] || items[0])
-  }
-}
-
-async function executeCommandPaletteItem(item: CommandPaletteItem | undefined): Promise<void> {
-  if (!item) {
-    return
-  }
-
-  if (item.type === 'bookmark' && item.bookmarkId) {
-    const bookmark = getBookmarkById(item.bookmarkId)
-    if (bookmark?.url) {
-      closeCommandPalette()
-      await recordBookmarkOpen(bookmark)
-      window.location.assign(bookmark.url)
-    }
-    return
-  }
-
-  if ((item.type === 'pin' || item.type === 'unpin') && item.bookmarkId) {
-    state.workspaceSettings = toggleNewTabWorkspacePin(
-      state.workspaceSettings,
-      state.workspaceSettings.activeWorkspaceId,
-      item.bookmarkId,
-      { validBookmarkIds: state.allBookmarkMap.keys() }
-    )
-    await saveNewTabWorkspaceSettings()
-    postDashboardSpeedDialState()
-    closeCommandPalette()
-    return
-  }
-
-  if (item.type === 'workspace' && item.workspaceId) {
-    await switchNewTabWorkspace(item.workspaceId)
-    closeCommandPalette()
-    return
-  }
-
-  closeCommandPalette()
-  if (item.type === 'settings') {
-    openSettingsDrawer({ focusFirstControl: false, section: 'workspaces' })
-    return
-  }
-
-  if (item.type === 'dashboard') {
-    openDashboardRoute()
-    return
-  }
-
-  if (item.type === 'options' && item.actionHash) {
-    openOptionsHash(item.actionHash)
-  }
-}
-
-async function switchNewTabWorkspace(workspaceId: string): Promise<void> {
-  const nextSettings = setActiveNewTabWorkspace(state.workspaceSettings, workspaceId)
-  if (nextSettings === state.workspaceSettings) {
-    return
-  }
-
-  state.workspaceSettings = nextSettings
-  await saveNewTabWorkspaceSettings()
-  syncWorkspaceSettingsControls()
-  render()
-  postDashboardSpeedDialState()
-  updateClockText()
 }
 
 function appendBookmarkTilesInChunks(
@@ -6080,7 +5795,7 @@ function renderBookmarkMenu({ focusFirst = true, focusAction = '' } = {}): void 
   actionList.setAttribute('aria-label', '书签操作')
   actionList.addEventListener('keydown', handleMenuActionsKeydown)
   const bookmarkLabel = getBookmarkActionLabelContext(bookmark)
-  const pinCopy = getSpeedDialPinActionCopy(isActiveMenuBookmarkPinned(), getActiveWorkspaceName())
+  const pinCopy = getSpeedDialPinActionCopy(isActiveMenuBookmarkPinned())
   const deleteLabel = state.pendingDeleteBookmarkId === String(bookmark.id) ? '确认删除书签' : '删除书签'
   actionList.append(
     createMenuAction(
@@ -6653,6 +6368,7 @@ async function saveBackgroundSettings(): Promise<void> {
   await saveSettingsWithFeedback({
     [STORAGE_KEYS.newTabBackgroundSettings]: state.backgroundSettings
   })
+  preloadedBackgroundSettings = state.backgroundSettings
 }
 
 function shouldClearBackgroundUrlCache(
@@ -7685,48 +7401,7 @@ function syncFolderSettingsControls(): void {
 }
 
 function syncNewTabModernSettingsControls(): void {
-  syncWorkspaceSettingsControls()
   syncModuleSettingsControls()
-}
-
-function syncWorkspaceSettingsControls(): void {
-  const activeWorkspace = getActiveNewTabWorkspace(state.workspaceSettings)
-  setTextContent('workspace-active-name', `${activeWorkspace.name} · ${activeWorkspace.pinnedIds.length} 个固定入口`)
-
-  const list = document.getElementById('workspace-settings-list')
-  if (!(list instanceof HTMLElement)) {
-    return
-  }
-
-  const rows = state.workspaceSettings.workspaces.map((workspace) => {
-    const row = document.createElement('div')
-    row.className = 'workspace-settings-row'
-    row.dataset.workspaceId = workspace.id
-
-    const input = document.createElement('input')
-    input.className = 'setting-text-input workspace-name-input'
-    input.type = 'text'
-    input.value = workspace.name
-    input.maxLength = 24
-    input.dataset.workspaceNameInput = workspace.id
-    input.setAttribute('aria-label', `重命名场景 ${workspace.name}`)
-
-    const meta = document.createElement('span')
-    meta.className = 'workspace-settings-meta'
-    meta.textContent = `${workspace.pinnedIds.length} 个固定入口`
-
-    const button = document.createElement('button')
-    button.className = 'newtab-button secondary workspace-activate-button'
-    button.type = 'button'
-    button.dataset.workspaceActivate = workspace.id
-    button.disabled = workspace.id === state.workspaceSettings.activeWorkspaceId
-    button.textContent = workspace.id === state.workspaceSettings.activeWorkspaceId ? '当前' : '切换'
-
-    row.append(input, meta, button)
-    return row
-  })
-
-  list.replaceChildren(...rows)
 }
 
 function syncModuleSettingsControls(): void {
@@ -7768,43 +7443,6 @@ function createModuleSettingRow(setting: ReturnType<typeof buildNewTabModuleSett
 
   label.append(copy, input, switchVisual)
   return label
-}
-
-function handleWorkspaceSettingsClick(event: Event): void {
-  const target = event.target
-  if (!(target instanceof Element)) {
-    return
-  }
-
-  const button = target.closest<HTMLButtonElement>('[data-workspace-activate]')
-  if (!button) {
-    return
-  }
-
-  void switchNewTabWorkspace(String(button.dataset.workspaceActivate || ''))
-}
-
-function handleWorkspaceSettingsInput(event: Event): void {
-  const target = event.target
-  if (!(target instanceof HTMLInputElement)) {
-    return
-  }
-
-  const workspaceId = String(target.dataset.workspaceNameInput || '')
-  if (!workspaceId) {
-    return
-  }
-
-  state.workspaceSettings = updateNewTabWorkspace(
-    state.workspaceSettings,
-    workspaceId,
-    { name: target.value },
-    { validBookmarkIds: state.allBookmarkMap.keys() }
-  )
-  void saveNewTabWorkspaceSettings().catch((error) => {
-    setSettingsSaveStatus('error', error instanceof Error ? error.message : '场景设置保存失败')
-  })
-  render()
 }
 
 function handleModuleSettingsChange(event: Event): void {

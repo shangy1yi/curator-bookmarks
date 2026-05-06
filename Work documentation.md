@@ -704,3 +704,36 @@
 ### 是否合并 main
 
 - 否。等待用户手动测试和明确批准。
+
+## 用户反馈后的调整
+
+### 2026-05-06 追加修改
+
+- 已删除 New Tab 命令工作区 UI、浮层渲染代码、样式和对应测试文件。
+- `Ctrl/Cmd+K` 已重新指向打开书签仪表盘。
+- 已删除 Options 隐私与权限中心入口、页面 section、渲染逻辑和独立 privacy section 文件。
+- 已重做 Options 标签管理中心布局：统计概览和整理表单分栏展示，使用频率卡片改为信息/示例分区，长文字允许换行，避免和模块边框冲突。
+
+### 追加验证
+
+- `npm run typecheck` 通过。
+- `npm run test:build && node --test .tmp-test/tests/newtab-content-state.test.js .tmp-test/tests/options-management-ui.test.js .tmp-test/tests/tag-management.test.js` 通过，120 passed。
+- `npm test` 通过，422 passed，0 failed。
+- `npm run build` 通过，已重新生成 `dist/`。
+
+## 仪表盘 favicon 回归调查与修复
+
+### 2026-05-06 追加修改
+
+- 调查结论：当前 Options 书签仪表盘只按可见卡片懒加载 Chrome `_favicon` URL；历史上的 dashboard favicon warmup helper 已在切换为 options dashboard iframe 后移除，因此大量未进入 Chrome favicon 缓存的旧书签会显示字母占位。
+- 已恢复 Options 仪表盘的低并发 favicon 预热队列：仪表盘模型准备好后，按全量书签 URL 去重并通过 Chrome `_favicon` endpoint 预加载。
+- 仪表盘卡片 favicon URL 现在带 `cache=1` 参数，和预热队列一致使用 Chrome favicon 缓存接口。
+- 预热成功后节流刷新仪表盘卡片，让已进入 Chrome 缓存的图标显示出来。
+- 不把 favicon 图片本体写入 extension storage，避免备份膨胀和存储容量问题。
+
+### 追加验证
+
+- `npm run typecheck` 通过。
+- `npm run test:build && node --test .tmp-test/tests/dashboard-selection-a11y.test.js .tmp-test/tests/options-management-ui.test.js .tmp-test/tests/dashboard-folder-switch-stability.test.js` 通过，75 passed。
+- `npm test` 通过，423 passed，0 failed。
+- `npm run build` 通过，已重新生成 `dist/`。

@@ -14,7 +14,7 @@ import {
   normalizeNewTabWorkspaceSettings as normalizeSharedNewTabWorkspaceSettings
 } from '../src/shared/newtab-workspace-settings.js'
 
-test('normalizes default workspaces and migrates legacy pins into the default scene', () => {
+test('normalizes to one Speed Dial workspace and migrates legacy pins', () => {
   const settings = normalizeNewTabWorkspaceSettings(null, {
     validBookmarkIds: ['1', '2', '3'],
     legacyPinnedIds: ['2', 'missing', '2', '1'],
@@ -23,10 +23,7 @@ test('normalizes default workspaces and migrates legacy pins into the default sc
 
   assert.equal(settings.activeWorkspaceId, DEFAULT_NEW_TAB_WORKSPACE_ID)
   assert.deepEqual(settings.workspaces.map((workspace) => [workspace.id, workspace.name]), [
-    ['default', '默认'],
-    ['work', '工作'],
-    ['study', '学习'],
-    ['personal', '个人']
+    ['default', 'Speed Dial']
   ])
   assert.deepEqual(settings.workspaces[0].pinnedIds, ['2', '1'])
 })
@@ -38,7 +35,7 @@ test('newtab workspace settings are shared by newtab and options surfaces', () =
   assert.deepEqual(sharedSettings, newtabSettings)
 })
 
-test('keeps workspace pins isolated when toggling bookmarks', () => {
+test('merges legacy workspace pins when toggling Speed Dial bookmarks', () => {
   const settings = normalizeNewTabWorkspaceSettings({
     activeWorkspaceId: 'work',
     workspaces: [
@@ -54,24 +51,29 @@ test('keeps workspace pins isolated when toggling bookmarks', () => {
     validBookmarkIds: ['1', '2', '3'],
     now: 20
   })
-  assert.deepEqual(pinned.workspaces.find((workspace) => workspace.id === 'work')?.pinnedIds, ['3', '1'])
-  assert.deepEqual(pinned.workspaces.find((workspace) => workspace.id === 'study')?.pinnedIds, ['2'])
+  assert.deepEqual(pinned.workspaces, [{
+    id: DEFAULT_NEW_TAB_WORKSPACE_ID,
+    name: 'Speed Dial',
+    pinnedIds: ['3', '1', '2'],
+    createdAt: 1,
+    updatedAt: 20
+  }])
 
   const unpinned = toggleNewTabWorkspacePin(pinned, 'work', '1', {
     validBookmarkIds: ['1', '2', '3'],
     now: 30
   })
-  assert.deepEqual(unpinned.workspaces.find((workspace) => workspace.id === 'work')?.pinnedIds, ['3'])
+  assert.deepEqual(unpinned.workspaces[0]?.pinnedIds, ['3', '2'])
 })
 
-test('selects active workspace only when it exists', () => {
+test('always selects the default Speed Dial workspace', () => {
   const settings = normalizeNewTabWorkspaceSettings(null)
-  assert.equal(setActiveNewTabWorkspace(settings, 'study').activeWorkspaceId, 'study')
+  assert.equal(setActiveNewTabWorkspace(settings, 'study').activeWorkspaceId, 'default')
   assert.equal(setActiveNewTabWorkspace(settings, 'missing').activeWorkspaceId, 'default')
-  assert.equal(getActiveNewTabWorkspace(setActiveNewTabWorkspace(settings, 'personal')).name, '个人')
+  assert.equal(getActiveNewTabWorkspace(setActiveNewTabWorkspace(settings, 'personal')).name, 'Speed Dial')
 })
 
-test('updates workspace names and prunes invalid pinned ids', () => {
+test('keeps the Speed Dial name and prunes invalid pinned ids', () => {
   const settings = normalizeNewTabWorkspaceSettings({
     activeWorkspaceId: 'work',
     workspaces: [
@@ -82,7 +84,7 @@ test('updates workspace names and prunes invalid pinned ids', () => {
     now: 10
   })
 
-  const renamed = updateNewTabWorkspace(settings, 'work', {
+  const renamed = updateNewTabWorkspace(settings, 'default', {
     name: '  深度工作  ',
     pinnedIds: ['3', '3', 'missing', '1']
   }, {
@@ -90,9 +92,9 @@ test('updates workspace names and prunes invalid pinned ids', () => {
     now: 20
   })
 
-  assert.equal(renamed.workspaces.find((workspace) => workspace.id === 'work')?.name, '深度工作')
-  assert.deepEqual(renamed.workspaces.find((workspace) => workspace.id === 'work')?.pinnedIds, ['3', '1'])
+  assert.equal(renamed.workspaces[0]?.name, 'Speed Dial')
+  assert.deepEqual(renamed.workspaces[0]?.pinnedIds, ['3', '1'])
 
   const pruned = pruneNewTabWorkspacePinnedIds(renamed, ['1'])
-  assert.deepEqual(pruned.workspaces.find((workspace) => workspace.id === 'work')?.pinnedIds, ['1'])
+  assert.deepEqual(pruned.workspaces[0]?.pinnedIds, ['1'])
 })

@@ -27,10 +27,6 @@ export const SECTION_META = {
     label: 'Data & Backup',
     title: '数据与备份'
   },
-  privacy: {
-    label: 'Privacy & Permissions',
-    title: '隐私与权限中心'
-  },
   tags: {
     label: 'Tag Management',
     title: '标签管理中心'

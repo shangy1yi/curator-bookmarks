@@ -45,7 +45,7 @@ test('newtab bookmark edit menu actions expose bookmark-specific labels', () => 
   const newtabSource = readProjectFile('src/newtab/newtab.ts')
 
   assert.match(newtabSource, /const bookmarkLabel = getBookmarkActionLabelContext\(bookmark\)/)
-  assert.match(newtabSource, /const pinCopy = getSpeedDialPinActionCopy\(isActiveMenuBookmarkPinned\(\), getActiveWorkspaceName\(\)\)/)
+  assert.match(newtabSource, /const pinCopy = getSpeedDialPinActionCopy\(isActiveMenuBookmarkPinned\(\)\)/)
   assert.match(newtabSource, /const deleteLabel = state\.pendingDeleteBookmarkId === String\(bookmark\.id\) \? '确认删除书签' : '删除书签'/)
   assert.match(newtabSource, /actionId: 'toggle-pin', ariaLabel: `\$\{pinCopy\.ariaLabel\}：\$\{bookmarkLabel\}`/)
   assert.match(newtabSource, /actionId: 'copy-url',[\s\S]*?ariaLabel: `复制书签链接：\$\{bookmarkLabel\}`/)

@@ -30,8 +30,8 @@ export const NEW_TAB_MODULE_SETTING_META: Record<
   Omit<NewTabModuleSettingRow, 'key' | 'enabled'>
 > = {
   speedDial: {
-    label: 'Speed Dial 与场景',
-    description: '显示场景切换和当前场景下固定的高频书签入口。'
+    label: 'Speed Dial',
+    description: '显示固定的高频书签入口。'
   },
   health: {
     label: '书签健康',

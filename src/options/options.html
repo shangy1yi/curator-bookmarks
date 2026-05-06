@@ -27,7 +27,6 @@
             <nav class="options-nav" aria-labelledby="options-settings-nav-label">
               <a class="options-nav-link" href="#general" data-section-link="general">通用设置</a>
               <a class="options-nav-link" href="#backup" data-section-link="backup">数据与备份</a>
-              <a class="options-nav-link" href="#privacy" data-section-link="privacy">隐私与权限中心</a>
             </nav>
           </div>
           <div class="options-nav-group">
@@ -1077,68 +1076,6 @@
           </section>
 
           <section
-            id="privacy"
-            class="options-panel"
-            data-section-panel="privacy"
-            aria-labelledby="privacy-title"
-            hidden
-          >
-            <p class="options-section-label">Privacy & Permissions</p>
-            <h1 id="privacy-title">隐私与权限中心</h1>
-
-            <div class="options-group privacy-center-card">
-              <div class="detect-results-header ai-tag-data-head">
-                <div>
-                  <strong>本地优先</strong>
-                  <p class="detect-results-subtitle">书签、标签、摘要、检测历史、回收站和设置默认保存在浏览器扩展本地数据里。Curator 不提供账号系统，不会把你的书签库上传到 Curator 服务器。</p>
-                </div>
-                <span class="options-chip muted">Local first</span>
-              </div>
-              <div class="privacy-assurance-grid">
-                <article>
-                  <strong>不会劫持默认搜索</strong>
-                  <p>扩展没有 search_provider 配置，不修改 Chrome 地址栏搜索引擎；popup 和 newtab 搜索只查本地书签索引。</p>
-                </article>
-                <article>
-                  <strong>联网只在明确功能中发生</strong>
-                  <p>可用性检测会访问目标书签 URL；AI 分析会请求你配置的 AI Base URL；开启 Jina Reader 后，目标 URL 会发送到 Jina Reader 解析。</p>
-                </article>
-                <article>
-                  <strong>API Key 不导出</strong>
-                  <p>API Key 只存于当前扩展本地设置，完整备份和标签导出都不会包含 API Key。</p>
-                </article>
-                <article>
-                  <strong>删除与备份入口</strong>
-                  <p>在“数据与备份”可以导出完整备份、只导出标签、清空标签数据；回收站和各管理区提供更细的删除入口。</p>
-                </article>
-              </div>
-            </div>
-
-            <div class="options-group privacy-center-card">
-              <div class="detect-results-header ai-tag-data-head">
-                <div>
-                  <strong>Manifest 权限用途</strong>
-                  <p class="detect-results-subtitle">这些权限服务于本地书签管理、用户主动发起的检测和可选 AI 工作流。</p>
-                </div>
-              </div>
-              <div id="privacy-permission-list" class="privacy-permission-list"></div>
-            </div>
-
-            <div class="options-group privacy-center-card">
-              <div class="detect-results-header ai-tag-data-row">
-                <div>
-                  <strong>数据恢复范围</strong>
-                  <p class="detect-results-subtitle">恢复会先预览。标签按 URL 匹配当前书签；新标签页只恢复配置；安全完整恢复会自动创建恢复前备份，并把当前缺失的书签复制到新的恢复文件夹。</p>
-                </div>
-                <div class="detect-results-actions">
-                  <a class="options-button secondary small" href="#backup" data-section-link="backup" aria-label="打开数据与备份入口">打开数据与备份</a>
-                  <a class="options-button secondary small" href="#ai" data-section-link="ai" aria-label="打开 AI 联网设置">查看 AI 联网设置</a>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section
             id="tags"
             class="options-panel"
             data-section-panel="tags"
@@ -1148,8 +1085,8 @@
             <p class="options-section-label">Tag Management</p>
             <h1 id="tags-title">标签管理中心</h1>
 
-            <div class="availability-decision-panel tag-management-summary" aria-label="标签统计概览">
-              <div class="availability-decision-grid">
+            <div class="tag-management-layout">
+              <div class="tag-management-overview" aria-label="标签统计概览">
                 <article>
                   <span>标签总数</span>
                   <strong id="tag-management-total">0 个标签</strong>
@@ -1163,38 +1100,38 @@
                   <strong id="tag-management-manual">0 个手动标签</strong>
                 </article>
               </div>
+
+              <div class="options-group tag-management-actions">
+                <div class="tag-management-action-head">
+                  <div>
+                    <strong>整理标签</strong>
+                    <p class="detect-results-subtitle">重命名会合并同名结果；删除只移除本地标签，不删除 Chrome 书签。</p>
+                  </div>
+                  <button id="tag-management-refresh" class="options-button secondary small" type="button" aria-label="刷新标签统计">刷新统计</button>
+                </div>
+                <div class="tag-management-form">
+                  <label>
+                    <span>原标签</span>
+                    <input id="tag-management-rename-source" type="text" autocomplete="off" placeholder="选择或输入标签">
+                  </label>
+                  <label>
+                    <span>新标签</span>
+                    <input id="tag-management-rename-target" type="text" autocomplete="off" placeholder="用于重命名">
+                  </label>
+                  <div class="tag-management-form-actions">
+                    <button id="tag-management-rename" class="options-button small" type="button" aria-label="重命名书签标签">重命名</button>
+                    <button id="tag-management-delete" class="options-button danger small" type="button" aria-label="删除书签标签">删除标签</button>
+                  </div>
+                </div>
+                <p id="tag-management-status" class="detect-status-copy"></p>
+              </div>
             </div>
 
-            <div class="options-group tag-management-actions">
-              <div class="detect-results-header ai-tag-data-row">
-                <div>
-                  <strong>重命名或删除标签</strong>
-                  <p class="detect-results-subtitle">操作只修改本地标签索引，不删除 Chrome 书签。删除标签前会确认；建议先导出标签数据或完整备份。</p>
-                </div>
-                <button id="tag-management-refresh" class="options-button secondary small" type="button" aria-label="刷新标签统计">刷新统计</button>
-              </div>
-              <div class="tag-management-form">
-                <label>
-                  <span>原标签</span>
-                  <input id="tag-management-rename-source" type="text" autocomplete="off" placeholder="例如 product">
-                </label>
-                <label>
-                  <span>新标签</span>
-                  <input id="tag-management-rename-target" type="text" autocomplete="off" placeholder="重命名时填写">
-                </label>
-                <div class="tag-management-form-actions">
-                  <button id="tag-management-rename" class="options-button small" type="button" aria-label="重命名书签标签">重命名</button>
-                  <button id="tag-management-delete" class="options-button danger small" type="button" aria-label="删除书签标签">删除标签</button>
-                </div>
-              </div>
-              <p id="tag-management-status" class="detect-status-copy"></p>
-            </div>
-
-            <div class="options-group">
-              <div class="detect-results-header ai-tag-data-head">
+            <div class="options-group tag-management-usage">
+              <div class="tag-management-usage-head">
                 <div>
                   <strong>使用频率</strong>
-                  <p class="detect-results-subtitle">按使用次数排序，点击标签可填入操作表单。</p>
+                  <p class="detect-results-subtitle">按使用次数排序，点击标签可填入整理表单。</p>
                 </div>
               </div>
               <div id="tag-management-results" class="tag-management-results">

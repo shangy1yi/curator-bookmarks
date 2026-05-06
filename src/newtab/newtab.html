@@ -10,20 +10,6 @@
     <div id="newtab-background-mask" class="newtab-background-mask" aria-hidden="true"></div>
 
     <div class="settings-trigger-zone">
-      <button
-        id="newtab-command-trigger"
-        class="settings-trigger command-trigger"
-        type="button"
-        aria-label="打开命令工作台"
-        aria-controls="newtab-command-palette-results"
-        aria-expanded="false"
-      >
-        <svg aria-hidden="true" viewBox="0 0 24 24">
-          <path d="M5 7.5h14M5 12h10M5 16.5h6"></path>
-          <path d="m16 15 3 3m0-3-3 3"></path>
-        </svg>
-        <span>打开命令工作台</span>
-      </button>
       <a
         id="newtab-dashboard-trigger"
         class="settings-trigger dashboard-trigger"
@@ -37,7 +23,7 @@
         </svg>
         <span>打开书签仪表盘</span>
       </a>
-      <span class="dashboard-shortcut-hint" aria-hidden="true">Ctrl/Cmd+K 打开命令工作台</span>
+      <span class="dashboard-shortcut-hint" aria-hidden="true">Ctrl/Cmd+K 快捷打开书签仪表盘</span>
       <button
         id="newtab-settings-trigger"
         class="settings-trigger"
@@ -189,22 +175,13 @@
           </div>
         </section>
 
-        <section class="settings-section" aria-labelledby="settings-workspaces-title">
-          <h2 id="settings-workspaces-title">场景与固定入口</h2>
+        <section class="settings-section" aria-labelledby="settings-speed-dial-title">
+          <h2 id="settings-speed-dial-title">Speed Dial</h2>
           <div class="settings-card">
             <div
               id="newtab-speed-dial-setting"
               class="newtab-module-settings-list"
-              aria-label="场景与固定入口模块"
-            ></div>
-            <div class="workspace-settings-summary">
-              <span>当前场景</span>
-              <strong id="workspace-active-name">默认</strong>
-            </div>
-            <div
-              id="workspace-settings-list"
-              class="workspace-settings-list"
-              aria-label="场景列表"
+              aria-label="Speed Dial 模块"
             ></div>
           </div>
         </section>

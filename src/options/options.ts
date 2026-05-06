@@ -239,6 +239,7 @@ import {
   handleDashboardDocumentClick,
   handleDashboardDocumentFocusIn,
   handleDashboardError,
+  handleDashboardLoad,
   handleDashboardInput,
   handleDashboardKeydown,
   handleDashboardPointerCancel,
@@ -252,13 +253,12 @@ import {
   isDashboardViewReady,
   prepareDashboardSectionEntry,
   getSingleDashboardMoveBookmark,
-  getDashboardFaviconFallbackUrl,
+  hydrateDashboardFaviconCache,
   moveSingleDashboardBookmark,
   moveSelectedDashboardBookmarks,
   removeDashboardSelectionIds,
   renderDashboardSection
 } from './sections/dashboard.js'
-import { PERMISSION_DISCLOSURES } from './sections/privacy.js'
 import {
   deleteTagFromIndex,
   renderTagManagementSection,
@@ -372,7 +372,6 @@ const dashboardCallbacks = {
   regenerateAiTags: regenerateDashboardAiTagsForBookmark,
   openMoveModal,
   closeMoveModal,
-  getFaviconFallbackUrl: getDashboardFaviconFallbackUrl,
   exitDashboard,
   confirm: requestConfirmation,
   recycleCallbacks
@@ -438,7 +437,8 @@ async function hydratePersistentState() {
       STORAGE_KEYS.folderCleanupState,
       STORAGE_KEYS.inboxSettings,
       STORAGE_KEYS.contentSnapshotSettings,
-      STORAGE_KEYS.contentSnapshotIndex
+      STORAGE_KEYS.contentSnapshotIndex,
+      STORAGE_KEYS.dashboardFaviconCache
     ])
 
     managerState.ignoreRules = normalizeIgnoreRules(stored[STORAGE_KEYS.ignoreRules])
@@ -455,6 +455,7 @@ async function hydratePersistentState() {
     contentSnapshotState.searchTextMap = buildContentSnapshotSearchMap(contentSnapshotState.index, {
       includeFullText: false
     })
+    hydrateDashboardFaviconCache(stored[STORAGE_KEYS.dashboardFaviconCache])
     contentSnapshotState.searchTextMapIncludesFullText = false
     contentSnapshotState.searchTextMapLoadingFullText = false
     resetContentSnapshotFullTextSearchMapRetry()
@@ -602,10 +603,6 @@ function syncPageSection() {
 
   if (key === 'general') {
     renderAiNamingSection()
-  }
-
-  if (key === 'privacy') {
-    renderPrivacySection()
   }
 
   if (key === 'tags') {
@@ -812,6 +809,7 @@ function bindEvents() {
   dom.dashboardPanel?.addEventListener('input', handleDashboardInput)
   dom.dashboardPanel?.addEventListener('change', handleDashboardInput)
   dom.dashboardPanel?.addEventListener('keydown', handleDashboardKeydown)
+  dom.dashboardPanel?.addEventListener('load', handleDashboardLoad, true)
   dom.dashboardPanel?.addEventListener('error', (event) => handleDashboardError(event, dashboardCallbacks), true)
   dom.dashboardPanel?.addEventListener('pointerdown', handleDashboardPointerDown)
   dom.dashboardPanel?.addEventListener('pointerover', handleDashboardTagPointerOver)
@@ -2531,11 +2529,6 @@ function renderActiveOptionsSection() {
     return
   }
 
-  if (activeSection === 'privacy') {
-    renderPrivacySection()
-    return
-  }
-
   if (activeSection === 'tags') {
     renderTagManagementSectionFromState()
     return
@@ -3972,20 +3965,6 @@ async function handleBookmarkTagClear() {
     aiNamingState.tagDataStatus = error instanceof Error ? error.message : '标签数据清空失败。'
     renderActiveOptionsSection()
   }
-}
-
-function renderPrivacySection() {
-  const list = document.getElementById('privacy-permission-list')
-  if (!list) {
-    return
-  }
-
-  list.innerHTML = PERMISSION_DISCLOSURES.map((item) => `
-    <article class="privacy-permission-card">
-      <strong>${escapeHtml(item.name)}</strong>
-      <p>${escapeHtml(item.copy)}</p>
-    </article>
-  `).join('')
 }
 
 function renderTagManagementSectionFromState(status = aiNamingState.tagDataStatus || '') {

@@ -116,6 +116,50 @@ interface DashboardModelCacheKey {
   includeFullText: boolean
 }
 
+export interface DashboardFaviconWarmupItem {
+  id: string
+  pageUrl: string
+  faviconUrl: string
+}
+
+export interface DashboardFaviconCacheEntry {
+  pageUrl: string
+  iconUrl: string
+  updatedAt: number
+  failedAt?: number
+  version?: number
+}
+
+export type DashboardFaviconCache = Record<string, DashboardFaviconCacheEntry>
+
+export interface DashboardFaviconWarmupQueueOptions {
+  bookmarks: readonly Pick<DashboardItem, 'id' | 'url'>[]
+  faviconEndpointUrl: string
+  remoteCache?: DashboardFaviconCache
+  size?: number
+  maxConcurrent?: number
+  batchSize?: number
+  batchDelayMs?: number
+  waitForIdle?: (callback: () => void) => void
+  loadFavicon?: (url: string, item: DashboardFaviconWarmupItem) => Promise<unknown> | unknown
+  onWarm?: (item: DashboardFaviconWarmupItem) => void
+  onError?: (item: DashboardFaviconWarmupItem, error: unknown) => void
+}
+
+export interface DashboardFaviconWarmupSnapshot {
+  pendingCount: number
+  activeCount: number
+  warmedCount: number
+  failedCount: number
+  canceled: boolean
+}
+
+export interface DashboardFaviconWarmupQueue {
+  start: () => void
+  cancel: () => void
+  getSnapshot: () => DashboardFaviconWarmupSnapshot
+}
+
 interface DashboardRenderCache {
   modelKey: DashboardModelCacheKey | null
   model: DashboardModel | null
@@ -140,7 +184,6 @@ interface DashboardCallbacks {
   regenerateAiTags: (bookmark: BookmarkRecord, signal?: AbortSignal) => Promise<void>
   openMoveModal: (source: string) => void
   closeMoveModal: () => void
-  getFaviconFallbackUrl?: (url: string) => string
   exitDashboard?: () => void
   confirm: (options: {
     title: string
@@ -162,6 +205,18 @@ const DASHBOARD_VIRTUAL_OVERSCAN_ROWS = 12
 const DASHBOARD_VIRTUAL_THRESHOLD = 120
 const DASHBOARD_SELECTION_MOTION_MS = 260
 const DASHBOARD_NEWTAB_EMBED_PARAM = 'newtab-dashboard'
+const DASHBOARD_FAVICON_SIZE = 32
+const DASHBOARD_FAVICON_WARMUP_CONCURRENCY = 2
+const DASHBOARD_FAVICON_WARMUP_BATCH_SIZE = 12
+const DASHBOARD_FAVICON_WARMUP_BATCH_DELAY_MS = 40
+const DASHBOARD_FAVICON_RERENDER_DEBOUNCE_MS = 900
+const DASHBOARD_FAVICON_CACHE_LIMIT = 2500
+const DASHBOARD_FAVICON_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const DASHBOARD_FAVICON_FAILURE_RETRY_MS = 24 * 60 * 60 * 1000
+const DASHBOARD_FAVICON_FETCH_VERSION = 2
+const DASHBOARD_REMOTE_FAVICON_FETCH_TIMEOUT_MS = 6000
+const DASHBOARD_REMOTE_FAVICON_MAX_BYTES = 384 * 1024
+const DASHBOARD_REMOTE_FAVICON_MAX_HTML_BYTES = 256 * 1024
 
 let dashboardStatusTimer = 0
 let dashboardResultsStableFrame = 0
@@ -179,6 +234,13 @@ let dashboardViewRevealRenderVersion = 0
 let dashboardCardsRenderVersion = 0
 let dashboardCardsCommittedRenderVersion = 0
 let pendingDashboardFolderFocusId = ''
+let dashboardFaviconWarmupQueue: DashboardFaviconWarmupQueue | null = null
+let dashboardFaviconWarmupKey = ''
+let dashboardFaviconWarmupRenderTimer = 0
+let dashboardFaviconLoadSyncFrame = 0
+let dashboardFaviconCache: DashboardFaviconCache = {}
+let dashboardFaviconCacheHydrated = false
+let dashboardFaviconCacheSaveTimer = 0
 const dashboardRenderCache: DashboardRenderCache = {
   modelKey: null,
   model: null,
@@ -699,6 +761,7 @@ export function renderDashboardSection(): void {
     resetDashboardPanelReveal()
   }
   const { model, visibleItems } = getDashboardRenderData()
+  syncDashboardFaviconWarmup(model.items)
   syncDashboardPanelReadyState()
 
   syncDashboardSelection(
@@ -747,6 +810,13 @@ export function isDashboardViewReady(): boolean {
 
 export function prepareDashboardSectionEntry(): void {
   resetDashboardPanelReveal()
+  dashboardFaviconWarmupKey = ''
+  scheduleDashboardFaviconLoadSync()
+}
+
+export function hydrateDashboardFaviconCache(rawCache: unknown, now = Date.now()): void {
+  dashboardFaviconCache = normalizeDashboardFaviconCache(rawCache, { now })
+  dashboardFaviconCacheHydrated = true
 }
 
 export function handleDashboardInput(event: Event): void {
@@ -909,6 +979,15 @@ export function handleDashboardError(event: Event, callbacks: DashboardCallbacks
   }
 
   handleDashboardFaviconError(target, callbacks)
+}
+
+export function handleDashboardLoad(event: Event): void {
+  const target = event.target
+  if (!(target instanceof HTMLImageElement) || !target.matches('[data-dashboard-favicon]')) {
+    return
+  }
+
+  handleDashboardFaviconLoad(target)
 }
 
 export function handleDashboardTagPointerOver(event: PointerEvent): void {
@@ -2470,11 +2549,13 @@ function markDashboardVirtualFilterChange(reason: 'folder' | 'query' | 'filter')
 function getDashboardVirtualRenderStateKey(renderedItems: DashboardItem[]): string {
   const itemState = renderedItems.map((item) => {
     const id = String(item.id)
+    const faviconEntry = getDashboardCachedFaviconEntry(item.url)
     return [
       id,
       dashboardState.expandedTagIds.has(id) ? '1' : '0',
       dashboardState.copyFeedbackId === id ? '1' : '0',
-      dashboardState.speedDialPinnedIds.has(id) ? '1' : '0'
+      dashboardState.speedDialPinnedIds.has(id) ? '1' : '0',
+      faviconEntry?.iconUrl || ''
     ].join(':')
   }).join('|')
 
@@ -2806,6 +2887,7 @@ function commitDashboardCardsRender(renderVersion: number): void {
   }
 
   dashboardCardsCommittedRenderVersion = safeRenderVersion
+  scheduleDashboardFaviconLoadSync()
   scheduleDashboardPanelReveal(safeRenderVersion)
 }
 
@@ -3064,7 +3146,7 @@ function buildDashboardCard(item: DashboardItem): string {
   const tags = item.tags.slice(0, visibleTagLimit)
   const hiddenTagCount = Math.max(0, item.tags.length - tags.length)
   const copyLabel = dashboardState.copyFeedbackId === String(item.id) ? '已复制' : '复制'
-  const faviconUrl = getDashboardFaviconFallbackUrl(item.url)
+  const faviconMarkup = renderDashboardFaviconImage(item.url)
   const tagStatusTitle = item.hasManualTags
     ? '已有手动标签'
     : item.aiTags.length
@@ -3105,8 +3187,8 @@ function buildDashboardCard(item: DashboardItem): string {
       data-dashboard-bookmark-id="${escapeAttr(item.id)}"
     >
       <div class="dashboard-card-body">
-        <span class="dashboard-favicon-shell" aria-hidden="true">
-          ${faviconUrl ? `<img src="${escapeAttr(faviconUrl)}" alt="" loading="lazy" decoding="async" draggable="false" data-dashboard-favicon data-dashboard-favicon-source="chrome" data-dashboard-favicon-page-url="${escapeAttr(item.url)}">` : ''}
+        <span class="dashboard-favicon-shell ${faviconMarkup ? 'has-favicon' : ''}" aria-hidden="true">
+          ${faviconMarkup}
           <span>${escapeHtml(getFallbackLabel(item.title))}</span>
         </span>
         <div class="dashboard-card-copy">
@@ -3224,8 +3306,55 @@ async function copyDashboardBookmarkUrl(bookmarkId: string): Promise<void> {
   }
 }
 
+function handleDashboardFaviconLoad(image: HTMLImageElement): void {
+  if (!image.naturalWidth || !image.naturalHeight) {
+    return
+  }
+
+  const shell = image.closest<HTMLElement>('.dashboard-favicon-shell')
+  shell?.classList.add('has-favicon')
+}
+
 function handleDashboardFaviconError(image: HTMLImageElement, _callbacks: DashboardCallbacks): void {
+  markDashboardFaviconImageFailed(image)
+}
+
+function markDashboardFaviconImageFailed(image: HTMLImageElement): void {
+  const failedSource = String(image.getAttribute('data-dashboard-favicon-source') || '')
+  const pageUrl = String(image.getAttribute('data-dashboard-favicon-page-url') || '').trim()
+  const shell = image.closest<HTMLElement>('.dashboard-favicon-shell')
+  if (failedSource === 'cache' && pageUrl) {
+    markDashboardRemoteFaviconFailed(pageUrl)
+  }
+
   image.remove()
+  shell?.classList.remove('has-favicon')
+}
+
+function scheduleDashboardFaviconLoadSync(): void {
+  if (dashboardFaviconLoadSyncFrame || typeof window === 'undefined') {
+    return
+  }
+
+  dashboardFaviconLoadSyncFrame = window.requestAnimationFrame(() => {
+    dashboardFaviconLoadSyncFrame = 0
+    syncCompletedDashboardFaviconImages()
+  })
+}
+
+function syncCompletedDashboardFaviconImages(): void {
+  dom.dashboardPanel
+    ?.querySelectorAll<HTMLImageElement>('img[data-dashboard-favicon]')
+    .forEach((image) => {
+      if (!image.complete) {
+        return
+      }
+      if (image.naturalWidth && image.naturalHeight) {
+        handleDashboardFaviconLoad(image)
+        return
+      }
+      markDashboardFaviconImageFailed(image)
+    })
 }
 
 async function moveDashboardBookmarkToFolder(
@@ -3346,7 +3475,7 @@ function renderDashboardDragOverlay(existingModel?: DashboardModel): void {
     includeFullText: contentSnapshotState.settings.fullTextSearchEnabled
   })
   const bookmark = availabilityState.bookmarkMap.get(String(dragState.bookmarkId))
-  const faviconUrl = getDashboardFaviconFallbackUrl(bookmark?.url || '')
+  const faviconMarkup = renderDashboardFaviconImage(bookmark?.url || '')
 
   dom.dashboardPanel?.classList.add('is-dashboard-dragging')
   cancelExitMotion(dom.dashboardDragOverlay, 'is-closing')
@@ -3369,12 +3498,13 @@ function renderDashboardDragOverlay(existingModel?: DashboardModel): void {
   setDashboardDropHover(dragState.hoverFolderId)
 
   dom.dashboardDragPreview.innerHTML = `
-    <span class="dashboard-favicon-shell" aria-hidden="true">
-      ${faviconUrl ? `<img src="${escapeAttr(faviconUrl)}" alt="" loading="lazy" decoding="async" draggable="false" data-dashboard-favicon data-dashboard-favicon-source="chrome" data-dashboard-favicon-page-url="${escapeAttr(bookmark?.url || '')}">` : ''}
+    <span class="dashboard-favicon-shell ${faviconMarkup ? 'has-favicon' : ''}" aria-hidden="true">
+      ${faviconMarkup}
       <span>${escapeHtml(getFallbackLabel(bookmark?.title || ''))}</span>
     </span>
     <span>${escapeHtml(bookmark?.title || '未命名书签')}</span>
   `
+  scheduleDashboardFaviconLoadSync()
 }
 
 function buildDashboardFolderDropCard(folder: DashboardFolderTarget): string {
@@ -3533,14 +3663,873 @@ function suppressDashboardNativeSelection(event?: Event): void {
 }
 
 export function getDashboardFaviconFallbackUrl(url: string): string {
-  const runtimeId = typeof chrome !== 'undefined' ? chrome.runtime?.id : ''
-  if (!runtimeId || !url) {
+  const endpointUrl = getDashboardFaviconEndpointUrl()
+  if (!endpointUrl || !url) {
     return ''
   }
-  return `chrome-extension://${runtimeId}/_favicon/?pageUrl=${encodeURIComponent(url)}&size=32`
+  return buildDashboardFaviconUrl(endpointUrl, url, { size: DASHBOARD_FAVICON_SIZE })
+}
+
+function renderDashboardFaviconImage(pageUrl: string): string {
+  const normalizedPageUrl = String(pageUrl || '').trim()
+  if (!normalizedPageUrl) {
+    return ''
+  }
+
+  const remoteEntry = getDashboardCachedFaviconEntry(normalizedPageUrl)
+  if (remoteEntry?.iconUrl) {
+    return `<img src="${escapeAttr(remoteEntry.iconUrl)}" alt="" loading="lazy" decoding="async" draggable="false" data-dashboard-favicon data-dashboard-favicon-source="cache" data-dashboard-favicon-page-url="${escapeAttr(normalizedPageUrl)}">`
+  }
+
+  return ''
 }
 
 function getFallbackLabel(title: string): string {
   const trimmed = String(title || '').trim()
   return (trimmed[0] || '*').toUpperCase()
+}
+
+function syncDashboardFaviconWarmup(items: DashboardItem[]): void {
+  if (availabilityState.catalogLoading || dom.dashboardPanel?.hidden) {
+    return
+  }
+
+  const endpointUrl = getDashboardFaviconEndpointUrl()
+  if (!endpointUrl || !items.length) {
+    stopDashboardFaviconWarmup()
+    dashboardFaviconWarmupKey = ''
+    return
+  }
+
+  const nextKey = getDashboardFaviconWarmupKey(items)
+  if (nextKey && nextKey === dashboardFaviconWarmupKey && dashboardFaviconWarmupQueue) {
+    return
+  }
+
+  stopDashboardFaviconWarmup()
+  dashboardFaviconWarmupKey = nextKey
+  dashboardFaviconWarmupQueue = createDashboardFaviconWarmupQueue({
+    bookmarks: items,
+    faviconEndpointUrl: endpointUrl,
+    remoteCache: dashboardFaviconCache,
+    size: DASHBOARD_FAVICON_SIZE,
+    maxConcurrent: DASHBOARD_FAVICON_WARMUP_CONCURRENCY,
+    batchSize: DASHBOARD_FAVICON_WARMUP_BATCH_SIZE,
+    batchDelayMs: DASHBOARD_FAVICON_WARMUP_BATCH_DELAY_MS,
+    loadFavicon: warmDashboardFavicon,
+    onWarm: (item) => {
+      if (getDashboardCachedFaviconEntry(item.pageUrl)) {
+        scheduleDashboardFaviconWarmupRender()
+      }
+    },
+    onError: (_item, error) => {
+      console.debug?.('[Curator] Dashboard favicon warmup skipped', error)
+    }
+  })
+  dashboardFaviconWarmupQueue.start()
+}
+
+function stopDashboardFaviconWarmup(): void {
+  dashboardFaviconWarmupQueue?.cancel()
+  dashboardFaviconWarmupQueue = null
+  if (dashboardFaviconWarmupRenderTimer) {
+    window.clearTimeout(dashboardFaviconWarmupRenderTimer)
+    dashboardFaviconWarmupRenderTimer = 0
+  }
+}
+
+function resetDashboardFaviconWarmupForCacheChange(): void {
+  dashboardFaviconWarmupKey = ''
+  stopDashboardFaviconWarmup()
+}
+
+function scheduleDashboardFaviconWarmupRender(): void {
+  if (dashboardFaviconWarmupRenderTimer || dom.dashboardPanel?.hidden) {
+    return
+  }
+
+  dashboardFaviconWarmupRenderTimer = window.setTimeout(() => {
+    dashboardFaviconWarmupRenderTimer = 0
+    if (!dom.dashboardPanel?.hidden && !availabilityState.catalogLoading) {
+      renderDashboardSection()
+    }
+  }, DASHBOARD_FAVICON_RERENDER_DEBOUNCE_MS)
+}
+
+function getDashboardFaviconWarmupKey(items: DashboardItem[]): string {
+  return items
+    .map((item) => `${String(item.id)}\u0000${String(item.url || '')}`)
+    .join('\u0001')
+}
+
+function getDashboardFaviconCacheKey(pageUrl: string): string {
+  try {
+    return new URL(pageUrl).href
+  } catch {
+    return String(pageUrl || '').trim()
+  }
+}
+
+function isDashboardRemoteFaviconPageUrl(pageUrl: string): boolean {
+  try {
+    const parsedUrl = new URL(pageUrl)
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function isDashboardSafeImageUrl(iconUrl: string): boolean {
+  const normalizedUrl = String(iconUrl || '').trim()
+  if (!normalizedUrl) {
+    return false
+  }
+
+  if (normalizedUrl.startsWith('data:image/')) {
+    return true
+  }
+
+  try {
+    const parsedUrl = new URL(normalizedUrl)
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function getDashboardCachedFaviconEntry(pageUrl: string, now = Date.now()): DashboardFaviconCacheEntry | null {
+  const key = getDashboardFaviconCacheKey(pageUrl)
+  const entry = key ? dashboardFaviconCache[key] : null
+  if (!entry || entry.pageUrl !== key || !entry.iconUrl) {
+    return null
+  }
+
+  if (now - entry.updatedAt > DASHBOARD_FAVICON_CACHE_MAX_AGE_MS) {
+    return null
+  }
+
+  return entry
+}
+
+function shouldSkipDashboardRemoteFaviconFetch(pageUrl: string, now = Date.now()): boolean {
+  const key = getDashboardFaviconCacheKey(pageUrl)
+  const entry = key ? dashboardFaviconCache[key] : null
+  return shouldSkipDashboardRemoteFaviconFetchForEntry(entry, now)
+}
+
+function hasFreshDashboardFaviconCacheEntry(pageUrl: string, now = Date.now()): boolean {
+  return Boolean(getDashboardCachedFaviconEntry(pageUrl, now))
+}
+
+function shouldSkipDashboardRemoteFaviconFetchForEntry(
+  entry: DashboardFaviconCacheEntry | null | undefined,
+  now = Date.now()
+): boolean {
+  if (hasFreshDashboardFaviconCacheEntryForEntry(entry, now)) {
+    return true
+  }
+
+  return shouldSkipDashboardRemoteFaviconRetryForEntry(entry, now)
+}
+
+function hasFreshDashboardFaviconCacheEntryForEntry(
+  entry: DashboardFaviconCacheEntry | null | undefined,
+  now = Date.now()
+): boolean {
+  if (!entry) {
+    return false
+  }
+
+  return Boolean(entry.iconUrl && now - entry.updatedAt <= DASHBOARD_FAVICON_CACHE_MAX_AGE_MS)
+}
+
+function shouldSkipDashboardRemoteFaviconRetryForEntry(
+  entry: DashboardFaviconCacheEntry | null | undefined,
+  now = Date.now()
+): boolean {
+  if (!entry) {
+    return false
+  }
+
+  return Boolean(
+    entry.failedAt &&
+    entry.version === DASHBOARD_FAVICON_FETCH_VERSION &&
+    now - entry.failedAt < DASHBOARD_FAVICON_FAILURE_RETRY_MS
+  )
+}
+
+function normalizeDashboardFaviconCache(
+  rawCache: unknown,
+  {
+    now = Date.now(),
+    limit = DASHBOARD_FAVICON_CACHE_LIMIT
+  }: {
+    now?: number
+    limit?: number
+  } = {}
+): DashboardFaviconCache {
+  if (!rawCache || typeof rawCache !== 'object' || Array.isArray(rawCache)) {
+    return {}
+  }
+
+  const entries: Array<[string, DashboardFaviconCacheEntry]> = []
+  for (const [rawKey, rawEntry] of Object.entries(rawCache as Record<string, unknown>)) {
+    if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) {
+      continue
+    }
+
+    const source = rawEntry as Record<string, unknown>
+    const pageUrl = getDashboardFaviconCacheKey(String(source.pageUrl || rawKey || '').trim())
+    if (!pageUrl) {
+      continue
+    }
+
+    const updatedAt = getDashboardFiniteTimestamp(source.updatedAt, 0)
+    const failedAt = getDashboardFiniteTimestamp(source.failedAt, 0)
+    const iconUrl = String(source.iconUrl || '').trim()
+    if (iconUrl && !isDashboardSafeImageUrl(iconUrl)) {
+      continue
+    }
+
+    if (iconUrl) {
+      if (!updatedAt || now - updatedAt > DASHBOARD_FAVICON_CACHE_MAX_AGE_MS) {
+        continue
+      }
+      entries.push([pageUrl, { pageUrl, iconUrl, updatedAt }])
+      continue
+    }
+
+    if (
+      failedAt &&
+      Number(source.version) === DASHBOARD_FAVICON_FETCH_VERSION &&
+      now - failedAt <= DASHBOARD_FAVICON_FAILURE_RETRY_MS
+    ) {
+      entries.push([pageUrl, {
+        pageUrl,
+        iconUrl: '',
+        updatedAt: 0,
+        failedAt,
+        version: DASHBOARD_FAVICON_FETCH_VERSION
+      }])
+    }
+  }
+
+  entries.sort((left, right) => {
+    const leftTime = left[1].updatedAt || left[1].failedAt || 0
+    const rightTime = right[1].updatedAt || right[1].failedAt || 0
+    return rightTime - leftTime || left[0].localeCompare(right[0])
+  })
+
+  return Object.fromEntries(entries.slice(0, clampDashboardInteger(limit, 1, DASHBOARD_FAVICON_CACHE_LIMIT, DASHBOARD_FAVICON_CACHE_LIMIT)))
+}
+
+function getDashboardFiniteTimestamp(value: unknown, fallback: number): number {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
+}
+
+export function buildDashboardFaviconUrl(
+  faviconEndpointUrl: string,
+  pageUrl: string,
+  {
+    size = DASHBOARD_FAVICON_SIZE,
+    cacheToken = ''
+  }: {
+    size?: number
+    cacheToken?: number | string
+  } = {}
+): string {
+  if (!faviconEndpointUrl || !pageUrl) {
+    return ''
+  }
+
+  const faviconUrl = new URL(faviconEndpointUrl)
+  faviconUrl.searchParams.set('pageUrl', pageUrl)
+  faviconUrl.searchParams.set('size', String(clampDashboardInteger(size, 16, 128, DASHBOARD_FAVICON_SIZE)))
+  faviconUrl.searchParams.set('cache', '1')
+  if (cacheToken) {
+    faviconUrl.searchParams.set('refresh', String(cacheToken))
+  }
+  return faviconUrl.toString()
+}
+
+export function buildDashboardFaviconWarmupItems({
+  bookmarks,
+  faviconEndpointUrl,
+  remoteCache = {},
+  size = DASHBOARD_FAVICON_SIZE
+}: Pick<DashboardFaviconWarmupQueueOptions, 'bookmarks' | 'faviconEndpointUrl' | 'remoteCache' | 'size'>): DashboardFaviconWarmupItem[] {
+  const seenUrls = new Set<string>()
+  const items: DashboardFaviconWarmupItem[] = []
+
+  for (const bookmark of bookmarks) {
+    const pageUrl = String(bookmark.url || '').trim()
+    const cacheKey = getDashboardFaviconCacheKey(pageUrl)
+    const cachedEntry = cacheKey ? remoteCache[cacheKey] : null
+    const now = Date.now()
+    if (
+      !pageUrl ||
+      !isDashboardRemoteFaviconPageUrl(pageUrl) ||
+      seenUrls.has(cacheKey || pageUrl) ||
+      hasFreshDashboardFaviconCacheEntryForEntry(cachedEntry, now)
+    ) {
+      continue
+    }
+    seenUrls.add(cacheKey || pageUrl)
+    items.push({
+      id: String(bookmark.id || pageUrl),
+      pageUrl: cacheKey || pageUrl,
+      faviconUrl: buildDashboardFaviconUrl(faviconEndpointUrl, pageUrl, { size })
+    })
+  }
+
+  return items
+}
+
+export function createDashboardFaviconWarmupQueue(
+  options: DashboardFaviconWarmupQueueOptions
+): DashboardFaviconWarmupQueue {
+  const maxConcurrent = clampDashboardInteger(
+    options.maxConcurrent,
+    1,
+    6,
+    DASHBOARD_FAVICON_WARMUP_CONCURRENCY
+  )
+  const batchSize = clampDashboardInteger(
+    options.batchSize,
+    1,
+    32,
+    DASHBOARD_FAVICON_WARMUP_BATCH_SIZE
+  )
+  const batchDelayMs = clampDashboardInteger(
+    options.batchDelayMs,
+    0,
+    2000,
+    DASHBOARD_FAVICON_WARMUP_BATCH_DELAY_MS
+  )
+  const waitForIdle = options.waitForIdle || waitForDashboardIdle
+  const loadFavicon = options.loadFavicon || preloadDashboardFavicon
+  const queue = buildDashboardFaviconWarmupItems(options)
+  const snapshot: DashboardFaviconWarmupSnapshot = {
+    pendingCount: queue.length,
+    activeCount: 0,
+    warmedCount: 0,
+    failedCount: 0,
+    canceled: false
+  }
+  let started = false
+  let scheduled = false
+  let batchRemaining = batchSize
+
+  const scheduleDrain = () => {
+    if (!started || snapshot.canceled || scheduled) {
+      return
+    }
+    scheduled = true
+    waitForIdle(() => {
+      scheduled = false
+      drain()
+    })
+  }
+
+  const scheduleNextBatch = () => {
+    if (!started || snapshot.canceled || scheduled) {
+      return
+    }
+    scheduled = true
+    globalThis.setTimeout(() => {
+      scheduled = false
+      batchRemaining = batchSize
+      drain()
+    }, batchDelayMs)
+  }
+
+  const settle = (item: DashboardFaviconWarmupItem, error?: unknown) => {
+    snapshot.activeCount = Math.max(0, snapshot.activeCount - 1)
+    if (snapshot.canceled) {
+      return
+    }
+    if (error) {
+      snapshot.failedCount += 1
+      options.onError?.(item, error)
+    } else {
+      snapshot.warmedCount += 1
+      options.onWarm?.(item)
+    }
+    drain()
+  }
+
+  const drain = () => {
+    if (!started || snapshot.canceled) {
+      return
+    }
+
+    while (snapshot.activeCount < maxConcurrent && batchRemaining > 0 && queue.length > 0) {
+      const item = queue.shift()
+      if (!item) {
+        break
+      }
+      snapshot.pendingCount = queue.length
+      snapshot.activeCount += 1
+      batchRemaining -= 1
+      Promise.resolve()
+        .then(() => loadFavicon(item.faviconUrl, item))
+        .then(() => settle(item))
+        .catch((error) => settle(item, error))
+    }
+
+    snapshot.pendingCount = queue.length
+    if (queue.length <= 0 || snapshot.activeCount >= maxConcurrent) {
+      return
+    }
+    if (batchRemaining <= 0) {
+      scheduleNextBatch()
+      return
+    }
+    scheduleDrain()
+  }
+
+  return {
+    start() {
+      if (started || snapshot.canceled) {
+        return
+      }
+      started = true
+      scheduleDrain()
+    },
+    cancel() {
+      snapshot.canceled = true
+      queue.length = 0
+      snapshot.pendingCount = 0
+    },
+    getSnapshot() {
+      return { ...snapshot }
+    }
+  }
+}
+
+function getDashboardFaviconEndpointUrl(): string {
+  if (typeof chrome === 'undefined') {
+    return ''
+  }
+
+  if (chrome.runtime?.getURL) {
+    return chrome.runtime.getURL('/_favicon/')
+  }
+
+  const runtimeId = chrome.runtime?.id || ''
+  return runtimeId ? `chrome-extension://${runtimeId}/_favicon/` : ''
+}
+
+function waitForDashboardIdle(callback: () => void): void {
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    window.requestIdleCallback(() => callback(), { timeout: 500 })
+    return
+  }
+  globalThis.setTimeout(callback, 16)
+}
+
+function preloadDashboardFavicon(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.decoding = 'async'
+    image.addEventListener('load', () => resolve(image), { once: true })
+    image.addEventListener('error', () => reject(new Error('dashboard favicon warmup failed')), { once: true })
+    image.setAttribute('src', url)
+  })
+}
+
+async function warmDashboardFavicon(chromeFaviconUrl: string, item: DashboardFaviconWarmupItem): Promise<void> {
+  try {
+    const chromeDataUrl = await fetchDashboardFaviconAsDataUrl(chromeFaviconUrl, {
+      credentials: 'same-origin',
+      referrerPolicy: 'no-referrer'
+    })
+    upsertDashboardRemoteFavicon(item.pageUrl, chromeDataUrl)
+    return
+  } catch {
+    try {
+      const image = await preloadDashboardFavicon(chromeFaviconUrl)
+      const chromeDataUrl = readDashboardImageAsDataUrl(image)
+      upsertDashboardRemoteFavicon(item.pageUrl, chromeDataUrl)
+      return
+    } catch {}
+  }
+
+  if (
+    hasFreshDashboardFaviconCacheEntry(item.pageUrl) ||
+    shouldSkipDashboardRemoteFaviconFetch(item.pageUrl)
+  ) {
+    return
+  }
+
+  try {
+    const iconUrl = await discoverDashboardRemoteFavicon(item.pageUrl)
+    const dataUrl = await fetchDashboardFaviconAsDataUrl(iconUrl, {
+      cache: 'force-cache',
+      credentials: 'omit',
+      redirect: 'follow',
+      referrerPolicy: 'no-referrer'
+    })
+    upsertDashboardRemoteFavicon(item.pageUrl, dataUrl)
+  } catch (error) {
+    markDashboardRemoteFaviconFailed(item.pageUrl)
+    throw error
+  }
+}
+
+async function discoverDashboardRemoteFavicon(pageUrl: string): Promise<string> {
+  const pageResponse = await fetchDashboardWithTimeout(pageUrl, {
+    cache: 'force-cache',
+    credentials: 'omit',
+    redirect: 'follow',
+    referrerPolicy: 'no-referrer'
+  })
+
+  if (!pageResponse.ok) {
+    return new URL('/favicon.ico', pageResponse.url || pageUrl).href
+  }
+
+  const contentType = (pageResponse.headers.get('content-type') || '').toLowerCase()
+  if (contentType && !contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
+    return new URL('/favicon.ico', pageResponse.url || pageUrl).href
+  }
+
+  const html = (await pageResponse.text()).slice(0, DASHBOARD_REMOTE_FAVICON_MAX_HTML_BYTES)
+  return getDashboardBestFaviconCandidate(html, pageResponse.url || pageUrl) ||
+    new URL('/favicon.ico', pageResponse.url || pageUrl).href
+}
+
+function getDashboardBestFaviconCandidate(html: string, baseUrl: string): string {
+  const matches = [...String(html || '').matchAll(/<link\b[^>]*>/gi)]
+  const candidates: Array<{ url: string; score: number }> = []
+
+  for (const match of matches) {
+    const tag = match[0] || ''
+    const rel = getDashboardHtmlAttribute(tag, 'rel').toLowerCase()
+    if (!rel || !/\b(?:icon|shortcut icon|apple-touch-icon|mask-icon)\b/i.test(rel)) {
+      continue
+    }
+
+    const href = getDashboardHtmlAttribute(tag, 'href')
+    if (!href) {
+      continue
+    }
+
+    try {
+      const url = new URL(decodeHtmlAttributeValue(href), baseUrl).href
+      const type = getDashboardHtmlAttribute(tag, 'type').toLowerCase()
+      const sizes = getDashboardHtmlAttribute(tag, 'sizes').toLowerCase()
+      candidates.push({
+        url,
+        score: getDashboardFaviconCandidateScore({ rel, type, sizes, url })
+      })
+    } catch {}
+  }
+
+  candidates.sort((left, right) => right.score - left.score)
+  return candidates[0]?.url || ''
+}
+
+function getDashboardHtmlAttribute(tag: string, name: string): string {
+  const pattern = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>` + '`' + `]+))`, 'i')
+  const match = String(tag || '').match(pattern)
+  return String(match?.[1] || match?.[2] || match?.[3] || '').trim()
+}
+
+function decodeHtmlAttributeValue(value: string): string {
+  return String(value || '')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+}
+
+function getDashboardFaviconCandidateScore({
+  rel,
+  type,
+  sizes,
+  url
+}: {
+  rel: string
+  type: string
+  sizes: string
+  url: string
+}): number {
+  let score = 0
+  if (/\bicon\b/.test(rel)) {
+    score += 20
+  }
+  if (/\bapple-touch-icon\b/.test(rel)) {
+    score += 12
+  }
+  if (type.includes('svg') || /\.svg(?:$|[?#])/i.test(url)) {
+    score += 8
+  } else if (type.includes('png') || /\.png(?:$|[?#])/i.test(url)) {
+    score += 6
+  } else if (type.includes('webp') || /\.webp(?:$|[?#])/i.test(url)) {
+    score += 5
+  } else if (/\.ico(?:$|[?#])/i.test(url)) {
+    score += 3
+  }
+
+  const sizeMatch = sizes.match(/\b(\d{2,4})x(\d{2,4})\b/)
+  if (sizeMatch) {
+    const iconSize = Math.min(Number(sizeMatch[1]) || 0, Number(sizeMatch[2]) || 0)
+    score += Math.max(0, 64 - Math.abs(iconSize - 64)) / 4
+  } else if (sizes.includes('any')) {
+    score += 10
+  }
+
+  return score
+}
+
+async function fetchDashboardFaviconAsDataUrl(iconUrl: string, options: RequestInit = {}): Promise<string> {
+  const response = await fetchDashboardWithTimeout(iconUrl, {
+    cache: 'force-cache',
+    redirect: 'follow',
+    referrerPolicy: 'no-referrer',
+    ...options
+  })
+  if (!response.ok) {
+    throw new Error(`favicon request failed: ${response.status}`)
+  }
+
+  const declaredLength = Number(response.headers.get('content-length') || 0)
+  if (declaredLength > DASHBOARD_REMOTE_FAVICON_MAX_BYTES) {
+    throw new Error('favicon is too large')
+  }
+
+  const blob = await response.blob()
+  if (!blob.size || blob.size > DASHBOARD_REMOTE_FAVICON_MAX_BYTES) {
+    throw new Error('favicon response is not a supported image')
+  }
+  const mimeType = await resolveDashboardFaviconMimeType(
+    blob,
+    iconUrl,
+    response.headers.get('content-type') || blob.type || ''
+  )
+  if (!mimeType) {
+    throw new Error('favicon response is not a supported image')
+  }
+  const typedBlob = blob.type === mimeType ? blob : blob.slice(0, blob.size, mimeType)
+
+  return await readDashboardBlobAsDataUrl(typedBlob)
+}
+
+async function resolveDashboardFaviconMimeType(
+  blob: Blob,
+  iconUrl: string,
+  declaredType: string
+): Promise<string> {
+  const normalizedType = normalizeDashboardMimeType(declaredType)
+  if (normalizedType.startsWith('image/')) {
+    return normalizedType
+  }
+
+  const extensionType = inferDashboardFaviconMimeTypeFromUrl(iconUrl)
+  if (extensionType) {
+    return extensionType
+  }
+
+  const signatureType = await inferDashboardFaviconMimeTypeFromBlob(blob)
+  if (signatureType) {
+    return signatureType
+  }
+
+  return ''
+}
+
+function normalizeDashboardMimeType(value: string): string {
+  return String(value || '').split(';')[0]?.trim().toLowerCase() || ''
+}
+
+function inferDashboardFaviconMimeTypeFromUrl(iconUrl: string): string {
+  let pathname = ''
+  try {
+    pathname = new URL(iconUrl).pathname.toLowerCase()
+  } catch {
+    pathname = String(iconUrl || '').toLowerCase()
+  }
+
+  if (pathname.endsWith('.svg') || pathname.endsWith('.svgz')) {
+    return 'image/svg+xml'
+  }
+  if (pathname.endsWith('.png')) {
+    return 'image/png'
+  }
+  if (pathname.endsWith('.webp')) {
+    return 'image/webp'
+  }
+  if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) {
+    return 'image/jpeg'
+  }
+  if (pathname.endsWith('.gif')) {
+    return 'image/gif'
+  }
+  if (pathname.endsWith('.ico') || pathname.endsWith('/favicon')) {
+    return 'image/x-icon'
+  }
+
+  return ''
+}
+
+async function inferDashboardFaviconMimeTypeFromBlob(blob: Blob): Promise<string> {
+  const buffer = await blob.slice(0, 512).arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+  if (bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47) {
+    return 'image/png'
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  if (bytes.length >= 4 &&
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38) {
+    return 'image/gif'
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x01 && bytes[3] === 0x00) {
+    return 'image/x-icon'
+  }
+  if (bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50) {
+    return 'image/webp'
+  }
+
+  const text = new TextDecoder().decode(bytes).trimStart().slice(0, 160).toLowerCase()
+  if (text.startsWith('<svg') || (text.startsWith('<?xml') && text.includes('<svg'))) {
+    return 'image/svg+xml'
+  }
+
+  return ''
+}
+
+function fetchDashboardWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => {
+    controller.abort()
+  }, DASHBOARD_REMOTE_FAVICON_FETCH_TIMEOUT_MS)
+
+  return fetch(url, {
+    ...options,
+    signal: controller.signal
+  }).finally(() => {
+    window.clearTimeout(timeoutId)
+  })
+}
+
+function readDashboardBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => {
+      const result = String(reader.result || '')
+      if (result.startsWith('data:image/')) {
+        resolve(result)
+      } else {
+        reject(new Error('favicon data url is invalid'))
+      }
+    }, { once: true })
+    reader.addEventListener('error', () => {
+      reject(reader.error || new Error('favicon read failed'))
+    }, { once: true })
+    reader.readAsDataURL(blob)
+  })
+}
+
+function readDashboardImageAsDataUrl(image: HTMLImageElement): string {
+  if (!image.naturalWidth || !image.naturalHeight) {
+    throw new Error('favicon image is empty')
+  }
+
+  const size = Math.max(1, Math.min(DASHBOARD_FAVICON_SIZE, image.naturalWidth, image.naturalHeight))
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const context = canvas.getContext('2d', { willReadFrequently: false })
+  if (!context) {
+    throw new Error('favicon canvas is unavailable')
+  }
+  context.drawImage(image, 0, 0, size, size)
+  const dataUrl = canvas.toDataURL('image/png')
+  if (!dataUrl.startsWith('data:image/')) {
+    throw new Error('favicon canvas export failed')
+  }
+  return dataUrl
+}
+
+function upsertDashboardRemoteFavicon(pageUrl: string, iconUrl: string, now = Date.now()): void {
+  const key = getDashboardFaviconCacheKey(pageUrl)
+  if (!key || !isDashboardSafeImageUrl(iconUrl)) {
+    return
+  }
+
+  dashboardFaviconCache = normalizeDashboardFaviconCache({
+    ...dashboardFaviconCache,
+    [key]: {
+      pageUrl: key,
+      iconUrl,
+      updatedAt: now
+    }
+  }, { now })
+  scheduleDashboardFaviconCacheSave()
+}
+
+function markDashboardRemoteFaviconFailed(pageUrl: string, now = Date.now()): void {
+  const key = getDashboardFaviconCacheKey(pageUrl)
+  if (!key) {
+    return
+  }
+
+  dashboardFaviconCache = normalizeDashboardFaviconCache({
+    ...dashboardFaviconCache,
+    [key]: {
+      pageUrl: key,
+      iconUrl: '',
+      updatedAt: 0,
+      failedAt: now,
+      version: DASHBOARD_FAVICON_FETCH_VERSION
+    }
+  }, { now })
+  scheduleDashboardFaviconCacheSave()
+}
+
+function scheduleDashboardFaviconCacheSave(): void {
+  if (!dashboardFaviconCacheHydrated) {
+    return
+  }
+
+  if (dashboardFaviconCacheSaveTimer) {
+    window.clearTimeout(dashboardFaviconCacheSaveTimer)
+  }
+
+  dashboardFaviconCacheSaveTimer = window.setTimeout(() => {
+    dashboardFaviconCacheSaveTimer = 0
+    void setLocalStorage({
+      [STORAGE_KEYS.dashboardFaviconCache]: dashboardFaviconCache
+    }).catch((error) => {
+      console.debug?.('[Curator] Dashboard favicon cache save skipped', error)
+    })
+  }, 600)
+}
+
+function clampDashboardInteger(value: unknown, min: number, max: number, fallback: number): number {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) {
+    return fallback
+  }
+  return Math.max(min, Math.min(Math.trunc(numberValue), max))
 }
