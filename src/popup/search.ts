@@ -103,22 +103,43 @@ export function searchBookmarks(
   query: string,
   bookmarks: PopupSearchBookmark[]
 ): PopupSearchResult[] {
+  return searchBookmarksWithLimit(query, bookmarks, MAX_POPUP_SEARCH_RESULTS)
+}
+
+export function searchBookmarksUnbounded(
+  query: string,
+  bookmarks: PopupSearchBookmark[]
+): PopupSearchResult[] {
+  return searchBookmarksWithLimit(query, bookmarks, 0)
+}
+
+function searchBookmarksWithLimit(
+  query: string,
+  bookmarks: PopupSearchBookmark[],
+  limit: number
+): PopupSearchResult[] {
   const parsedQuery = parsePopupSearchQuery(query)
   const candidates = getSearchCandidates(bookmarks, parsedQuery)
   const results: PopupSearchResult[] = []
+  const bounded = limit > 0
 
   for (const bookmark of candidates) {
     const match = scoreBookmarkWithReasons(bookmark, parsedQuery)
     if (match.score > 0) {
-      appendTopSearchResult(results, {
+      const result = {
         ...bookmark,
         score: match.score,
         matchReasons: match.reasons
-      })
+      }
+      if (bounded) {
+        appendTopSearchResult(results, result, limit)
+      } else {
+        results.push(result)
+      }
     }
   }
 
-  return results
+  return bounded ? results : results.sort(compareSearchResults)
 }
 
 export async function searchBookmarksCooperatively(
@@ -945,11 +966,11 @@ function getBookmarkSearchText(bookmark: PopupSearchBookmark): string {
   return bookmark.searchText || `${bookmark.normalizedTitle} ${bookmark.normalizedUrl}`
 }
 
-function appendTopSearchResult(results: PopupSearchResult[], result: PopupSearchResult): void {
+function appendTopSearchResult(results: PopupSearchResult[], result: PopupSearchResult, limit = MAX_POPUP_SEARCH_RESULTS): void {
   results.push(result)
   results.sort(compareSearchResults)
-  if (results.length > MAX_POPUP_SEARCH_RESULTS) {
-    results.length = MAX_POPUP_SEARCH_RESULTS
+  if (results.length > limit) {
+    results.length = limit
   }
 }
 

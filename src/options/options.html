@@ -443,6 +443,7 @@
                     <span class="dashboard-search-input-field">
                       <input id="dashboard-query" class="options-search-input" type="search" spellcheck="false" placeholder="">
                     </span>
+                    <button id="dashboard-natural-search-toggle" class="dashboard-natural-search-toggle" type="button" data-dashboard-action="toggle-natural-search" aria-pressed="false" aria-label="开启 Dashboard 自然语言搜索">语义</button>
                     <button
                       id="dashboard-search-help-toggle"
                       class="dashboard-help-button"
@@ -460,6 +461,7 @@
                   高级搜索语法：site:github.com 或 site: github.com 限定站点。folder:"前端 资料" 限定文件夹路径。type:文档 限定 AI 识别的内容类型。最近 2 周、昨天、上个月限定添加时间。-youtube 或 -"短视频" 排除结果。
                 </p>
                 <div id="dashboard-search-chips" class="dashboard-search-chips hidden" aria-label="当前搜索条件"></div>
+                <div id="dashboard-saved-searches" class="dashboard-saved-searches hidden" aria-label="已保存搜索"></div>
                 <nav id="dashboard-folder-breadcrumbs" class="dashboard-folder-breadcrumbs hidden" aria-label="当前 Dashboard 文件夹路径"></nav>
               </div>
             </div>

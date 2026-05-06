@@ -5,8 +5,10 @@ import {
   type ContentSnapshotIndex
 } from './content-snapshots.js'
 import {
+  buildSearchTextQuery,
   matchesParsedSearchQuery,
-  parseSearchQuery
+  parseSearchQuery,
+  type ParsedSearchQuery
 } from './search-query.js'
 import { extractDomain, normalizeText } from './text.js'
 import type { BookmarkRecord, FolderRecord } from './types.js'
@@ -15,10 +17,12 @@ export type DashboardSortKey = 'date-desc' | 'date-asc' | 'title-asc' | 'domain-
 
 export interface DashboardFilters {
   query?: string
+  parsedQuery?: ParsedSearchQuery | null
   folderId?: string
   domain?: string
   month?: string
   sortKey?: DashboardSortKey
+  textMatchMode?: 'all' | 'any'
 }
 
 export interface DashboardFilterSortOptions {
@@ -177,10 +181,13 @@ export function filterAndSortDashboardItems(
 }
 
 function createDashboardItemPredicate(filters: DashboardFilters = {}): (item: DashboardItem) => boolean {
-  const parsedQuery = parseSearchQuery(filters.query || '')
+  const parsedQuery = filters.parsedQuery || parseSearchQuery(filters.query || '')
+  const queryText = buildSearchTextQuery(parsedQuery)
+  const queryTerms = parsedQuery.textTerms
   const folderId = String(filters.folderId || '').trim()
   const domain = String(filters.domain || '').trim()
   const month = String(filters.month || '').trim()
+  const textMatchMode = filters.textMatchMode === 'any' ? 'any' : 'all'
 
   return (item) => {
     if (!matchesParsedSearchQuery(parsedQuery, {
@@ -194,7 +201,15 @@ function createDashboardItemPredicate(filters: DashboardFilters = {}): (item: Da
       return false
     }
 
-    if (parsedQuery.textTerms.length && !parsedQuery.textTerms.every((term) => item.searchText.includes(term))) {
+    if (
+      queryText &&
+      !item.searchText.includes(queryText) &&
+      (
+        textMatchMode === 'any'
+          ? !queryTerms.some((term) => item.searchText.includes(term))
+          : !queryTerms.every((term) => item.searchText.includes(term))
+      )
+    ) {
       return false
     }
 

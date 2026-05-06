@@ -552,6 +552,7 @@ body.background-mask-enabled .newtab-background-mask {
 }
 
 .newtab-search-clear,
+.newtab-search-natural,
 .newtab-search-engine,
 .newtab-search-submit {
   display: grid;
@@ -591,8 +592,37 @@ body.background-mask-enabled .newtab-background-mask {
   white-space: nowrap;
 }
 
+.newtab-search-natural {
+  width: auto;
+  min-width: min(38px, calc(var(--search-height) + 10px));
+  max-width: 58px;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid rgba(245, 245, 247, 0.11);
+  color: rgba(245, 245, 247, 0.68);
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.newtab-search-natural.active {
+  border-color: rgba(163, 230, 53, 0.34);
+  background: rgba(63, 98, 18, 0.28);
+  color: #d9f99d;
+}
+
+.newtab-search-natural.fallback {
+  border-color: rgba(253, 224, 71, 0.34);
+  background: rgba(161, 98, 7, 0.24);
+  color: #fef08a;
+}
+
 .newtab-search-clear:hover,
 .newtab-search-clear:focus-visible,
+.newtab-search-natural:hover,
+.newtab-search-natural:focus-visible,
 .newtab-search-engine:hover,
 .newtab-search-engine:focus-visible,
 .newtab-search-submit:hover,
@@ -613,6 +643,7 @@ body.background-mask-enabled .newtab-background-mask {
 }
 
 .newtab-search-clear:active,
+.newtab-search-natural:active,
 .newtab-search-engine:active,
 .newtab-search-submit:active {
   transform: scale(0.94);
@@ -721,6 +752,101 @@ body.background-mask-enabled .newtab-background-mask {
   font-size: 10px;
   font-weight: 700;
   line-height: 1.3;
+}
+
+.newtab-search-chips,
+.newtab-saved-search-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px 6px;
+}
+
+.newtab-search-chips.hidden,
+.newtab-saved-searches.hidden {
+  display: none;
+}
+
+.newtab-search-chip,
+.newtab-saved-search-chip {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(245, 245, 247, 0.13);
+  border-radius: 7px;
+  background: rgba(245, 245, 247, 0.06);
+  color: rgba(245, 245, 247, 0.82);
+  font-size: 10px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.newtab-search-chip {
+  max-width: 100%;
+  padding: 0 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.newtab-saved-search-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 8px 1px;
+  color: rgba(245, 245, 247, 0.5);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.newtab-saved-search-head .error {
+  color: #fecaca;
+}
+
+.newtab-saved-search-save,
+.newtab-saved-search-apply,
+.newtab-saved-search-delete {
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.newtab-saved-search-save,
+.newtab-saved-search-apply {
+  background: rgba(245, 245, 247, 0.06);
+}
+
+.newtab-saved-search-save:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.newtab-saved-search-apply {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.newtab-saved-search-delete {
+  width: 22px;
+  padding: 0;
+  color: rgba(245, 245, 247, 0.5);
+}
+
+.newtab-saved-search-save:hover:not(:disabled),
+.newtab-saved-search-save:focus-visible,
+.newtab-saved-search-apply:hover,
+.newtab-saved-search-apply:focus-visible,
+.newtab-saved-search-delete:hover,
+.newtab-saved-search-delete:focus-visible {
+  background: rgba(245, 245, 247, 0.1);
+  color: var(--text);
+  outline: none;
 }
 
 .newtab-search-suggestion {

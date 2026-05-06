@@ -1033,6 +1033,17 @@ test('newtab bookmark suggestions are debounced and cached', () => {
   assert.doesNotMatch(script, /input\.addEventListener\('input', \(\) => \{[\s\S]*?renderSuggestions\(\)/)
 })
 
+test('newtab semantic search toggle always runs natural and AI-backed suggestions', () => {
+  const script = readProjectFile('src/newtab/newtab.ts')
+  const body = getFunctionBody(script, 'shouldLoadNaturalSearchSuggestions')
+  const resolverBody = getFunctionBody(script, 'resolveNewTabNaturalSearchPlan')
+
+  assert.match(body, /state\.searchSettings\.naturalSearchEnabled[\s\S]*?return true/)
+  assert.match(resolverBody, /import\('\.\.\/popup\/natural-search-ai\.js'\)/)
+  assert.match(resolverBody, /requestNaturalSearchAiPlan\(\{[\s\S]*?query,[\s\S]*?localPlan,[\s\S]*?settings,[\s\S]*?signal: controller\.signal/)
+  assert.match(script, /naturalButton\.addEventListener\('click'[\s\S]*?naturalSearchSuggestionCache\.clear\(\)/)
+})
+
 test('newtab bookmark change events are coalesced before full refresh', () => {
   const script = readProjectFile('src/newtab/newtab.ts')
 
@@ -1126,15 +1137,15 @@ test('newtab releases transient runtime work and ages search suggestion caches',
   assert.match(cleanupBody, /dashboardFrame\.removeAttribute\('src'\)/)
 })
 
-test('newtab search and quick access stay scoped to selected source folders', () => {
+test('newtab quick access stays scoped while search covers the full bookmark tree', () => {
   const script = readProjectFile('src/newtab/newtab.ts')
 
   assert.match(script, /bookmarks:\s*state\.bookmarks/)
-  assert.match(script, /bookmarks:\s*getVisibleBookmarkRecords\(\)/)
-  assert.match(script, /function getVisibleBookmarkRecords\(\): BookmarkRecord\[\]/)
-  assert.match(script, /folderData\.bookmarkMap\.get\(bookmarkId\)/)
+  assert.match(script, /state\.searchIndex = buildNewTabSearchIndex\(\{[\s\S]*?bookmarks:\s*getAllBookmarkRecords\(\)/)
+  assert.match(script, /function getAllBookmarkRecords\(\): BookmarkRecord\[\]/)
+  assert.match(script, /return folderData\.bookmarks/)
+  assert.doesNotMatch(script, /function getVisibleBookmarkRecords\(\): BookmarkRecord\[\]/)
   assert.doesNotMatch(script, /bookmarks:\s*state\.allBookmarks,[\s\S]*?pinnedIds: state\.activity\.pinnedIds/)
-  assert.doesNotMatch(script, /bookmarks:\s*state\.folderData\?\.bookmarks \|\| extractBookmarkData\(state\.rootNode\)\.bookmarks/)
 })
 
 test('newtab source selection rolls back when folder settings fail to save', () => {
@@ -1223,7 +1234,8 @@ test('newtab search suggestions wait for arrow navigation before selecting a boo
   assert.match(script, /let activeSuggestionIndex = -1/)
   assert.match(script, /activeSuggestionIndex = preserveActive && previousActiveIndex >= 0[\s\S]*\? Math\.min\(previousActiveIndex, searchSuggestions\.length - 1\)[\s\S]*: -1/)
   assert.match(script, /activeSuggestionIndex = activeSuggestionIndex < 0[\s\S]*\? \(direction > 0 \? 0 : searchSuggestions\.length - 1\)/)
-  assert.match(script, /suggestionsHint\.textContent = `按 ↓ 选择书签，选中后 Enter 打开；Cmd\/Ctrl\+Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页`/)
+  assert.match(script, /suggestionsHint\.textContent = getSearchSuggestionHintText\(\)/)
+  assert.match(script, /return `按 ↓ 选择书签，选中后 Enter 打开；Cmd\/Ctrl\+Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页；\$\{mode\}\$\{fallback\}`/)
   assert.doesNotMatch(script, /activeSuggestionIndex = preserveActive[^\n]*\n\s*\? [^\n]*\n\s*: 0/)
 })
 
@@ -1240,7 +1252,8 @@ test('newtab search suggestions explain bookmark enter behavior and empty web se
   assert.match(script, /suggestionsHint\.setAttribute\('aria-live', 'polite'\)/)
   assert.match(script, /createSearchWebFallbackButton\(trimmedQuery\)/)
   assert.match(script, /未找到书签；按 Enter 仅在本页用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页/)
-  assert.match(script, /suggestionsHint\.textContent = `按 ↓ 选择书签，选中后 Enter 打开；Cmd\/Ctrl\+Enter 用 \$\{getSearchEngineDisplayName\(\)\} 搜索网页`/)
+  assert.match(script, /suggestionsHint\.textContent = getSearchSuggestionHintText\(\)/)
+  assert.match(script, /const mode = state\.searchSettings\.naturalSearchEnabled[\s\S]*?'AI 改写'[\s\S]*?'本地语义'[\s\S]*: 'popup 匹配'/)
   assert.match(script, /button\.addEventListener\('click', \(\) => \{[\s\S]*?submitSearch\(query\)/)
   assert.match(css, /\.newtab-search-hint\s*\{/)
   assert.match(css, /\.newtab-search-web-hint\s*\{/)

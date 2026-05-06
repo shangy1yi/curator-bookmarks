@@ -275,6 +275,28 @@ test('dashboard query hydrates full text map on demand and renders after hydrati
   assert.match(ensureBody, /renderDashboardSection\(\)/)
 })
 
+test('dashboard search reuses popup search, saved searches and AI natural parsing', () => {
+  const optionsHtml = readProjectFile('src/options/options.html')
+  const optionsCss = readProjectFile('src/options/options.css')
+  const domSource = readProjectFile('src/options/shared-options/dom.ts')
+  const dashboardSource = readProjectFile('src/options/sections/dashboard.ts')
+
+  assert.match(optionsHtml, /id="dashboard-natural-search-toggle"[^>]+data-dashboard-action="toggle-natural-search"/)
+  assert.match(optionsHtml, /id="dashboard-saved-searches"[^>]+aria-label="已保存搜索"/)
+  assert.match(domSource, /dashboardNaturalSearchToggle\s*=\s*byId\('dashboard-natural-search-toggle'\)/)
+  assert.match(domSource, /dashboardSavedSearches\s*=\s*byId\('dashboard-saved-searches'\)/)
+  assert.match(dashboardSource, /indexBookmarkForSearch/)
+  assert.match(dashboardSource, /searchBookmarksUnbounded/)
+  assert.match(dashboardSource, /getSavedSearchesForScope\(dashboardState\.savedSearches, 'dashboard'\)/)
+  assert.match(dashboardSource, /data-dashboard-saved-search-action="save-current"/)
+  assert.match(dashboardSource, /data-dashboard-saved-search-action="apply"/)
+  assert.match(dashboardSource, /data-dashboard-saved-search-action="delete"/)
+  assert.match(dashboardSource, /requestNaturalSearchAiPlan\(\{[\s\S]*?query,[\s\S]*?localPlan: effectiveLocalPlan,[\s\S]*?settings,[\s\S]*?signal: controller\.signal/)
+  assert.match(dashboardSource, /naturalSearch\.buildLocalNaturalSearchPlan\(query\)/)
+  assert.match(optionsCss, /\.dashboard-natural-search-toggle\.active\s*\{[\s\S]*?color:\s*#d9f99d/)
+  assert.match(optionsCss, /\.dashboard-saved-search-chip\.active\s*\{[\s\S]*?border-color:\s*rgba\(163,\s*230,\s*53,\s*0\.32\)/)
+})
+
 test('AI snapshot saves update only the changed search text entry', () => {
   const optionsSource = readProjectFile('src/options/options.ts')
   const saveBody = getFunctionBody(optionsSource, 'saveContentSnapshotForAiPreparedItem')

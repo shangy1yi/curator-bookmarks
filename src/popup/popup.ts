@@ -99,6 +99,7 @@ const FOCUSABLE_SELECTOR = [
 ].join(',')
 let popupDialogReturnFocusElement: HTMLElement | null = null
 let naturalSearchModulePromise: Promise<typeof import('./natural-search.js')> | null = null
+let naturalSearchAiModulePromise: Promise<typeof import('./natural-search-ai.js')> | null = null
 let contentExtractionModulePromise: Promise<typeof import('../options/sections/content-extraction.js')> | null = null
 let aiSettingsModulePromise: Promise<typeof import('../options/sections/ai-settings.js')> | null = null
 let aiResponseModulePromise: Promise<typeof import('../shared/ai-response.js')> | null = null
@@ -112,6 +113,11 @@ function abortNaturalSearchRequest() {
 function loadNaturalSearchModule(): Promise<typeof import('./natural-search.js')> {
   naturalSearchModulePromise ||= import('./natural-search.js')
   return naturalSearchModulePromise
+}
+
+function loadNaturalSearchAiModule(): Promise<typeof import('./natural-search-ai.js')> {
+  naturalSearchAiModulePromise ||= import('./natural-search-ai.js')
+  return naturalSearchAiModulePromise
 }
 
 function loadContentExtractionModule(): Promise<typeof import('../options/sections/content-extraction.js')> {
@@ -183,40 +189,6 @@ const SMART_CLASSIFY_SCHEMA = {
     }
   }
 }
-
-const NATURAL_SEARCH_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['queries', 'keywords', 'excluded_terms', 'date_range', 'explanation'],
-  properties: {
-    queries: {
-      type: 'array',
-      maxItems: 5,
-      items: { type: 'string', maxLength: 80 }
-    },
-    keywords: {
-      type: 'array',
-      maxItems: 12,
-      items: { type: 'string', maxLength: 40 }
-    },
-    excluded_terms: {
-      type: 'array',
-      maxItems: 8,
-      items: { type: 'string', maxLength: 40 }
-    },
-    date_range: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['from', 'to', 'label'],
-      properties: {
-        from: { type: 'string', maxLength: 10 },
-        to: { type: 'string', maxLength: 10 },
-        label: { type: 'string', maxLength: 40 }
-      }
-    },
-    explanation: { type: 'string', maxLength: 120 }
-  }
-} as const
 
 document.addEventListener('DOMContentLoaded', () => {
   cacheDom()
@@ -1057,14 +1029,15 @@ async function toggleNaturalLanguageSearch() {
 
 async function prepareNaturalLanguageSearchAi() {
   try {
-    const settings = await loadAiProviderSettings()
-    if (!hasConfiguredAiProviderSettings(settings)) {
+    const naturalSearchAi = await loadNaturalSearchAiModule()
+    const settings = await naturalSearchAi.loadNaturalSearchAiProviderSettings()
+    if (!naturalSearchAi.hasConfiguredNaturalSearchAiProvider(settings)) {
       state.naturalSearchError = '未配置 AI 渠道，当前使用本地解析。'
       return
     }
 
-    validateSmartAiSettings(settings)
-    await ensureSmartClassifyPermissions(settings, { interactive: true })
+    naturalSearchAi.validateNaturalSearchAiProvider(settings)
+    await naturalSearchAi.ensureNaturalSearchAiPermissions(settings, { interactive: true })
   } catch {
     state.naturalSearchError = 'AI 未就绪，当前使用本地解析。'
   }
@@ -1284,8 +1257,9 @@ async function resolveCachedNaturalSearchPlan(
   }
 
   try {
-    const settings = await loadAiProviderSettings()
-    if (hasConfiguredAiProviderSettings(settings)) {
+    const naturalSearchAi = await loadNaturalSearchAiModule()
+    const settings = await naturalSearchAi.loadNaturalSearchAiProviderSettings()
+    if (naturalSearchAi.hasConfiguredNaturalSearchAiProvider(settings)) {
       return { plan: cachedPlan, canReuseResults: true }
     }
   } catch {
@@ -1309,13 +1283,16 @@ async function resolveNaturalSearchPlan(
   let settings
 
   try {
-    settings = await loadAiProviderSettings()
+    const naturalSearchAi = await loadNaturalSearchAiModule()
+    settings = await naturalSearchAi.loadNaturalSearchAiProviderSettings()
   } catch (error) {
-    state.naturalSearchError = normalizeNaturalSearchError(error)
+    const naturalSearchAi = await loadNaturalSearchAiModule()
+    state.naturalSearchError = naturalSearchAi.normalizeNaturalSearchAiError(error)
     return localPlan
   }
 
-  if (!hasConfiguredAiProviderSettings(settings)) {
+  const naturalSearchAi = await loadNaturalSearchAiModule()
+  if (!naturalSearchAi.hasConfiguredNaturalSearchAiProvider(settings)) {
     state.naturalSearchError = '未配置 AI 渠道，已使用本地解析。'
     return localPlan
   }
@@ -1326,10 +1303,15 @@ async function resolveNaturalSearchPlan(
   }
 
   try {
-    plan = await requestNaturalSearchAiPlan(query, localPlan, settings, naturalSearch, options)
+    plan = await naturalSearchAi.requestNaturalSearchAiPlan({
+      query,
+      localPlan,
+      settings,
+      signal: options.signal
+    })
     state.naturalSearchError = ''
   } catch (error) {
-    state.naturalSearchError = normalizeNaturalSearchError(error)
+    state.naturalSearchError = naturalSearchAi.normalizeNaturalSearchAiError(error)
   }
 
   if (plan.source === 'ai') {
@@ -4522,160 +4504,6 @@ async function ensureSmartClassifyPermissions(settings, { interactive = false } 
     throw createSmartPermissionRequiredError(missingOrigins, '未完成 AI 渠道授权，暂时无法智能分类。')
   }
   return true
-}
-
-async function requestNaturalSearchAiPlan(
-  query,
-  localPlan: NaturalSearchPlan,
-  settings,
-  naturalSearch: typeof import('./natural-search.js'),
-  options: { signal?: AbortSignal | null } = {}
-): Promise<NaturalSearchPlan> {
-  throwIfAborted(options.signal)
-  validateSmartAiSettings(settings)
-  await ensureSmartClassifyPermissions(settings, { interactive: false })
-
-  throwIfAborted(options.signal)
-  const aiResponse = await loadAiResponseModule()
-  const endpoint = aiResponse.getAiEndpoint(settings)
-  const requestBody = buildNaturalSearchRequestBody({ settings, query, localPlan })
-  const response = await fetchWithSmartTimeout(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${settings.apiKey}`
-    },
-    body: JSON.stringify(requestBody),
-    signal: options.signal
-  }, settings.timeoutMs)
-  throwIfAborted(options.signal)
-  const payload = await response.json().catch(() => null)
-
-  if (!response.ok) {
-    throw new Error(aiResponse.extractAiErrorMessage(payload, response.status))
-  }
-
-  const rawJsonText = settings.apiStyle === 'responses'
-    ? aiResponse.extractResponsesJsonText(payload)
-    : aiResponse.extractChatCompletionsJsonText(payload)
-
-  try {
-    return naturalSearch.normalizeNaturalSearchAiPlan(JSON.parse(rawJsonText), localPlan)
-  } catch {
-    throw new Error('AI 返回了无法解析的自然语言搜索结果。')
-  }
-}
-
-function buildNaturalSearchRequestBody({ settings, query, localPlan }) {
-  const today = formatLocalDate(Date.now())
-  const exampleDateRange = getPreviousWeekDateRange()
-  const systemPrompt = [
-    '你是浏览器书签搜索查询理解器。',
-    '你的任务是把用户自然语言改写为本地书签搜索关键词，不要回答用户问题。',
-    '输出要适合在标题、URL、文件夹路径、AI 标签、主题、别名和摘要中做文本匹配。',
-    '保留产品名、框架名、库名、站点名和专有名词；去掉“帮我找、那个、收藏的、书签”等意图词。',
-    '为中文和英文同义表达补充少量高价值关键词，例如“表格教程”可包含 table、grid、tutorial、guide。',
-    '如果用户明确排除某类内容，把排除词放入 excluded_terms。',
-    'date_range 只有在用户明确提到时间时填写；from 和 to 使用 YYYY-MM-DD，to 是不包含的结束日期；没有时间条件时三个字段都返回空字符串。',
-    '不要编造用户没有表达的具体网站、作者或标题。'
-  ].join('\n')
-  const userPrompt = JSON.stringify({
-    today,
-    raw_query: query,
-    local_interpretation: {
-      queries: localPlan.queries,
-      date_range: localPlan.dateRange
-        ? {
-            from: formatLocalDate(localPlan.dateRange.from),
-            to: formatLocalDate(localPlan.dateRange.to),
-            label: localPlan.dateRange.label
-          }
-        : { from: '', to: '', label: '' }
-    },
-    examples: [
-      {
-        input: '帮我找上周收藏的那个 React 表格教程',
-        output: {
-          queries: ['react 表格 教程 table grid tutorial guide', 'react table tutorial'],
-          keywords: ['react', '表格', '教程', 'table', 'grid', 'tutorial'],
-          excluded_terms: [],
-          date_range: exampleDateRange
-            ? {
-                from: formatLocalDate(exampleDateRange.from),
-                to: formatLocalDate(exampleDateRange.to),
-                label: exampleDateRange.label
-              }
-            : { from: '', to: '', label: '' },
-          explanation: '按上周收藏和 React 表格教程关键词匹配'
-        }
-      }
-    ]
-  }, null, 2)
-
-  if (settings.apiStyle === 'chat_completions') {
-    const schemaHint = '\n\n请严格按以下 JSON 格式返回结果，不要添加任何额外文本或 markdown 标记：\n' + JSON.stringify(NATURAL_SEARCH_SCHEMA, null, 2)
-    return {
-      model: settings.model,
-      messages: [
-        { role: 'system', content: systemPrompt + schemaHint },
-        { role: 'user', content: userPrompt }
-      ],
-      response_format: { type: 'json_object' }
-    }
-  }
-
-  return {
-    model: settings.model,
-    input: [
-      {
-        role: 'system',
-        content: [{ type: 'input_text', text: systemPrompt }]
-      },
-      {
-        role: 'user',
-        content: [{ type: 'input_text', text: userPrompt }]
-      }
-    ],
-    text: {
-      format: {
-        type: 'json_schema',
-        name: 'popup_natural_language_search',
-        strict: true,
-        schema: NATURAL_SEARCH_SCHEMA
-      }
-    }
-  }
-}
-
-function getPreviousWeekDateRange(): NaturalSearchPlan['dateRange'] {
-  const now = new Date()
-  const day = now.getDay()
-  const daysFromMonday = (day + 6) % 7
-  const thisWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysFromMonday)
-  thisWeekStart.setHours(0, 0, 0, 0)
-  const previousWeekStart = thisWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000
-  return {
-    from: previousWeekStart,
-    to: thisWeekStart.getTime(),
-    label: '上周收藏'
-  }
-}
-
-function normalizeNaturalSearchError(error) {
-  if (isSmartPermissionRequiredError(error)) {
-    return 'AI 渠道未授权，已使用本地自然语言解析。'
-  }
-
-  const message = error instanceof Error ? error.message : ''
-  if (!message) {
-    return 'AI 解析不可用，已使用本地自然语言解析。'
-  }
-
-  if (message.includes('请先到通用设置')) {
-    return '未配置 AI 渠道，已使用本地自然语言解析。'
-  }
-
-  return `AI 解析不可用，已使用本地解析：${cleanSmartText(message, 72)}`
 }
 
 async function buildCurrentPageContext(currentUrl, settings) {

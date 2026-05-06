@@ -11,6 +11,16 @@ import {
 } from '../shared/bookmark-tree.js'
 import { getLocalStorage, setLocalStorage } from '../shared/storage.js'
 import type { BookmarkRecord, ExtractedBookmarkData, FolderRecord } from '../shared/types.js'
+import {
+  deleteSavedSearch,
+  getSavedSearchesForScope,
+  loadSavedSearchIndex,
+  parseSearchQuery,
+  saveSearch,
+  type SavedSearch,
+  type SavedSearchIndex
+} from '../shared/search-query.js'
+import type { NaturalSearchPlan } from '../popup/natural-search.js'
 import type {
   BookmarkTagExtraction,
   BookmarkTagIndex,
@@ -180,6 +190,7 @@ const DEFAULT_SEARCH_SETTINGS = {
   engine: 'google' as SearchEngineId,
   enabledEngines: DEFAULT_ENABLED_SEARCH_ENGINE_IDS,
   placeholder: '搜索网页或书签',
+  naturalSearchEnabled: false,
   width: 34,
   height: 34,
   offsetY: 0,
@@ -419,6 +430,14 @@ const state = {
   allBookmarkMap: new Map<string, chrome.bookmarks.BookmarkTreeNode>(),
   searchIndex: [] as NewTabSearchIndexEntry[],
   preparedSearchIndex: prepareNewTabSearchIndex([]) as NewTabPreparedSearchIndex,
+  savedSearches: null as SavedSearchIndex | null,
+  savedSearchesLoaded: false,
+  savedSearchesError: '',
+  naturalSearchPending: false,
+  naturalSearchError: '',
+  naturalSearchPlan: null as NaturalSearchPlan | null,
+  naturalSearchPlanCache: new Map<string, NaturalSearchPlan>(),
+  naturalSearchAbortController: null as AbortController | null,
   activeMenuBookmarkId: '',
   menuX: 0,
   menuY: 0,
@@ -547,6 +566,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindEvents()
   renderIconPresetCards()
   void backgroundPreloadPromise
+  void hydrateNewTabSavedSearches()
   void refreshNewTab()
 })
 
@@ -3753,6 +3773,11 @@ function createSearchWidget(): HTMLElement | null {
   clearButton.setAttribute('aria-label', '清空搜索')
   clearButton.textContent = '×'
 
+  const naturalButton = document.createElement('button')
+  naturalButton.className = 'newtab-search-natural'
+  naturalButton.type = 'button'
+  naturalButton.setAttribute('aria-pressed', String(state.searchSettings.naturalSearchEnabled))
+
   const engineButton = document.createElement('button')
   engineButton.className = 'newtab-search-engine'
   engineButton.type = 'button'
@@ -3765,6 +3790,25 @@ function createSearchWidget(): HTMLElement | null {
     engineButton.textContent = label
     engineButton.title = `当前引擎：${engine?.name || label}。Cmd/Ctrl+Enter 搜索前 ${SEARCH_MULTI_OPEN_LIMIT} 个启用引擎。`
     engineButton.setAttribute('aria-label', `选择搜索引擎，当前为 ${engine?.name || label}`)
+  }
+
+  const updateNaturalButton = () => {
+    const active = state.searchSettings.naturalSearchEnabled
+    naturalButton.classList.toggle('active', active)
+    naturalButton.classList.toggle('pending', state.naturalSearchPending)
+    naturalButton.classList.toggle('fallback', Boolean(state.naturalSearchError))
+    naturalButton.textContent = !active
+      ? '语义'
+      : state.naturalSearchPending
+        ? '理解'
+        : state.naturalSearchPlan?.source === 'ai' && !state.naturalSearchError
+          ? 'AI'
+          : '本地'
+    naturalButton.title = active
+      ? (state.naturalSearchError || '自然语言搜索已开启，AI 可用时会改写查询')
+      : '开启自然语言搜索：本地解析，AI 可用时改写查询'
+    naturalButton.setAttribute('aria-pressed', String(active))
+    naturalButton.setAttribute('aria-label', active ? '关闭自然语言搜索' : '开启自然语言搜索')
   }
 
   const closeEngineMenu = ({ restoreFocus = false } = {}) => {
@@ -3906,7 +3950,15 @@ function createSearchWidget(): HTMLElement | null {
   suggestionsHint.setAttribute('aria-live', 'polite')
   suggestionsHint.hidden = true
 
-  suggestionsPanel.append(suggestionsHeading, suggestions, suggestionsHint)
+  const searchChips = document.createElement('div')
+  searchChips.className = 'newtab-search-chips hidden'
+  searchChips.setAttribute('aria-label', '当前搜索条件')
+
+  const savedSearches = document.createElement('div')
+  savedSearches.className = 'newtab-saved-searches hidden'
+  savedSearches.setAttribute('aria-label', '已保存搜索')
+
+  suggestionsPanel.append(searchChips, savedSearches, suggestionsHeading, suggestions, suggestionsHint)
 
   let searchSuggestions: SearchBookmarkSuggestion[] = []
   let activeSuggestionIndex = -1
@@ -3919,6 +3971,10 @@ function createSearchWidget(): HTMLElement | null {
     searchSuggestions = []
     activeSuggestionIndex = -1
     suggestions.replaceChildren()
+    searchChips.replaceChildren()
+    searchChips.classList.add('hidden')
+    savedSearches.replaceChildren()
+    savedSearches.classList.add('hidden')
     suggestions.hidden = false
     suggestionsHeading.textContent = '书签匹配'
     suggestionsHeading.hidden = false
@@ -3938,6 +3994,11 @@ function createSearchWidget(): HTMLElement | null {
   } = {}) => {
     const trimmedQuery = String(query || '').trim()
     const previousActiveIndex = activeSuggestionIndex
+    renderNewTabSearchChips(searchChips, trimmedQuery)
+    renderNewTabSavedSearches(savedSearches, trimmedQuery, input, () => {
+      syncSearchInputActions(input, clearButton, separator, submitButton)
+      scheduleSuggestionsRender({ preserveActive: true, immediate: true })
+    })
     searchSuggestions = suggestionList
     if (!searchSuggestions.length) {
       activeSuggestionIndex = -1
@@ -3979,7 +4040,7 @@ function createSearchWidget(): HTMLElement | null {
     ))
     suggestionsPanel.classList.remove('hidden')
     suggestionsHeading.hidden = false
-    suggestionsHint.textContent = `按 ↓ 选择书签，选中后 Enter 打开；Cmd/Ctrl+Enter 用 ${getSearchEngineDisplayName()} 搜索网页`
+    suggestionsHint.textContent = getSearchSuggestionHintText()
     suggestionsHint.hidden = false
     input.setAttribute('aria-expanded', 'true')
 
@@ -4012,9 +4073,14 @@ function createSearchWidget(): HTMLElement | null {
             return
           }
 
+          updateNaturalButton()
           renderSuggestions(naturalSuggestions, { preserveActive: true, query })
         }).catch(() => {
           // Keep the popup-aligned suggestions visible if the optional natural-search chunk fails to load.
+        }).finally(() => {
+          if (requestId === suggestionRequestId) {
+            updateNaturalButton()
+          }
         })
       }).catch(() => {
         if (requestId !== suggestionRequestId) {
@@ -4104,6 +4170,20 @@ function createSearchWidget(): HTMLElement | null {
     hideSuggestions()
     input.focus()
   })
+  naturalButton.addEventListener('click', () => {
+    state.searchSettings = normalizeSearchSettings({
+      ...state.searchSettings,
+      naturalSearchEnabled: !state.searchSettings.naturalSearchEnabled
+    })
+    abortNewTabNaturalSearchRequest()
+    naturalSearchSuggestionCache.clear()
+    state.naturalSearchPlan = null
+    state.naturalSearchError = ''
+    scheduleSearchSettingsSave()
+    updateNaturalButton()
+    input.focus()
+    scheduleSuggestionsRender({ preserveActive: true, immediate: true })
+  })
   engineButton.addEventListener('click', () => {
     if (engineButton.getAttribute('aria-expanded') === 'true') {
       closeEngineMenu()
@@ -4143,7 +4223,8 @@ function createSearchWidget(): HTMLElement | null {
   })
 
   updateEngineButton()
-  form.append(input, clearButton, separator, engineButton, submitButton)
+  updateNaturalButton()
+  form.append(input, clearButton, separator, naturalButton, engineButton, submitButton)
   syncSearchInputActions(input, clearButton, separator, submitButton)
   slot.append(form, suggestionsPanel)
   return slot
@@ -4169,6 +4250,191 @@ function createSearchWidget(): HTMLElement | null {
   function getSearchEngineDisplayName(): string {
     return SEARCH_ENGINE_CONFIG_BY_ID.get(state.searchSettings.engine)?.name || 'Google'
   }
+
+  function getSearchSuggestionHintText(): string {
+    const mode = state.searchSettings.naturalSearchEnabled
+      ? state.naturalSearchPlan?.source === 'ai' && !state.naturalSearchError
+        ? 'AI 改写'
+        : '本地语义'
+      : 'popup 匹配'
+    const fallback = state.naturalSearchError ? `；${state.naturalSearchError}` : ''
+    return `按 ↓ 选择书签，选中后 Enter 打开；Cmd/Ctrl+Enter 用 ${getSearchEngineDisplayName()} 搜索网页；${mode}${fallback}`
+  }
+}
+
+function renderNewTabSearchChips(container: HTMLElement, query: string): void {
+  const chips = parseSearchQuery(query).chips
+  container.classList.toggle('hidden', chips.length === 0)
+  container.replaceChildren(...chips.map((chip) => {
+    const item = document.createElement('span')
+    item.className = `newtab-search-chip ${chip.kind}`
+    item.textContent = chip.label
+    return item
+  }))
+}
+
+function renderNewTabSavedSearches(
+  container: HTMLElement,
+  query: string,
+  input: HTMLInputElement,
+  onApply: () => void
+): void {
+  const savedSearches = state.savedSearches
+    ? getSavedSearchesForScope(state.savedSearches, 'popup')
+    : []
+  const normalizedQuery = normalizeNewTabSearchText(query)
+  const canSaveCurrent = Boolean(normalizedQuery)
+  const hasCurrentSaved = canSaveCurrent && savedSearches.some((item) => normalizeNewTabSearchText(item.query) === normalizedQuery)
+  const show = canSaveCurrent || savedSearches.length > 0 || state.savedSearchesError
+
+  container.classList.toggle('hidden', !show)
+  container.replaceChildren()
+  if (!show) {
+    return
+  }
+
+  const head = document.createElement('div')
+  head.className = 'newtab-saved-search-head'
+  const label = document.createElement('span')
+  label.textContent = state.savedSearchesError || '保存搜索'
+  label.className = state.savedSearchesError ? 'error' : ''
+  head.appendChild(label)
+
+  if (canSaveCurrent) {
+    const saveButton = document.createElement('button')
+    saveButton.className = 'newtab-saved-search-save'
+    saveButton.type = 'button'
+    saveButton.disabled = hasCurrentSaved
+    saveButton.textContent = hasCurrentSaved ? '已保存' : '保存'
+    saveButton.addEventListener('pointerdown', (event) => {
+      event.preventDefault()
+    })
+    saveButton.addEventListener('click', () => {
+      void saveNewTabCurrentSearch(query).then(onApply)
+    })
+    head.appendChild(saveButton)
+  }
+  container.appendChild(head)
+
+  if (!savedSearches.length) {
+    return
+  }
+
+  const list = document.createElement('div')
+  list.className = 'newtab-saved-search-list'
+  for (const search of savedSearches.slice(0, 6)) {
+    list.appendChild(createNewTabSavedSearchChip(search, input, onApply))
+  }
+  container.appendChild(list)
+}
+
+function createNewTabSavedSearchChip(
+  search: SavedSearch,
+  input: HTMLInputElement,
+  onApply: () => void
+): HTMLElement {
+  const chip = document.createElement('span')
+  chip.className = 'newtab-saved-search-chip'
+
+  const apply = document.createElement('button')
+  apply.className = 'newtab-saved-search-apply'
+  apply.type = 'button'
+  apply.textContent = search.name || search.query
+  apply.title = search.query
+  apply.addEventListener('pointerdown', (event) => {
+    event.preventDefault()
+  })
+  apply.addEventListener('click', () => {
+    input.value = search.query
+    onApply()
+    input.focus()
+  })
+
+  const remove = document.createElement('button')
+  remove.className = 'newtab-saved-search-delete'
+  remove.type = 'button'
+  remove.textContent = '×'
+  remove.setAttribute('aria-label', `删除保存搜索：${search.name || search.query}`)
+  remove.addEventListener('pointerdown', (event) => {
+    event.preventDefault()
+  })
+  remove.addEventListener('click', () => {
+    void deleteNewTabSavedSearch(search.id).then(onApply)
+  })
+
+  chip.append(apply, remove)
+  return chip
+}
+
+async function hydrateNewTabSavedSearches(): Promise<void> {
+  if (state.savedSearchesLoaded) {
+    return
+  }
+
+  try {
+    state.savedSearches = await loadSavedSearchIndex()
+    state.savedSearchesLoaded = true
+    state.savedSearchesError = ''
+  } catch {
+    state.savedSearchesLoaded = true
+    state.savedSearchesError = '保存搜索读取失败'
+  }
+}
+
+async function ensureNewTabSavedSearchIndex(): Promise<SavedSearchIndex> {
+  if (state.savedSearches) {
+    return state.savedSearches
+  }
+
+  state.savedSearches = await loadSavedSearchIndex()
+  state.savedSearchesLoaded = true
+  return state.savedSearches
+}
+
+async function saveNewTabCurrentSearch(query: string): Promise<void> {
+  const trimmedQuery = String(query || '').trim()
+  if (!trimmedQuery) {
+    return
+  }
+
+  try {
+    const index = await ensureNewTabSavedSearchIndex()
+    state.savedSearches = await saveSearch(index, {
+      name: createNewTabSavedSearchName(trimmedQuery),
+      query: trimmedQuery,
+      scope: 'both'
+    })
+    state.savedSearchesLoaded = true
+    state.savedSearchesError = ''
+  } catch (error) {
+    state.savedSearchesError = error instanceof Error ? error.message : '保存搜索失败'
+  }
+}
+
+async function deleteNewTabSavedSearch(searchId: string): Promise<void> {
+  try {
+    const index = await ensureNewTabSavedSearchIndex()
+    state.savedSearches = await deleteSavedSearch(index, String(searchId || ''))
+    state.savedSearchesLoaded = true
+    state.savedSearchesError = ''
+  } catch (error) {
+    state.savedSearchesError = error instanceof Error ? error.message : '删除保存搜索失败'
+  }
+}
+
+function createNewTabSavedSearchName(query: string): string {
+  const parsed = parseSearchQuery(query)
+  const chipLabels = parsed.chips.map((chip) => chip.label.replace(/^[^：]+：/, '')).filter(Boolean)
+  const terms = parsed.textTerms.join(' ')
+  return truncateNewTabSearchText([...chipLabels, terms].filter(Boolean).join(' · ') || query, 60) || '未命名搜索'
+}
+
+function truncateNewTabSearchText(value: unknown, limit = 60): string {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (text.length <= limit) {
+    return text
+  }
+  return `${text.slice(0, Math.max(0, limit - 1)).trim()}…`
 }
 
 function syncSearchInputActions(
@@ -4191,6 +4457,12 @@ interface SearchSuggestionCacheEntry {
 
 const searchSuggestionCache = new Map<string, SearchSuggestionCacheEntry>()
 const naturalSearchSuggestionCache = new Map<string, SearchSuggestionCacheEntry>()
+
+function abortNewTabNaturalSearchRequest(): void {
+  state.naturalSearchAbortController?.abort()
+  state.naturalSearchAbortController = null
+  state.naturalSearchPending = false
+}
 
 function getSearchBookmarkSuggestions(query: string): Promise<SearchBookmarkSuggestion[]> {
   const cacheKey = getSearchSuggestionCacheKey(query)
@@ -4215,13 +4487,75 @@ function getNaturalSearchBookmarkSuggestions(query: string): Promise<SearchBookm
     return cached.promise
   }
 
-  const suggestionsPromise = getNaturalSearchBookmarkSuggestionsFromIndex(
-    query,
-    state.preparedSearchIndex,
-    SEARCH_SUGGESTION_LIMIT
-  )
+  const suggestionsPromise = resolveNewTabNaturalSearchPlan(query)
+    .then((plan) => getNaturalSearchBookmarkSuggestionsFromIndex(
+      query,
+      state.preparedSearchIndex,
+      SEARCH_SUGGESTION_LIMIT,
+      { naturalSearchPlan: plan }
+    ))
   setSearchSuggestionCacheEntry(naturalSearchSuggestionCache, cacheKey, suggestionsPromise)
   return suggestionsPromise
+}
+
+async function resolveNewTabNaturalSearchPlan(query: string): Promise<NaturalSearchPlan> {
+  const naturalSearch = await import('../popup/natural-search.js')
+  const localPlan = naturalSearch.buildLocalNaturalSearchPlan(query)
+  const normalizedQuery = normalizeNewTabSearchText(query)
+  const planCacheKey = getNaturalSearchPlanCacheKey(normalizedQuery)
+  const cachedPlan = state.naturalSearchPlanCache.get(planCacheKey)
+  if (cachedPlan) {
+    state.naturalSearchPlan = cachedPlan
+    state.naturalSearchError = ''
+    return cachedPlan
+  }
+
+  if (!state.searchSettings.naturalSearchEnabled) {
+    state.naturalSearchPlan = localPlan
+    return localPlan
+  }
+
+  abortNewTabNaturalSearchRequest()
+  const controller = new AbortController()
+  state.naturalSearchAbortController = controller
+  state.naturalSearchPending = true
+  state.naturalSearchError = ''
+
+  try {
+    const naturalSearchAi = await import('../popup/natural-search-ai.js')
+    const settings = await naturalSearchAi.loadNaturalSearchAiProviderSettings()
+    if (!naturalSearchAi.hasConfiguredNaturalSearchAiProvider(settings)) {
+      state.naturalSearchError = '未配置 AI 渠道，已使用本地解析。'
+      state.naturalSearchPlan = localPlan
+      return localPlan
+    }
+
+    const plan = await naturalSearchAi.requestNaturalSearchAiPlan({
+      query,
+      localPlan,
+      settings,
+      signal: controller.signal
+    })
+    state.naturalSearchPlan = plan
+    state.naturalSearchError = ''
+    if (plan.source === 'ai') {
+      state.naturalSearchPlanCache.set(planCacheKey, plan)
+    }
+    return plan
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error
+    }
+    const naturalSearchAi = await import('../popup/natural-search-ai.js')
+    state.naturalSearchError = naturalSearchAi.normalizeNaturalSearchAiError(error)
+    state.naturalSearchPlan = localPlan
+    return localPlan
+  } finally {
+    if (state.naturalSearchAbortController === controller) {
+      state.naturalSearchAbortController = null
+    }
+    state.naturalSearchPending = false
+  }
 }
 
 function getSearchSuggestionCacheEntry(
@@ -4287,6 +4621,9 @@ function shouldLoadNaturalSearchSuggestions(
   const normalizedQuery = normalizeNewTabSearchText(query)
   if (!normalizedQuery) {
     return false
+  }
+  if (state.searchSettings.naturalSearchEnabled) {
+    return true
   }
   if (!directSuggestions.length) {
     return true
@@ -4508,8 +4845,17 @@ function getSearchSuggestionCacheKey(query: string): string {
     state.preparedSearchIndex.entries.length,
     state.bookmarkTagIndex?.updatedAt || 0,
     state.searchSnapshotIndex?.updatedAt || 0,
+    state.searchSettings.naturalSearchEnabled ? 'ai' : 'local',
     normalizeNewTabSearchText(query)
   ].join(':')
+}
+
+function getNaturalSearchDateBucket(): string {
+  return formatNewTabLocalDate(Date.now())
+}
+
+function getNaturalSearchPlanCacheKey(normalizedQuery: string): string {
+  return `${getNaturalSearchDateBucket()}\u0000${normalizedQuery}`
 }
 
 function createSearchSuggestionButton(
@@ -5507,8 +5853,10 @@ function cleanupNewTabRuntime(): void {
   removeFolderDragGhost()
   setActiveBackgroundObjectUrl('')
   clearVideoBackground()
+  abortNewTabNaturalSearchRequest()
   searchSuggestionCache.clear()
   naturalSearchSuggestionCache.clear()
+  state.naturalSearchPlanCache.clear()
   if (faviconAccentSaveTimer) {
     window.clearTimeout(faviconAccentSaveTimer)
     faviconAccentSaveTimer = 0
@@ -5662,32 +6010,14 @@ function refreshDerivedBookmarkState(): void {
   state.allBookmarks = buildAllBookmarks(state.rootNode)
   state.allBookmarkMap = new Map(state.allBookmarks.map((bookmark) => [String(bookmark.id), bookmark]))
   state.searchIndex = buildNewTabSearchIndex({
-    bookmarks: getVisibleBookmarkRecords(),
+    bookmarks: getAllBookmarkRecords(),
     tagIndex: state.bookmarkTagIndex,
     snapshotIndex: state.searchSnapshotIndex
   })
   state.preparedSearchIndex = prepareNewTabSearchIndex(state.searchIndex)
   searchSuggestionCache.clear()
   naturalSearchSuggestionCache.clear()
-}
-
-function getVisibleBookmarkRecords(): BookmarkRecord[] {
-  const folderData = state.folderData || extractBookmarkData(state.rootNode)
-  const records: BookmarkRecord[] = []
-  const seenIds = new Set<string>()
-
-  for (const bookmark of state.bookmarks) {
-    const bookmarkId = String(bookmark.id || '').trim()
-    const record = bookmarkId ? folderData.bookmarkMap.get(bookmarkId) : null
-    if (!record || seenIds.has(record.id)) {
-      continue
-    }
-
-    records.push(record)
-    seenIds.add(record.id)
-  }
-
-  return records
+  state.naturalSearchPlanCache.clear()
 }
 
 function getAllBookmarkRecords(): BookmarkRecord[] {
@@ -7226,6 +7556,7 @@ function normalizeSearchSettings(rawSettings: unknown): typeof DEFAULT_SEARCH_SE
     engine,
     enabledEngines: normalizeEnabledSearchEngineIds(settings.enabledEngines, engine),
     placeholder,
+    naturalSearchEnabled: settings.naturalSearchEnabled === true,
     width: clampNumber(settings.width, 16, 72, DEFAULT_SEARCH_SETTINGS.width),
     height: clampNumber(settings.height, 28, 56, DEFAULT_SEARCH_SETTINGS.height),
     offsetY: clampNumber(
@@ -8559,4 +8890,16 @@ function getFaviconUrl(url: string, bookmarkId = ''): string {
 function getFallbackLabel(title: string): string {
   const trimmed = title.trim()
   return (trimmed[0] || '*').toUpperCase()
+}
+
+function formatNewTabLocalDate(value: unknown): string {
+  const date = new Date(Number(value))
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }

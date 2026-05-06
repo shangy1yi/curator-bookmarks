@@ -13,12 +13,22 @@ import {
   type BookmarkTagIndex,
   type BookmarkTagRecord
 } from '../../shared/bookmark-tags.js'
-import { displayUrl } from '../../shared/text.js'
+import { displayUrl, normalizeText } from '../../shared/text.js'
 import { moveBookmark } from '../../shared/bookmarks-api.js'
 import { createAutoBackupBeforeDangerousOperation } from '../../shared/backup.js'
+import { createMemoryCache, type MemoryCache } from '../../shared/cache.js'
 import { renderDotMatrixLoader } from '../../shared/dot-matrix-loader.js'
 import { cancelExitMotion, closeWithExitMotion } from '../../shared/motion.js'
-import { parseSearchQuery } from '../../shared/search-query.js'
+import {
+  buildSearchTextQuery,
+  deleteSavedSearch,
+  getSavedSearchesForScope,
+  loadSavedSearchIndex,
+  parseSearchQuery,
+  saveSearch,
+  type SavedSearch,
+  type SavedSearchIndex
+} from '../../shared/search-query.js'
 import {
   buildContentSnapshotSearchMapWithFullText,
   type ContentSnapshotIndex
@@ -52,6 +62,13 @@ import { aiNamingState, availabilityState, contentSnapshotState, dashboardState,
 import { dom } from '../shared-options/dom.js'
 import { escapeAttr, escapeHtml } from '../shared-options/html.js'
 import { deleteBookmarksToRecycle } from './recycle.js'
+import type { NaturalSearchPlan, NaturalSearchResultSet } from '../../popup/natural-search.js'
+import {
+  indexBookmarkForSearch,
+  searchBookmarksUnbounded,
+  type PopupSearchBookmark,
+  type PopupSearchResult
+} from '../../popup/search.js'
 
 export type DashboardViewMode = 'cards'
 
@@ -164,6 +181,7 @@ interface DashboardRenderCache {
   modelKey: DashboardModelCacheKey | null
   model: DashboardModel | null
   visibleModel: DashboardModel | null
+  visibleNaturalPlan: NaturalSearchPlan | null
   visibleQuery: string
   visibleFolderId: string
   visibleDomain: string
@@ -176,6 +194,11 @@ interface DashboardRenderCache {
   sidebarSelectedFolderId: string
   sidebarMarkup: string
   sidebarTotalFolders: number
+}
+
+interface DashboardNaturalSearchCacheEntry {
+  plan: NaturalSearchPlan
+  results: PopupSearchResult[]
 }
 
 interface DashboardCallbacks {
@@ -217,6 +240,8 @@ const DASHBOARD_FAVICON_FETCH_VERSION = 2
 const DASHBOARD_REMOTE_FAVICON_FETCH_TIMEOUT_MS = 6000
 const DASHBOARD_REMOTE_FAVICON_MAX_BYTES = 384 * 1024
 const DASHBOARD_REMOTE_FAVICON_MAX_HTML_BYTES = 256 * 1024
+const DASHBOARD_NATURAL_SEARCH_CACHE_LIMIT = 24
+const DASHBOARD_NATURAL_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000
 
 let dashboardStatusTimer = 0
 let dashboardResultsStableFrame = 0
@@ -242,10 +267,18 @@ let dashboardFaviconCache: DashboardFaviconCache = {}
 let dashboardFaviconCacheHydrated = false
 let dashboardFaviconCacheSaveTimer = 0
 let dashboardDropHoverCard: HTMLElement | null = null
+let dashboardNaturalSearchModulePromise: Promise<typeof import('../../popup/natural-search.js')> | null = null
+let dashboardNaturalSearchAiModulePromise: Promise<typeof import('../../popup/natural-search-ai.js')> | null = null
+const dashboardNaturalSearchCache: MemoryCache<string, DashboardNaturalSearchCacheEntry> = createMemoryCache({
+  maxEntries: DASHBOARD_NATURAL_SEARCH_CACHE_LIMIT,
+  ttlMs: DASHBOARD_NATURAL_SEARCH_CACHE_TTL_MS,
+  version: 'dashboard-natural-search-v1'
+})
 const dashboardRenderCache: DashboardRenderCache = {
   modelKey: null,
   model: null,
   visibleModel: null,
+  visibleNaturalPlan: null,
   visibleQuery: '',
   visibleFolderId: '',
   visibleDomain: '',
@@ -287,6 +320,16 @@ const virtualState: DashboardVirtualState = {
   lastResizeWidth: 0,
   lastResizeHeight: 0,
   lastResizeColumnCount: 0
+}
+
+function loadDashboardNaturalSearchModule(): Promise<typeof import('../../popup/natural-search.js')> {
+  dashboardNaturalSearchModulePromise ||= import('../../popup/natural-search.js')
+  return dashboardNaturalSearchModulePromise
+}
+
+function loadDashboardNaturalSearchAiModule(): Promise<typeof import('../../popup/natural-search-ai.js')> {
+  dashboardNaturalSearchAiModulePromise ||= import('../../popup/natural-search-ai.js')
+  return dashboardNaturalSearchAiModulePromise
 }
 
 const dragState: DashboardDragState = {
@@ -813,6 +856,12 @@ export function prepareDashboardSectionEntry(): void {
   resetDashboardPanelReveal()
   dashboardFaviconWarmupItems = null
   scheduleDashboardFaviconLoadSync()
+  void hydrateDashboardSavedSearches().then(() => {
+    if (!dom.dashboardPanel?.hidden) {
+      renderDashboardSearchTools()
+    }
+  })
+  startDashboardNaturalSearch()
 }
 
 export function hydrateDashboardFaviconCache(rawCache: unknown, now = Date.now()): void {
@@ -845,6 +894,7 @@ export function handleDashboardInput(event: Event): void {
 
   dashboardState.query = target.value
   ensureDashboardFullTextSearchMapForQuery()
+  startDashboardNaturalSearch()
   markDashboardVirtualFilterChange('query')
   scheduleDashboardSectionRender()
 }
@@ -896,6 +946,12 @@ export function handleDashboardKeydown(event: KeyboardEvent): void {
 export async function handleDashboardClick(event: Event, callbacks: DashboardCallbacks): Promise<void> {
   const target = event.target as HTMLElement | null
   if (!target) {
+    return
+  }
+
+  const savedSearchButton = target.closest<HTMLElement>('[data-dashboard-saved-search-action]')
+  if (savedSearchButton) {
+    await handleDashboardSavedSearchAction(savedSearchButton)
     return
   }
 
@@ -951,6 +1007,8 @@ export async function handleDashboardClick(event: Event, callbacks: DashboardCal
     } else if (action === 'edit-tags') {
       const bookmarkId = String(actionButton.getAttribute('data-dashboard-bookmark-id') || '').trim()
       openDashboardTagEditor(bookmarkId)
+    } else if (action === 'toggle-natural-search') {
+      toggleDashboardNaturalSearch()
     } else if (action === 'close-tag-editor') {
       if (!cancelDashboardTagRegeneration()) {
         closeDashboardTagEditor()
@@ -1809,6 +1867,7 @@ function getCachedDashboardModel({
   dashboardRenderCache.model = model
   dashboardRenderCache.visibleItems = null
   dashboardRenderCache.visibleModel = null
+  dashboardRenderCache.visibleNaturalPlan = null
   dashboardRenderCache.folderCountsModel = null
   dashboardRenderCache.folderBookmarkCounts = null
   dashboardRenderCache.sidebarModel = null
@@ -1847,6 +1906,12 @@ function ensureDashboardFullTextSearchMapForQuery(): void {
     })
 }
 
+function invalidateDashboardVisibleItemCache(): void {
+  dashboardRenderCache.visibleItems = null
+  dashboardRenderCache.visibleModel = null
+  dashboardRenderCache.visibleNaturalPlan = null
+}
+
 function isDashboardModelCacheKeyEqual(left: DashboardModelCacheKey, right: DashboardModelCacheKey): boolean {
   return (
     left.bookmarks === right.bookmarks &&
@@ -1868,6 +1933,7 @@ function getCachedDashboardVisibleItems(
   filters: DashboardFilters = {}
 ): DashboardItem[] {
   const query = String(filters.query || '')
+  const naturalPlan = getDashboardVisibleNaturalSearchPlan(query)
   const folderId = String(filters.folderId || '')
   const domain = String(filters.domain || '')
   const month = String(filters.month || '')
@@ -1876,6 +1942,7 @@ function getCachedDashboardVisibleItems(
   if (
     dashboardRenderCache.visibleItems &&
     dashboardRenderCache.visibleModel === model &&
+    dashboardRenderCache.visibleNaturalPlan === naturalPlan &&
     dashboardRenderCache.visibleQuery === query &&
     dashboardRenderCache.visibleFolderId === folderId &&
     dashboardRenderCache.visibleDomain === domain &&
@@ -1885,16 +1952,23 @@ function getCachedDashboardVisibleItems(
     return dashboardRenderCache.visibleItems
   }
 
-  const visibleItems = sortDashboardItems(
-    filterDashboardItems(model.items, {
+  const visibleItems = naturalPlan
+    ? getNaturalDashboardVisibleItems(model, naturalPlan, {
       query,
       folderId,
       domain,
-      month
-    }),
-    sortKey
-  )
+      month,
+      sortKey
+    })
+    : getPopupDashboardVisibleItems(model, {
+      query,
+      folderId,
+      domain,
+      month,
+      sortKey
+    })
   dashboardRenderCache.visibleModel = model
+  dashboardRenderCache.visibleNaturalPlan = naturalPlan
   dashboardRenderCache.visibleQuery = query
   dashboardRenderCache.visibleFolderId = folderId
   dashboardRenderCache.visibleDomain = domain
@@ -1902,6 +1976,122 @@ function getCachedDashboardVisibleItems(
   dashboardRenderCache.visibleSortKey = sortKey
   dashboardRenderCache.visibleItems = visibleItems
   return visibleItems
+}
+
+function getPopupDashboardVisibleItems(
+  model: DashboardModel,
+  filters: DashboardFilters = {}
+): DashboardItem[] {
+  const query = String(filters.query || '').trim()
+  const structurallyFiltered = filterDashboardItems(model.items, {
+    query: query ? '' : query,
+    folderId: filters.folderId,
+    domain: filters.domain,
+    month: filters.month
+  })
+  if (!query) {
+    return sortDashboardItems(structurallyFiltered, filters.sortKey)
+  }
+
+  const itemById = new Map(structurallyFiltered.map((item) => [String(item.id), item]))
+  const popupBookmarks = getDashboardPopupSearchBookmarksFromItems(structurallyFiltered)
+  const results = searchBookmarksUnbounded(query, popupBookmarks)
+  return results
+    .map((result) => itemById.get(String(result.id)))
+    .filter((item): item is DashboardItem => Boolean(item))
+}
+
+function getDashboardVisibleNaturalSearchPlan(query: string): NaturalSearchPlan | null {
+  const normalizedQuery = normalizeDashboardSearchText(query)
+  if (!normalizedQuery || !dashboardState.naturalSearchEnabled) {
+    return null
+  }
+
+  if (dashboardState.naturalSearchPlan?.rawQuery === String(query || '').trim()) {
+    return dashboardState.naturalSearchPlan
+  }
+
+  const cachedEntry = dashboardNaturalSearchCache.get(getDashboardNaturalSearchCacheKey(normalizedQuery))
+  if (cachedEntry) {
+    dashboardState.naturalSearchPlan = cachedEntry.plan
+    return cachedEntry.plan
+  }
+
+  const localPlan = buildDashboardLocalNaturalSearchPlan(query)
+  dashboardState.naturalSearchPlan = localPlan
+  return localPlan
+}
+
+function getNaturalDashboardVisibleItems(
+  model: DashboardModel,
+  plan: NaturalSearchPlan,
+  filters: DashboardFilters = {}
+): DashboardItem[] {
+  const normalizedQuery = normalizeDashboardSearchText(filters.query || plan.rawQuery)
+  const cachedEntry = dashboardNaturalSearchCache.get(getDashboardNaturalSearchCacheKey(normalizedQuery))
+  const rankedIds = cachedEntry && cachedEntry.plan === plan
+    ? cachedEntry.results.map((result) => String(result.id))
+    : []
+  const parsedQueries = createDashboardNaturalParsedQueries(plan)
+  const candidatesById = new Map<string, DashboardItem>()
+  const candidateOrder = new Map<string, number>()
+
+  for (const parsedQuery of parsedQueries) {
+    const matches = filterDashboardItems(model.items, {
+      ...filters,
+      query: buildSearchTextQuery(parsedQuery),
+      parsedQuery,
+      textMatchMode: 'any'
+    })
+    for (const item of matches) {
+      const id = String(item.id)
+      if (!candidatesById.has(id)) {
+        candidatesById.set(id, item)
+        candidateOrder.set(id, candidateOrder.size)
+      }
+    }
+  }
+
+  const rankedItems: DashboardItem[] = []
+  for (const id of rankedIds) {
+    const item = candidatesById.get(id)
+    if (!item) {
+      continue
+    }
+    rankedItems.push(item)
+    candidatesById.delete(id)
+  }
+
+  const fallbackItems = sortDashboardItems([...candidatesById.values()], filters.sortKey)
+  const rankOffset = rankedItems.length
+  return [...rankedItems, ...fallbackItems].sort((left, right) => {
+    const leftRank = rankedIds.indexOf(String(left.id))
+    const rightRank = rankedIds.indexOf(String(right.id))
+    const leftKnownRank = leftRank >= 0
+    const rightKnownRank = rightRank >= 0
+    if (leftKnownRank || rightKnownRank) {
+      return (leftKnownRank ? leftRank : rankOffset + (candidateOrder.get(String(left.id)) || 0)) -
+        (rightKnownRank ? rightRank : rankOffset + (candidateOrder.get(String(right.id)) || 0))
+    }
+    return 0
+  })
+}
+
+function createDashboardNaturalParsedQueries(plan: NaturalSearchPlan) {
+  const queries = [
+    plan.rawQuery,
+    plan.highlightQuery,
+    ...plan.queries
+  ].filter(Boolean)
+
+  return queries.map((query) => {
+    const parsed = parseSearchQuery(query)
+    return {
+      ...parsed,
+      dateRange: plan.dateRange || parsed.dateRange,
+      excludedTerms: [...new Set([...parsed.excludedTerms, ...plan.excludedTerms])]
+    }
+  })
 }
 
 function getDashboardTagRecord(bookmarkId: string): BookmarkTagRecord | null {
@@ -1912,6 +2102,7 @@ function getDashboardTagRecord(bookmarkId: string): BookmarkTagRecord | null {
 function renderDashboardSearchTools(): void {
   const parsed = parseSearchQuery(dashboardState.query)
   const chips = parsed.chips
+  renderDashboardNaturalSearchToggle()
 
   dom.dashboardSearchChips?.classList.toggle('hidden', chips.length === 0)
   if (dom.dashboardSearchChips) {
@@ -1920,6 +2111,498 @@ function renderDashboardSearchTools(): void {
       .join('')
   }
 
+  renderDashboardSavedSearches()
+}
+
+function renderDashboardNaturalSearchToggle(): void {
+  const button = dom.dashboardNaturalSearchToggle
+  if (!button) {
+    return
+  }
+
+  const active = dashboardState.naturalSearchEnabled
+  const pending = dashboardState.naturalSearchPending
+  const fallback = Boolean(active && dashboardState.naturalSearchError)
+  button.classList.toggle('active', active)
+  button.classList.toggle('pending', pending)
+  button.classList.toggle('fallback', fallback)
+  button.textContent = getDashboardNaturalSearchToggleText()
+  button.setAttribute('aria-pressed', String(active))
+  button.setAttribute('aria-label', active ? '关闭 Dashboard 自然语言搜索' : '开启 Dashboard 自然语言搜索')
+  button.title = getDashboardNaturalSearchToggleTitle()
+}
+
+function renderDashboardSavedSearches(): void {
+  const container = dom.dashboardSavedSearches
+  if (!container) {
+    return
+  }
+
+  const savedSearches = dashboardState.savedSearches
+    ? getSavedSearchesForScope(dashboardState.savedSearches, 'dashboard')
+    : []
+  const normalizedQuery = normalizeDashboardSearchText(dashboardState.query)
+  const canSaveCurrent = Boolean(normalizedQuery)
+  const hasCurrentSaved = canSaveCurrent && savedSearches.some((item) => normalizeDashboardSearchText(item.query) === normalizedQuery)
+  const show = canSaveCurrent || savedSearches.length > 0 || dashboardState.savedSearchesError
+
+  container.classList.toggle('hidden', !show)
+  if (!show) {
+    container.innerHTML = ''
+    return
+  }
+
+  const status = dashboardState.savedSearchesError
+    ? `<span class="dashboard-saved-search-status error">${escapeHtml(dashboardState.savedSearchesError)}</span>`
+    : !savedSearches.length
+      ? '<span class="dashboard-saved-search-status">还没有保存搜索</span>'
+      : ''
+  const saveButton = canSaveCurrent
+    ? `
+      <button class="dashboard-saved-search-save" type="button" data-dashboard-saved-search-action="save-current" ${hasCurrentSaved ? 'disabled' : ''}>
+        ${hasCurrentSaved ? '已保存' : '保存搜索'}
+      </button>
+    `
+    : ''
+  const items = savedSearches.slice(0, 6).map(renderDashboardSavedSearchChip).join('')
+
+  container.innerHTML = `
+    <div class="dashboard-saved-search-head">
+      <span>保存搜索</span>
+      ${saveButton}
+    </div>
+    ${status}
+    ${items ? `<div class="dashboard-saved-search-list">${items}</div>` : ''}
+  `
+}
+
+function renderDashboardSavedSearchChip(search: SavedSearch): string {
+  const isActive = normalizeDashboardSearchText(search.query) === normalizeDashboardSearchText(dashboardState.query)
+  return `
+    <span class="dashboard-saved-search-chip ${isActive ? 'active' : ''}">
+      <button
+        class="dashboard-saved-search-apply"
+        type="button"
+        data-dashboard-saved-search-action="apply"
+        data-dashboard-saved-search-id="${escapeAttr(search.id)}"
+        title="${escapeAttr(search.query)}"
+      >${escapeHtml(search.name || search.query)}</button>
+      <button
+        class="dashboard-saved-search-delete"
+        type="button"
+        data-dashboard-saved-search-action="delete"
+        data-dashboard-saved-search-id="${escapeAttr(search.id)}"
+        aria-label="删除保存搜索：${escapeAttr(search.name || search.query)}"
+      >×</button>
+    </span>
+  `
+}
+
+async function hydrateDashboardSavedSearches(): Promise<void> {
+  if (dashboardState.savedSearchesLoaded) {
+    return
+  }
+
+  try {
+    dashboardState.savedSearches = await loadSavedSearchIndex()
+    dashboardState.savedSearchesLoaded = true
+    dashboardState.savedSearchesError = ''
+  } catch {
+    dashboardState.savedSearchesLoaded = true
+    dashboardState.savedSearchesError = '保存搜索读取失败'
+  }
+}
+
+async function ensureDashboardSavedSearchIndex(): Promise<SavedSearchIndex> {
+  if (dashboardState.savedSearches) {
+    return dashboardState.savedSearches
+  }
+
+  dashboardState.savedSearches = await loadSavedSearchIndex()
+  dashboardState.savedSearchesLoaded = true
+  dashboardState.savedSearchesError = ''
+  return dashboardState.savedSearches
+}
+
+async function handleDashboardSavedSearchAction(button: HTMLElement): Promise<void> {
+  const action = button.getAttribute('data-dashboard-saved-search-action')
+  const searchId = button.getAttribute('data-dashboard-saved-search-id')
+
+  if (action === 'save-current') {
+    await saveDashboardCurrentSearchQuery()
+    return
+  }
+
+  if (action === 'apply') {
+    const savedSearch = dashboardState.savedSearches
+      ? getSavedSearchesForScope(dashboardState.savedSearches, 'dashboard').find((item) => item.id === searchId)
+      : null
+    if (savedSearch) {
+      applyDashboardSearchQuery(savedSearch.query)
+      setDashboardStatus(`已应用保存搜索：${savedSearch.name}`)
+      dom.dashboardQuery?.focus()
+    }
+    return
+  }
+
+  if (action === 'delete') {
+    await deleteDashboardSavedSearch(searchId)
+  }
+}
+
+async function saveDashboardCurrentSearchQuery(): Promise<void> {
+  const query = dashboardState.query.trim()
+  if (!query) {
+    setDashboardStatus('请输入查询后再保存。')
+    dom.dashboardQuery?.focus()
+    return
+  }
+
+  try {
+    const index = await ensureDashboardSavedSearchIndex()
+    dashboardState.savedSearches = await saveSearch(index, {
+      name: createDashboardSavedSearchName(query),
+      query,
+      scope: 'both'
+    })
+    dashboardState.savedSearchesLoaded = true
+    dashboardState.savedSearchesError = ''
+    renderDashboardSearchTools()
+    setDashboardStatus('已保存搜索，可在 popup、newtab 和 Dashboard 复用。')
+  } catch (error) {
+    dashboardState.savedSearchesError = error instanceof Error ? error.message : '保存搜索失败'
+    renderDashboardSearchTools()
+    setDashboardStatus('保存搜索失败，请稍后重试。')
+  }
+}
+
+async function deleteDashboardSavedSearch(searchId: unknown): Promise<void> {
+  try {
+    const index = await ensureDashboardSavedSearchIndex()
+    dashboardState.savedSearches = await deleteSavedSearch(index, String(searchId || ''))
+    dashboardState.savedSearchesLoaded = true
+    dashboardState.savedSearchesError = ''
+    renderDashboardSearchTools()
+    setDashboardStatus('已删除保存搜索。')
+  } catch (error) {
+    dashboardState.savedSearchesError = error instanceof Error ? error.message : '删除保存搜索失败'
+    renderDashboardSearchTools()
+    setDashboardStatus('删除保存搜索失败，请稍后重试。')
+  }
+}
+
+function createDashboardSavedSearchName(query: string): string {
+  const parsed = parseSearchQuery(query)
+  const chipLabels = parsed.chips.map((chip) => chip.label.replace(/^[^：]+：/, '')).filter(Boolean)
+  const terms = parsed.textTerms.join(' ')
+  return truncateDashboardText([...chipLabels, terms].filter(Boolean).join(' · ') || query, 60) || '未命名搜索'
+}
+
+function applyDashboardSearchQuery(query: string): void {
+  dashboardState.query = query
+  if (dom.dashboardQuery) {
+    dom.dashboardQuery.value = query
+  }
+  dashboardState.selectedIds.clear()
+  dashboardState.expandedTagIds.clear()
+  clearIdleDashboardTagEditorForFilterChange()
+  ensureDashboardFullTextSearchMapForQuery()
+  startDashboardNaturalSearch()
+  markDashboardVirtualFilterChange('query')
+  scheduleDashboardSectionRender()
+}
+
+function toggleDashboardNaturalSearch(): void {
+  dashboardState.naturalSearchEnabled = !dashboardState.naturalSearchEnabled
+  dashboardState.naturalSearchError = ''
+  dashboardState.naturalSearchPlan = null
+  abortDashboardNaturalSearchRequest()
+  invalidateDashboardVisibleItemCache()
+  if (!dashboardState.naturalSearchEnabled) {
+    dashboardNaturalSearchCache.clear()
+    ensureDashboardFullTextSearchMapForQuery()
+    markDashboardVirtualFilterChange('query')
+    scheduleDashboardSectionRender()
+    window.setTimeout(() => dom.dashboardQuery?.focus(), 0)
+    return
+  }
+
+  ensureDashboardFullTextSearchMapForQuery()
+  startDashboardNaturalSearch()
+  markDashboardVirtualFilterChange('query')
+  scheduleDashboardSectionRender()
+  window.setTimeout(() => dom.dashboardQuery?.focus(), 0)
+  void prepareDashboardNaturalSearchAi().finally(() => {
+    startDashboardNaturalSearch()
+    markDashboardVirtualFilterChange('query')
+    scheduleDashboardSectionRender()
+  })
+}
+
+async function prepareDashboardNaturalSearchAi(): Promise<void> {
+  try {
+    const naturalSearchAi = await loadDashboardNaturalSearchAiModule()
+    const settings = await naturalSearchAi.loadNaturalSearchAiProviderSettings()
+    if (!naturalSearchAi.hasConfiguredNaturalSearchAiProvider(settings)) {
+      dashboardState.naturalSearchError = '未配置 AI 渠道，当前使用本地解析。'
+      return
+    }
+
+    naturalSearchAi.validateNaturalSearchAiProvider(settings)
+    await naturalSearchAi.ensureNaturalSearchAiPermissions(settings, { interactive: true })
+  } catch {
+    dashboardState.naturalSearchError = 'AI 未就绪，当前使用本地解析。'
+  }
+}
+
+function startDashboardNaturalSearch(): void {
+  const query = String(dashboardState.query || '').trim()
+  const normalizedQuery = normalizeDashboardSearchText(query)
+  if (!dashboardState.naturalSearchEnabled || !normalizedQuery) {
+    abortDashboardNaturalSearchRequest()
+    dashboardState.naturalSearchPending = false
+    dashboardState.naturalSearchError = ''
+    dashboardState.naturalSearchPlan = null
+    invalidateDashboardVisibleItemCache()
+    return
+  }
+
+  const cacheKey = getDashboardNaturalSearchCacheKey(normalizedQuery)
+  const cachedEntry = dashboardNaturalSearchCache.get(cacheKey)
+  if (cachedEntry) {
+    dashboardState.naturalSearchPlan = cachedEntry.plan
+    dashboardState.naturalSearchPending = false
+    dashboardState.naturalSearchError = ''
+    invalidateDashboardVisibleItemCache()
+    return
+  }
+
+  const localPlan = buildDashboardLocalNaturalSearchPlan(query)
+  dashboardState.naturalSearchPlan = localPlan
+  invalidateDashboardVisibleItemCache()
+  hydrateDashboardLocalNaturalSearchPlan(query)
+  void resolveDashboardNaturalSearch(query, normalizedQuery, cacheKey, localPlan)
+}
+
+async function resolveDashboardNaturalSearch(
+  query: string,
+  normalizedQuery: string,
+  cacheKey: string,
+  localPlan: NaturalSearchPlan
+): Promise<void> {
+  abortDashboardNaturalSearchRequest()
+  const controller = new AbortController()
+  dashboardState.naturalSearchAbortController = controller
+  dashboardState.naturalSearchPending = true
+  dashboardState.naturalSearchError = ''
+  renderDashboardSearchTools()
+
+  let plan = localPlan
+  try {
+    const naturalSearch = await loadDashboardNaturalSearchModule()
+    if (!isCurrentDashboardNaturalSearchRequest(controller, normalizedQuery)) {
+      return
+    }
+
+    const effectiveLocalPlan = naturalSearch.buildLocalNaturalSearchPlan(query)
+    plan = effectiveLocalPlan
+    dashboardState.naturalSearchPlan = effectiveLocalPlan
+    invalidateDashboardVisibleItemCache()
+    scheduleDashboardSectionRender()
+
+    const naturalSearchAi = await loadDashboardNaturalSearchAiModule()
+    const settings = await naturalSearchAi.loadNaturalSearchAiProviderSettings()
+    if (!naturalSearchAi.hasConfiguredNaturalSearchAiProvider(settings)) {
+      dashboardState.naturalSearchError = '未配置 AI 渠道，已使用本地解析。'
+    } else {
+      plan = await naturalSearchAi.requestNaturalSearchAiPlan({
+        query,
+        localPlan: effectiveLocalPlan,
+        settings,
+        signal: controller.signal
+      })
+      dashboardState.naturalSearchError = ''
+    }
+
+    const results = await searchDashboardNaturalPlan(plan)
+    if (!isCurrentDashboardNaturalSearchRequest(controller, normalizedQuery)) {
+      return
+    }
+
+    dashboardState.naturalSearchPlan = plan
+    dashboardNaturalSearchCache.set(cacheKey, { plan, results })
+    invalidateDashboardVisibleItemCache()
+    markDashboardVirtualFilterChange('query')
+    scheduleDashboardSectionRender()
+  } catch (error) {
+    if (!isCurrentDashboardNaturalSearchRequest(controller, normalizedQuery) || isDashboardNaturalSearchAbortError(error)) {
+      return
+    }
+
+    const naturalSearchAi = await loadDashboardNaturalSearchAiModule()
+    dashboardState.naturalSearchError = naturalSearchAi.normalizeNaturalSearchAiError(error)
+    dashboardState.naturalSearchPlan = plan
+    const results = await searchDashboardNaturalPlan(plan).catch(() => [])
+    dashboardNaturalSearchCache.set(cacheKey, { plan, results })
+    invalidateDashboardVisibleItemCache()
+    markDashboardVirtualFilterChange('query')
+    scheduleDashboardSectionRender()
+  } finally {
+    if (dashboardState.naturalSearchAbortController === controller) {
+      dashboardState.naturalSearchAbortController = null
+    }
+    if (normalizeDashboardSearchText(dashboardState.query) === normalizedQuery) {
+      dashboardState.naturalSearchPending = false
+      renderDashboardSearchTools()
+    }
+  }
+}
+
+async function searchDashboardNaturalPlan(plan: NaturalSearchPlan): Promise<PopupSearchResult[]> {
+  const naturalSearch = await loadDashboardNaturalSearchModule()
+  const model = getDashboardRenderData().model
+  const popupBookmarks = getDashboardPopupSearchBookmarks(model)
+  const bookmarks = naturalSearch.filterBookmarksByNaturalDateRange(popupBookmarks, plan)
+  const resultSets: NaturalSearchResultSet[] = []
+  const seenQueries = new Set<string>()
+
+  for (const query of [plan.rawQuery, ...plan.queries]) {
+    const normalizedQuery = normalizeDashboardSearchText(query)
+    if (!normalizedQuery || seenQueries.has(normalizedQuery)) {
+      continue
+    }
+    seenQueries.add(normalizedQuery)
+    const results = searchBookmarksUnbounded(query, bookmarks)
+    if (results.length) {
+      resultSets.push({ query, results })
+    }
+  }
+
+  return resultSets.length ? naturalSearch.mergeNaturalSearchResultSets(plan, resultSets) : []
+}
+
+function getDashboardPopupSearchBookmarks(model: DashboardModel): PopupSearchBookmark[] {
+  return getDashboardPopupSearchBookmarksFromItems(model.items)
+}
+
+function getDashboardPopupSearchBookmarksFromItems(items: DashboardItem[]): PopupSearchBookmark[] {
+  const popupBookmarks: PopupSearchBookmark[] = []
+  for (const item of items) {
+    const tagRecord = getDashboardTagRecord(String(item.id))
+    popupBookmarks.push(indexBookmarkForSearch(item, tagRecord))
+  }
+  return popupBookmarks
+}
+
+function abortDashboardNaturalSearchRequest(): void {
+  dashboardState.naturalSearchAbortController?.abort()
+  dashboardState.naturalSearchAbortController = null
+  dashboardState.naturalSearchPending = false
+}
+
+function isCurrentDashboardNaturalSearchRequest(controller: AbortController, normalizedQuery: string): boolean {
+  return (
+    dashboardState.naturalSearchAbortController === controller &&
+    dashboardState.naturalSearchEnabled &&
+    normalizeDashboardSearchText(dashboardState.query) === normalizedQuery
+  )
+}
+
+function isDashboardNaturalSearchAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
+function buildDashboardLocalNaturalSearchPlan(query: string): NaturalSearchPlan {
+  return {
+    rawQuery: String(query || '').trim(),
+    queries: [normalizeDashboardSearchText(query)].filter(Boolean),
+    highlightQuery: normalizeDashboardSearchText(query),
+    dateRange: null,
+    excludedTerms: [],
+    explanation: '本地自然语言解析准备中',
+    source: 'local'
+  }
+}
+
+function hydrateDashboardLocalNaturalSearchPlan(query: string): void {
+  void loadDashboardNaturalSearchModule()
+    .then((naturalSearch) => {
+      if (!dashboardState.naturalSearchEnabled || normalizeDashboardSearchText(dashboardState.query) !== normalizeDashboardSearchText(query)) {
+        return
+      }
+
+      dashboardState.naturalSearchPlan = naturalSearch.buildLocalNaturalSearchPlan(query)
+      invalidateDashboardVisibleItemCache()
+      markDashboardVirtualFilterChange('query')
+      scheduleDashboardSectionRender()
+    })
+    .catch(() => {})
+}
+
+function getDashboardNaturalSearchCacheKey(normalizedQuery: string): string {
+  return `${formatDashboardLocalDate(Date.now())}\u0000${normalizedQuery}`
+}
+
+function getDashboardNaturalSearchToggleText(): string {
+  if (!dashboardState.naturalSearchEnabled) {
+    return '语义'
+  }
+
+  if (dashboardState.naturalSearchPending) {
+    return dashboardState.naturalSearchError ? '本地' : '理解中'
+  }
+
+  if (dashboardState.naturalSearchPlan?.source === 'ai' && !dashboardState.naturalSearchError) {
+    return 'AI'
+  }
+
+  return '本地'
+}
+
+function getDashboardNaturalSearchToggleTitle(): string {
+  if (!dashboardState.naturalSearchEnabled) {
+    return '开启自然语言搜索：本地解析，AI 可用时改写查询'
+  }
+
+  if (dashboardState.naturalSearchPending) {
+    return dashboardState.naturalSearchError
+      ? 'AI 不可用，正在使用本地解析；点击关闭'
+      : '正在理解搜索意图，点击关闭'
+  }
+
+  if (dashboardState.naturalSearchError) {
+    return `${dashboardState.naturalSearchError}；点击关闭`
+  }
+
+  if (dashboardState.naturalSearchPlan?.source === 'ai') {
+    return 'AI 已改写查询；点击关闭自然语言搜索'
+  }
+
+  return '本地自然语言解析中；点击关闭'
+}
+
+function normalizeDashboardSearchText(value: unknown): string {
+  return normalizeText(value).trim()
+}
+
+function truncateDashboardText(value: unknown, limit = 60): string {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (text.length <= limit) {
+    return text
+  }
+  return `${text.slice(0, Math.max(0, limit - 1)).trim()}…`
+}
+
+function formatDashboardLocalDate(value: unknown): string {
+  const date = new Date(Number(value))
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function renderDashboardFolderBreadcrumbs(): void {

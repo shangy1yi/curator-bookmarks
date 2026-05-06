@@ -9,7 +9,8 @@ import {
 } from '../src/popup/natural-search.js'
 import {
   indexBookmarkForSearch,
-  searchBookmarks
+  searchBookmarks,
+  searchBookmarksUnbounded
 } from '../src/popup/search.js'
 
 function bookmark(overrides: Partial<BookmarkRecord>): BookmarkRecord {
@@ -41,6 +42,20 @@ test('builds local natural search plan with relative date and synonym expansion'
   assert.ok(plan.queries.some((query) => query.includes('react')))
   assert.ok(plan.queries.some((query) => query.includes('table')))
   assert.ok(plan.highlightQuery.includes('教程'))
+})
+
+test('exports popup search results without the popup result cap for larger surfaces', () => {
+  const bookmarks = Array.from({ length: 26 }, (_value, index) =>
+    indexBookmarkForSearch(bookmark({
+      id: `react-${index}`,
+      title: `React Guide ${index}`,
+      normalizedTitle: `react guide ${index}`,
+      dateAdded: index + 1
+    }))
+  )
+
+  assert.equal(searchBookmarks('react', bookmarks).length, 20)
+  assert.equal(searchBookmarksUnbounded('react', bookmarks).length, 26)
 })
 
 test('keeps structured search operators in local natural search queries', () => {

@@ -4,7 +4,7 @@ import type {
   ContentSnapshotRecord
 } from '../shared/content-snapshots.js'
 import type { BookmarkRecord } from '../shared/types.js'
-import type { NaturalSearchResultSet } from '../popup/natural-search.js'
+import type { NaturalSearchPlan, NaturalSearchResultSet } from '../popup/natural-search.js'
 import type { PopupSearchBookmark } from '../popup/search.js'
 
 export type NewTabContentState =
@@ -337,6 +337,7 @@ export function resolvePortalPanelLayout({
 
 export interface NewTabSearchSuggestionOptions {
   now?: number
+  naturalSearchPlan?: NaturalSearchPlan | null
 }
 
 export function buildNewTabSearchIndex(
@@ -630,7 +631,7 @@ export async function getNaturalSearchBookmarkSuggestionsFromIndex(
     mergeNaturalSearchResultSets
   } = await import('../popup/natural-search.js')
 
-  const plan = buildLocalNaturalSearchPlan(query, options.now)
+  const plan = options.naturalSearchPlan || buildLocalNaturalSearchPlan(query, options.now)
   const popupBookmarks = getPreparedPopupSearchBookmarks(preparedIndex, indexBookmarkForSearch)
   const bookmarks = filterBookmarksByNaturalDateRange(popupBookmarks, plan)
   const resultSets: NaturalSearchResultSet[] = []
