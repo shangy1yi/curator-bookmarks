@@ -24,6 +24,10 @@
   <img src="https://img.shields.io/github/v/release/sy0u1ti/curator-bookmarks" alt="GitHub Release">
 </p>
 
+<p align="center">
+  <img src="src/assets/curator-bookmarks-intro.gif" alt="Curator Bookmark 功能演示">
+</p>
+
 
 
 ---
