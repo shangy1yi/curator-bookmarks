@@ -229,14 +229,14 @@ const DASHBOARD_VIRTUAL_THRESHOLD = 120
 const DASHBOARD_SELECTION_MOTION_MS = 260
 const DASHBOARD_NEWTAB_EMBED_PARAM = 'newtab-dashboard'
 const DASHBOARD_FAVICON_SIZE = 32
-const DASHBOARD_FAVICON_WARMUP_CONCURRENCY = 2
-const DASHBOARD_FAVICON_WARMUP_BATCH_SIZE = 12
-const DASHBOARD_FAVICON_WARMUP_BATCH_DELAY_MS = 40
-const DASHBOARD_FAVICON_RERENDER_DEBOUNCE_MS = 900
+const DASHBOARD_FAVICON_WARMUP_CONCURRENCY = 1
+const DASHBOARD_FAVICON_WARMUP_BATCH_SIZE = 4
+const DASHBOARD_FAVICON_WARMUP_BATCH_DELAY_MS = 160
+const DASHBOARD_FAVICON_WARMUP_OVERSCAN_ROWS = 2
 const DASHBOARD_FAVICON_CACHE_LIMIT = 2500
 const DASHBOARD_FAVICON_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const DASHBOARD_FAVICON_FAILURE_RETRY_MS = 24 * 60 * 60 * 1000
-const DASHBOARD_FAVICON_FETCH_VERSION = 2
+const DASHBOARD_FAVICON_FETCH_VERSION = 3
 const DASHBOARD_REMOTE_FAVICON_FETCH_TIMEOUT_MS = 6000
 const DASHBOARD_REMOTE_FAVICON_MAX_BYTES = 384 * 1024
 const DASHBOARD_REMOTE_FAVICON_MAX_HTML_BYTES = 256 * 1024
@@ -261,7 +261,8 @@ let dashboardCardsCommittedRenderVersion = 0
 let pendingDashboardFolderFocusId = ''
 let dashboardFaviconWarmupQueue: DashboardFaviconWarmupQueue | null = null
 let dashboardFaviconWarmupItems: DashboardItem[] | null = null
-let dashboardFaviconWarmupRenderTimer = 0
+let dashboardFaviconWarmupStartIndex = -1
+let dashboardFaviconWarmupEndIndex = -1
 let dashboardFaviconLoadSyncFrame = 0
 let dashboardFaviconCache: DashboardFaviconCache = {}
 let dashboardFaviconCacheHydrated = false
@@ -805,7 +806,6 @@ export function renderDashboardSection(): void {
     resetDashboardPanelReveal()
   }
   const { model, visibleItems } = getDashboardRenderData()
-  syncDashboardFaviconWarmup(model.items)
   syncDashboardPanelReadyState()
 
   syncDashboardSelection(
@@ -2986,6 +2986,7 @@ function renderDashboardCards(items: DashboardItem[], renderVersion = beginDashb
     resetDashboardVirtualRenderCache({ preserveItems: true })
     virtualState.items = items
     dom.dashboardResults.innerHTML = items.map((item) => buildDashboardCard(item)).join('')
+    syncDashboardFaviconWarmup(items)
     reconcileDashboardTransientUiWithRenderedItems(new Set(items.map((item) => String(item.id))))
     endStableDashboardResultsUpdate()
     commitDashboardCardsRender(renderVersion)
@@ -3020,6 +3021,11 @@ function renderDashboardCards(items: DashboardItem[], renderVersion = beginDashb
   virtualState.scrollTop = virtualWindow.scrollTop
   virtualState.columnCount = virtualWindow.columnCount
   virtualState.rowStride = virtualWindow.rowStride
+  syncDashboardFaviconWarmup(
+    items,
+    getDashboardFaviconWarmupStartIndex(viewportWindow),
+    getDashboardFaviconWarmupEndIndex(viewportWindow, items.length)
+  )
 
   if (canReuseDashboardVirtualShell(items, virtualWindow, viewportWindow)) {
     const spacer = dom.dashboardResults.querySelector<HTMLElement>('.dashboard-virtual-spacer')
@@ -3108,6 +3114,16 @@ function canReuseDashboardVirtualShell(
 
   const renderedItems = items.slice(virtualState.renderedStartIndex, virtualState.renderedEndIndex)
   return virtualState.renderedStateKey === getDashboardVirtualRenderStateKey(renderedItems)
+}
+
+function getDashboardFaviconWarmupStartIndex(window: DashboardVirtualWindow): number {
+  const startRow = Math.max(0, window.startRow - DASHBOARD_FAVICON_WARMUP_OVERSCAN_ROWS)
+  return startRow * Math.max(1, window.columnCount)
+}
+
+function getDashboardFaviconWarmupEndIndex(window: DashboardVirtualWindow, itemCount: number): number {
+  const endRow = Math.max(window.endRow, window.startRow + 1) + DASHBOARD_FAVICON_WARMUP_OVERSCAN_ROWS
+  return Math.min(Math.max(0, itemCount), endRow * Math.max(1, window.columnCount))
 }
 
 function renderDashboardVirtualWindow({
@@ -3233,13 +3249,11 @@ function markDashboardVirtualFilterChange(reason: 'folder' | 'query' | 'filter')
 function getDashboardVirtualRenderStateKey(renderedItems: DashboardItem[]): string {
   const itemState = renderedItems.map((item) => {
     const id = String(item.id)
-    const faviconEntry = getDashboardCachedFaviconEntry(item.url)
     return [
       id,
       dashboardState.expandedTagIds.has(id) ? '1' : '0',
       dashboardState.copyFeedbackId === id ? '1' : '0',
-      dashboardState.speedDialPinnedIds.has(id) ? '1' : '0',
-      faviconEntry?.iconUrl || ''
+      dashboardState.speedDialPinnedIds.has(id) ? '1' : '0'
     ].join(':')
   }).join('|')
 
@@ -3871,7 +3885,7 @@ function buildDashboardCard(item: DashboardItem): string {
       data-dashboard-bookmark-id="${escapeAttr(item.id)}"
     >
       <div class="dashboard-card-body">
-        <span class="dashboard-favicon-shell ${faviconMarkup ? 'has-favicon' : ''}" aria-hidden="true">
+        <span class="dashboard-favicon-shell" aria-hidden="true">
           ${faviconMarkup}
           <span>${escapeHtml(getFallbackLabel(item.title))}</span>
         </span>
@@ -4008,7 +4022,14 @@ function markDashboardFaviconImageFailed(image: HTMLImageElement): void {
   const pageUrl = String(image.getAttribute('data-dashboard-favicon-page-url') || '').trim()
   const shell = image.closest<HTMLElement>('.dashboard-favicon-shell')
   if (failedSource === 'cache' && pageUrl) {
-    markDashboardRemoteFaviconFailed(pageUrl)
+    removeDashboardRemoteFavicon(pageUrl)
+    const chromeFallbackUrl = getDashboardFaviconFallbackUrl(pageUrl)
+    if (chromeFallbackUrl) {
+      image.src = chromeFallbackUrl
+      image.setAttribute('data-dashboard-favicon-source', 'chrome')
+      shell?.classList.remove('has-favicon')
+      return
+    }
   }
 
   image.remove()
@@ -4182,7 +4203,7 @@ function renderDashboardDragOverlay(existingModel?: DashboardModel): void {
   setDashboardDropHover(dragState.hoverFolderId)
 
   dom.dashboardDragPreview.innerHTML = `
-    <span class="dashboard-favicon-shell ${faviconMarkup ? 'has-favicon' : ''}" aria-hidden="true">
+    <span class="dashboard-favicon-shell" aria-hidden="true">
       ${faviconMarkup}
       <span>${escapeHtml(getFallbackLabel(bookmark?.title || ''))}</span>
     </span>
@@ -4367,10 +4388,35 @@ function renderDashboardFaviconImage(pageUrl: string): string {
 
   const remoteEntry = getDashboardCachedFaviconEntry(normalizedPageUrl)
   if (remoteEntry?.iconUrl) {
-    return `<img src="${escapeAttr(remoteEntry.iconUrl)}" alt="" loading="lazy" decoding="async" draggable="false" data-dashboard-favicon data-dashboard-favicon-source="cache" data-dashboard-favicon-page-url="${escapeAttr(normalizedPageUrl)}">`
+    return renderDashboardFaviconImg({
+      src: remoteEntry.iconUrl,
+      source: 'cache',
+      pageUrl: normalizedPageUrl
+    })
   }
 
-  return ''
+  const chromeFaviconUrl = getDashboardFaviconFallbackUrl(normalizedPageUrl)
+  if (!chromeFaviconUrl) {
+    return ''
+  }
+
+  return renderDashboardFaviconImg({
+    src: chromeFaviconUrl,
+    source: 'chrome',
+    pageUrl: normalizedPageUrl
+  })
+}
+
+function renderDashboardFaviconImg({
+  src,
+  source,
+  pageUrl
+}: {
+  src: string
+  source: 'cache' | 'chrome'
+  pageUrl: string
+}): string {
+  return `<img src="${escapeAttr(src)}" alt="" loading="lazy" decoding="async" draggable="false" data-dashboard-favicon data-dashboard-favicon-source="${source}" data-dashboard-favicon-page-url="${escapeAttr(pageUrl)}">`
 }
 
 function getFallbackLabel(title: string): string {
@@ -4378,26 +4424,40 @@ function getFallbackLabel(title: string): string {
   return (trimmed[0] || '*').toUpperCase()
 }
 
-function syncDashboardFaviconWarmup(items: DashboardItem[]): void {
+function syncDashboardFaviconWarmup(
+  items: DashboardItem[],
+  startIndex = 0,
+  endIndex = items.length
+): void {
   if (availabilityState.catalogLoading || dom.dashboardPanel?.hidden) {
     stopDashboardFaviconWarmup()
     return
   }
 
   const endpointUrl = getDashboardFaviconEndpointUrl()
-  if (!endpointUrl || !items.length) {
+  const safeStartIndex = clampDashboardInteger(startIndex, 0, items.length, 0)
+  const safeEndIndex = clampDashboardInteger(endIndex, safeStartIndex, items.length, items.length)
+  const warmupItems = items.slice(safeStartIndex, safeEndIndex)
+  if (!endpointUrl || !warmupItems.length) {
     stopDashboardFaviconWarmup()
     return
   }
 
-  if (items === dashboardFaviconWarmupItems && dashboardFaviconWarmupQueue) {
+  if (
+    items === dashboardFaviconWarmupItems &&
+    safeStartIndex === dashboardFaviconWarmupStartIndex &&
+    safeEndIndex === dashboardFaviconWarmupEndIndex &&
+    dashboardFaviconWarmupQueue
+  ) {
     return
   }
 
   stopDashboardFaviconWarmup()
   dashboardFaviconWarmupItems = items
+  dashboardFaviconWarmupStartIndex = safeStartIndex
+  dashboardFaviconWarmupEndIndex = safeEndIndex
   dashboardFaviconWarmupQueue = createDashboardFaviconWarmupQueue({
-    bookmarks: items,
+    bookmarks: warmupItems,
     faviconEndpointUrl: endpointUrl,
     remoteCache: dashboardFaviconCache,
     size: DASHBOARD_FAVICON_SIZE,
@@ -4406,9 +4466,7 @@ function syncDashboardFaviconWarmup(items: DashboardItem[]): void {
     batchDelayMs: DASHBOARD_FAVICON_WARMUP_BATCH_DELAY_MS,
     loadFavicon: warmDashboardFavicon,
     onWarm: (item) => {
-      if (getDashboardCachedFaviconEntry(item.pageUrl)) {
-        scheduleDashboardFaviconWarmupRender()
-      }
+      syncDashboardFaviconForPageUrl(item.pageUrl)
     },
     onError: (_item, error) => {
       console.debug?.('[Curator] Dashboard favicon warmup skipped', error)
@@ -4421,10 +4479,8 @@ function stopDashboardFaviconWarmup(): void {
   dashboardFaviconWarmupQueue?.cancel()
   dashboardFaviconWarmupQueue = null
   dashboardFaviconWarmupItems = null
-  if (dashboardFaviconWarmupRenderTimer) {
-    window.clearTimeout(dashboardFaviconWarmupRenderTimer)
-    dashboardFaviconWarmupRenderTimer = 0
-  }
+  dashboardFaviconWarmupStartIndex = -1
+  dashboardFaviconWarmupEndIndex = -1
 }
 
 function resetDashboardFaviconWarmupForCacheChange(): void {
@@ -4432,17 +4488,30 @@ function resetDashboardFaviconWarmupForCacheChange(): void {
   stopDashboardFaviconWarmup()
 }
 
-function scheduleDashboardFaviconWarmupRender(): void {
-  if (dashboardFaviconWarmupRenderTimer || dom.dashboardPanel?.hidden) {
+function syncDashboardFaviconForPageUrl(pageUrl: string): void {
+  if (dom.dashboardPanel?.hidden || availabilityState.catalogLoading) {
     return
   }
 
-  dashboardFaviconWarmupRenderTimer = window.setTimeout(() => {
-    dashboardFaviconWarmupRenderTimer = 0
-    if (!dom.dashboardPanel?.hidden && !availabilityState.catalogLoading) {
-      renderDashboardSection()
+  const entry = getDashboardCachedFaviconEntry(pageUrl)
+  if (!entry?.iconUrl || !dom.dashboardResults) {
+    return
+  }
+
+  const cacheKey = getDashboardFaviconCacheKey(pageUrl)
+  dom.dashboardResults.querySelectorAll<HTMLImageElement>('img[data-dashboard-favicon]').forEach((image) => {
+    const imagePageUrl = getDashboardFaviconCacheKey(
+      String(image.getAttribute('data-dashboard-favicon-page-url') || '').trim()
+    )
+    if (imagePageUrl !== cacheKey || image.getAttribute('src') === entry.iconUrl) {
+      return
     }
-  }, DASHBOARD_FAVICON_RERENDER_DEBOUNCE_MS)
+    const shell = image.closest<HTMLElement>('.dashboard-favicon-shell')
+    shell?.classList.remove('has-favicon')
+    image.src = entry.iconUrl
+    image.setAttribute('data-dashboard-favicon-source', 'cache')
+  })
+  scheduleDashboardFaviconLoadSync()
 }
 
 function getDashboardFaviconCacheKey(pageUrl: string): string {
@@ -4523,7 +4592,11 @@ function hasFreshDashboardFaviconCacheEntryForEntry(
     return false
   }
 
-  return Boolean(entry.iconUrl && now - entry.updatedAt <= DASHBOARD_FAVICON_CACHE_MAX_AGE_MS)
+  return Boolean(
+    entry.iconUrl &&
+    entry.version === DASHBOARD_FAVICON_FETCH_VERSION &&
+    now - entry.updatedAt <= DASHBOARD_FAVICON_CACHE_MAX_AGE_MS
+  )
 }
 
 function shouldSkipDashboardRemoteFaviconRetryForEntry(
@@ -4575,10 +4648,19 @@ function normalizeDashboardFaviconCache(
     }
 
     if (iconUrl) {
-      if (!updatedAt || now - updatedAt > DASHBOARD_FAVICON_CACHE_MAX_AGE_MS) {
+      if (
+        Number(source.version) !== DASHBOARD_FAVICON_FETCH_VERSION ||
+        !updatedAt ||
+        now - updatedAt > DASHBOARD_FAVICON_CACHE_MAX_AGE_MS
+      ) {
         continue
       }
-      entries.push([pageUrl, { pageUrl, iconUrl, updatedAt }])
+      entries.push([pageUrl, {
+        pageUrl,
+        iconUrl,
+        updatedAt,
+        version: DASHBOARD_FAVICON_FETCH_VERSION
+      }])
       continue
     }
 
@@ -4824,26 +4906,28 @@ function preloadDashboardFavicon(url: string): Promise<HTMLImageElement> {
 
 async function warmDashboardFavicon(chromeFaviconUrl: string, item: DashboardFaviconWarmupItem): Promise<void> {
   try {
-    const chromeDataUrl = await fetchDashboardFaviconAsDataUrl(chromeFaviconUrl, {
-      credentials: 'same-origin',
-      referrerPolicy: 'no-referrer'
-    })
-    upsertDashboardRemoteFavicon(item.pageUrl, chromeDataUrl)
-    return
-  } catch {
-    try {
-      const image = await preloadDashboardFavicon(chromeFaviconUrl)
-      const chromeDataUrl = readDashboardImageAsDataUrl(image)
-      upsertDashboardRemoteFavicon(item.pageUrl, chromeDataUrl)
-      return
-    } catch {}
-  }
+    await preloadDashboardFavicon(chromeFaviconUrl)
+  } catch {}
 
   if (
     hasFreshDashboardFaviconCacheEntry(item.pageUrl) ||
     shouldSkipDashboardRemoteFaviconFetch(item.pageUrl)
   ) {
     return
+  }
+
+  const defaultRemoteFaviconUrl = getDashboardDefaultRemoteFaviconUrl(item.pageUrl)
+  if (defaultRemoteFaviconUrl) {
+    try {
+      const dataUrl = await fetchDashboardFaviconAsDataUrl(defaultRemoteFaviconUrl, {
+        cache: 'force-cache',
+        credentials: 'omit',
+        redirect: 'follow',
+        referrerPolicy: 'no-referrer'
+      })
+      upsertDashboardRemoteFavicon(item.pageUrl, dataUrl)
+      return
+    } catch {}
   }
 
   try {
@@ -4858,6 +4942,14 @@ async function warmDashboardFavicon(chromeFaviconUrl: string, item: DashboardFav
   } catch (error) {
     markDashboardRemoteFaviconFailed(item.pageUrl)
     throw error
+  }
+}
+
+function getDashboardDefaultRemoteFaviconUrl(pageUrl: string): string {
+  try {
+    return new URL('/favicon.ico', pageUrl).href
+  } catch {
+    return ''
   }
 }
 
@@ -5011,14 +5103,14 @@ async function resolveDashboardFaviconMimeType(
     return normalizedType
   }
 
-  const extensionType = inferDashboardFaviconMimeTypeFromUrl(iconUrl)
-  if (extensionType) {
-    return extensionType
-  }
-
   const signatureType = await inferDashboardFaviconMimeTypeFromBlob(blob)
   if (signatureType) {
     return signatureType
+  }
+
+  const extensionType = inferDashboardFaviconMimeTypeFromUrl(iconUrl)
+  if (!normalizedType && extensionType) {
+    return extensionType
   }
 
   return ''
@@ -5133,27 +5225,6 @@ function readDashboardBlobAsDataUrl(blob: Blob): Promise<string> {
   })
 }
 
-function readDashboardImageAsDataUrl(image: HTMLImageElement): string {
-  if (!image.naturalWidth || !image.naturalHeight) {
-    throw new Error('favicon image is empty')
-  }
-
-  const size = Math.max(1, Math.min(DASHBOARD_FAVICON_SIZE, image.naturalWidth, image.naturalHeight))
-  const canvas = document.createElement('canvas')
-  canvas.width = size
-  canvas.height = size
-  const context = canvas.getContext('2d', { willReadFrequently: false })
-  if (!context) {
-    throw new Error('favicon canvas is unavailable')
-  }
-  context.drawImage(image, 0, 0, size, size)
-  const dataUrl = canvas.toDataURL('image/png')
-  if (!dataUrl.startsWith('data:image/')) {
-    throw new Error('favicon canvas export failed')
-  }
-  return dataUrl
-}
-
 function upsertDashboardRemoteFavicon(pageUrl: string, iconUrl: string, now = Date.now()): void {
   const key = getDashboardFaviconCacheKey(pageUrl)
   if (!key || !isDashboardSafeImageUrl(iconUrl)) {
@@ -5165,7 +5236,8 @@ function upsertDashboardRemoteFavicon(pageUrl: string, iconUrl: string, now = Da
     [key]: {
       pageUrl: key,
       iconUrl,
-      updatedAt: now
+      updatedAt: now,
+      version: DASHBOARD_FAVICON_FETCH_VERSION
     }
   }, { now })
   scheduleDashboardFaviconCacheSave()
@@ -5187,6 +5259,17 @@ function markDashboardRemoteFaviconFailed(pageUrl: string, now = Date.now()): vo
       version: DASHBOARD_FAVICON_FETCH_VERSION
     }
   }, { now })
+  scheduleDashboardFaviconCacheSave()
+}
+
+function removeDashboardRemoteFavicon(pageUrl: string): void {
+  const key = getDashboardFaviconCacheKey(pageUrl)
+  if (!key || !dashboardFaviconCache[key]) {
+    return
+  }
+
+  dashboardFaviconCache = { ...dashboardFaviconCache }
+  delete dashboardFaviconCache[key]
   scheduleDashboardFaviconCacheSave()
 }
 

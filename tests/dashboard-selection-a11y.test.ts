@@ -144,24 +144,29 @@ test('dashboard cards keep letter fallback visible until favicon image load succ
   assert.match(dashboardSource, /export function getDashboardFaviconFallbackUrl\(url: string\): string/)
   assert.match(dashboardSource, /buildDashboardFaviconUrl\(endpointUrl, url, \{ size: DASHBOARD_FAVICON_SIZE \}\)/)
   assert.match(dashboardSource, /faviconUrl\.searchParams\.set\('cache', '1'\)/)
-  assert.match(dashboardSource, /data-dashboard-favicon-source="cache"/)
-  assert.doesNotMatch(dashboardSource, /data-dashboard-favicon-source="chrome"/)
-  assert.match(dashboardSource, /data-dashboard-favicon-page-url="\$\{escapeAttr\(normalizedPageUrl\)\}"/)
-  assert.match(dashboardSource, /const chromeDataUrl = await fetchDashboardFaviconAsDataUrl\(chromeFaviconUrl/)
-  assert.match(dashboardSource, /upsertDashboardRemoteFavicon\(item\.pageUrl, chromeDataUrl\)/)
-  assert.match(dashboardSource, /const image = await preloadDashboardFavicon\(chromeFaviconUrl\)/)
-  assert.match(dashboardSource, /readDashboardImageAsDataUrl\(image\)/)
-  assert.match(dashboardSource, /dashboard-favicon-shell \$\{faviconMarkup \? 'has-favicon' : ''\}/)
+  assert.match(dashboardSource, /source: 'cache'/)
+  assert.match(dashboardSource, /data-dashboard-favicon-source="\$\{source\}"/)
+  assert.match(dashboardSource, /source: 'chrome'/)
+  assert.match(dashboardSource, /data-dashboard-favicon-page-url="\$\{escapeAttr\(pageUrl\)\}"/)
+  assert.match(dashboardSource, /await preloadDashboardFavicon\(chromeFaviconUrl\)/)
+  assert.match(dashboardSource, /const defaultRemoteFaviconUrl = getDashboardDefaultRemoteFaviconUrl\(item\.pageUrl\)/)
+  assert.doesNotMatch(dashboardSource, /fetchDashboardFaviconAsDataUrl\(chromeFaviconUrl/)
+  assert.doesNotMatch(dashboardSource, /readDashboardImageAsDataUrl/)
+  assert.match(dashboardSource, /<span class="dashboard-favicon-shell" aria-hidden="true">/)
+  assert.match(dashboardSource, /const chromeFaviconUrl = getDashboardFaviconFallbackUrl\(normalizedPageUrl\)/)
   assert.match(dashboardSource, /export function handleDashboardLoad\(event: Event\): void/)
   assert.match(dashboardSource, /function handleDashboardFaviconLoad\(image: HTMLImageElement\): void/)
   assert.match(dashboardSource, /shell\?\.classList\.add\('has-favicon'\)/)
   assert.match(dashboardSource, /function syncCompletedDashboardFaviconImages\(\): void/)
   assert.match(dashboardSource, /image\.complete[\s\S]*?handleDashboardFaviconLoad\(image\)/)
   assert.match(dashboardSource, /function handleDashboardFaviconError\(image: HTMLImageElement, _callbacks: DashboardCallbacks\): void/)
+  assert.match(dashboardSource, /removeDashboardRemoteFavicon\(pageUrl\)[\s\S]*?getDashboardFaviconFallbackUrl\(pageUrl\)/)
   assert.match(dashboardSource, /function markDashboardFaviconImageFailed\(image: HTMLImageElement\): void[\s\S]*?image\.remove\(\)/)
   assert.match(dashboardSource, /shell\?\.classList\.remove\('has-favicon'\)/)
   assert.match(dashboardSource, /getDashboardBestFaviconCandidate\(html, pageResponse\.url \|\| pageUrl\)[\s\S]*?new URL\('\/favicon\.ico'/)
-  assert.match(dashboardSource, /const DASHBOARD_FAVICON_FETCH_VERSION = 2/)
+  assert.match(dashboardSource, /const DASHBOARD_FAVICON_FETCH_VERSION = 3/)
+  assert.match(dashboardSource, /entry\.version === DASHBOARD_FAVICON_FETCH_VERSION/)
+  assert.match(dashboardSource, /Number\(source\.version\) !== DASHBOARD_FAVICON_FETCH_VERSION/)
   assert.match(dashboardSource, /function resolveDashboardFaviconMimeType\(/)
   assert.match(dashboardSource, /inferDashboardFaviconMimeTypeFromBlob/)
   assert.match(optionsSource, /handleDashboardError\(event, dashboardCallbacks\), true/)
@@ -199,14 +204,15 @@ test('dashboard favicon warmup skips cached records but still retries chrome fav
     'https://cached.example/': {
       pageUrl: 'https://cached.example/',
       iconUrl: 'data:image/png;base64,AAAA',
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      version: 3
     },
     'https://failed.example/': {
       pageUrl: 'https://failed.example/',
       iconUrl: '',
       updatedAt: 0,
       failedAt: Date.now(),
-      version: 2
+      version: 3
     },
     'https://stale-failure.example/': {
       pageUrl: 'https://stale-failure.example/',
@@ -330,10 +336,23 @@ test('dashboard favicon warmup reuse avoids lossy signatures and repeated item j
   const previewBody = source.match(/function updateDashboardDragPreviewPosition[\s\S]*?\n}\n\nfunction updateDashboardDropHoverFromPoint/)?.[0] || ''
 
   assert.match(source, /let dashboardFaviconWarmupItems: DashboardItem\[\] \| null = null/)
-  assert.match(warmupBody, /items === dashboardFaviconWarmupItems && dashboardFaviconWarmupQueue/)
+  assert.match(source, /let dashboardFaviconWarmupStartIndex = -1/)
+  assert.match(source, /let dashboardFaviconWarmupEndIndex = -1/)
+  assert.match(source, /const DASHBOARD_FAVICON_WARMUP_CONCURRENCY = 1/)
+  assert.match(source, /const DASHBOARD_FAVICON_WARMUP_OVERSCAN_ROWS = 2/)
+  assert.match(warmupBody, /safeStartIndex === dashboardFaviconWarmupStartIndex/)
+  assert.match(warmupBody, /safeEndIndex === dashboardFaviconWarmupEndIndex/)
+  assert.match(warmupBody, /dashboardFaviconWarmupQueue/)
   assert.match(warmupBody, /stopDashboardFaviconWarmup\(\)[\s\S]*?return/)
   assert.match(warmupBody, /dashboardFaviconWarmupItems = items/)
+  assert.match(warmupBody, /bookmarks: warmupItems/)
+  assert.match(warmupBody, /syncDashboardFaviconForPageUrl\(item\.pageUrl\)/)
   assert.match(source, /dashboardFaviconWarmupItems = null/)
+  assert.match(source, /function syncDashboardFaviconForPageUrl\(pageUrl: string\): void/)
+  assert.match(source, /querySelectorAll<HTMLImageElement>\('img\[data-dashboard-favicon\]'\)/)
+  assert.match(source, /getDashboardFaviconWarmupStartIndex\(viewportWindow\)/)
+  assert.match(source, /getDashboardFaviconWarmupEndIndex\(viewportWindow, items\.length\)/)
+  assert.doesNotMatch(source, /syncDashboardFaviconWarmup\(model\.items\)/)
   assert.doesNotMatch(source, /function getDashboardFaviconWarmupKey/)
   assert.doesNotMatch(source, /function updateDashboardFaviconWarmupHash/)
   assert.doesNotMatch(warmupBody, /\.map\(\(item\)/)
