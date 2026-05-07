@@ -12,6 +12,7 @@ import {
   resolvePortalPanelLayout,
   getAdaptiveSearchOffsetBounds,
   getAdaptiveSearchWidthBounds,
+  getAutoCenteredSearchOffsetY,
   getVerticalCenterCollisionOffset
 } from '../src/newtab/content-state.js'
 
@@ -150,6 +151,51 @@ test('adaptive newtab search width keeps enough range for the minimum pixel widt
     min: 16,
     max: 57
   })
+})
+
+test('auto-centered newtab search offset uses space between neighboring modules', () => {
+  assert.equal(getAutoCenteredSearchOffsetY({
+    currentOffsetY: 0,
+    searchTop: 112,
+    searchBottom: 146,
+    viewportTop: 0,
+    viewportBottom: 720,
+    previousModuleBottom: 74,
+    nextModuleTop: 430,
+    minimumGap: 12,
+    minOffsetY: -240,
+    maxOffsetY: 240
+  }), 123)
+})
+
+test('auto-centered newtab search offset clamps to adaptive bounds', () => {
+  assert.equal(getAutoCenteredSearchOffsetY({
+    currentOffsetY: 48,
+    searchTop: 160,
+    searchBottom: 194,
+    viewportTop: 0,
+    viewportBottom: 720,
+    previousModuleBottom: 120,
+    nextModuleTop: 520,
+    minimumGap: 12,
+    minOffsetY: -16,
+    maxOffsetY: 72
+  }), 72)
+})
+
+test('auto-centered newtab search offset falls back when no usable slot exists', () => {
+  assert.equal(getAutoCenteredSearchOffsetY({
+    currentOffsetY: 20,
+    searchTop: 160,
+    searchBottom: 194,
+    viewportTop: 0,
+    viewportBottom: 220,
+    previousModuleBottom: 150,
+    nextModuleTop: 168,
+    minimumGap: 12,
+    minOffsetY: -80,
+    maxOffsetY: 80
+  }), 20)
 })
 
 test('builds a compact newtab portal overview from folders and activity', () => {
@@ -490,7 +536,7 @@ test('newtab search vertical offset uses adaptive runtime bounds', () => {
   assert.match(source, /offsetY:\s*clampNumber\(\s*settings\.offsetY,\s*SEARCH_OFFSET_ABSOLUTE_MIN,\s*SEARCH_OFFSET_ABSOLUTE_MAX,\s*DEFAULT_SEARCH_SETTINGS\.offsetY\s*\)/)
   assert.match(source, /document\.getElementById\('search-offset-y'\)\?\.addEventListener\('input', handleSearchSettingsPreview\)/)
   assert.match(source, /function applySearchSettingsLive\(\): void/)
-  assert.match(source, /slot\?\.style\.setProperty\('--search-offset-y'/)
+  assert.match(source, /slot\.style\.setProperty\(\s*'--search-offset-y'/)
   assert.match(source, /function scheduleSearchSettingsSettle\(\): void/)
   assert.match(source, /document\.getElementById\('search-offset-y'\)\?\.addEventListener\('change', handleSearchSettingsCommit\)/)
   assert.match(source, /widthInput\.max\s*=\s*String\(bounds\.max\)/)
@@ -498,6 +544,31 @@ test('newtab search vertical offset uses adaptive runtime bounds', () => {
   assert.match(source, /offsetYInput\.max\s*=\s*String\(bounds\.max\)/)
   const previewBody = source.match(/function handleSearchSettingsPreview\(\): void \{([\s\S]*?)\n\}/)?.[1] || ''
   assert.doesNotMatch(previewBody, /scheduleRender/)
+})
+
+test('newtab search settings expose automatic vertical centering', () => {
+  const html = readProjectFile('src/newtab/newtab.html')
+  const source = readProjectFile('src/newtab/newtab.ts')
+  const autoCenterInput = html.match(/<input[^>]+id="search-auto-vertical-center"[^>]*>/)?.[0] || ''
+  const readSettingsBody = getFunctionBody(source, 'readSearchSettingsFromControls')
+  const syncOffsetBody = getFunctionBody(source, 'syncSearchOffsetControl')
+  const updateBoundsBody = getFunctionBody(source, 'updateAdaptiveSearchOffsetBounds')
+
+  assert.match(html, /自动垂直居中/)
+  assert.match(html, /根据上方和下方模块之间的可用空间自动居中搜索栏。/)
+  assert.match(autoCenterInput, /type="checkbox"/)
+  assert.match(source, /autoVerticalCenter:\s*false/)
+  assert.match(source, /autoVerticalCenter:\s*settings\.autoVerticalCenter === true/)
+  assert.match(source, /document\.getElementById\('search-auto-vertical-center'\)\?\.addEventListener\('change', handleSearchSettingsChange\)/)
+  assert.match(readSettingsBody, /autoVerticalCenterInput instanceof HTMLInputElement/)
+  assert.match(readSettingsBody, /autoVerticalCenterInput\.checked/)
+  assert.match(source, /function updateSearchAutoVerticalCenterOffset\(\): void/)
+  assert.match(source, /getAutoCenteredSearchOffsetY\(/)
+  assert.match(source, /function getCurrentSearchOffsetY\(slot: HTMLElement\): number/)
+  assert.match(updateBoundsBody, /currentOffsetY:\s*getCurrentSearchOffsetY\(slot\)/)
+  assert.match(updateBoundsBody, /if \(!state\.searchSettings\.autoVerticalCenter\)/)
+  assert.match(syncOffsetBody, /state\.searchSettings\.autoVerticalCenter/)
+  assert.match(syncOffsetBody, /setTextContent\('search-offset-y-value', state\.searchSettings\.autoVerticalCenter \? '自动' : `\$\{value\}px`\)/)
 })
 
 test('newtab search width setting controls the actual form and overlay width', () => {

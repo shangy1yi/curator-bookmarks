@@ -192,6 +192,20 @@ export interface AdaptiveSearchOffsetBounds {
   max: number
 }
 
+export interface AutoCenteredSearchOffsetInput {
+  currentOffsetY: number
+  searchTop: number
+  searchBottom: number
+  viewportTop: number
+  viewportBottom: number
+  previousModuleBottom?: number
+  nextModuleTop?: number
+  minimumGap?: number
+  minOffsetY?: number
+  maxOffsetY?: number
+  fallbackOffsetY?: number
+}
+
 export interface AdaptiveSearchWidthBoundsInput {
   viewportWidth: number
   containerWidth: number
@@ -208,6 +222,14 @@ const DEFAULT_ADAPTIVE_SEARCH_OFFSET_MAX = 240
 const DEFAULT_ADAPTIVE_SEARCH_WIDTH_MIN_VW = 16
 const DEFAULT_ADAPTIVE_SEARCH_WIDTH_MAX_VW = 72
 const DEFAULT_ADAPTIVE_SEARCH_WIDTH_MIN_PX = 220
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) {
+    return fallback
+  }
+  return Math.max(min, Math.min(max, Math.round(numericValue)))
+}
 
 export function getVerticalCenterCollisionOffset({
   utilityBottom,
@@ -274,6 +296,57 @@ export function getAdaptiveSearchOffsetBounds({
   }
 
   return { min, max }
+}
+
+export function getAutoCenteredSearchOffsetY({
+  currentOffsetY,
+  searchTop,
+  searchBottom,
+  viewportTop,
+  viewportBottom,
+  previousModuleBottom,
+  nextModuleTop,
+  minimumGap = DEFAULT_ADAPTIVE_SEARCH_OFFSET_GAP,
+  minOffsetY = DEFAULT_ADAPTIVE_SEARCH_OFFSET_MIN,
+  maxOffsetY = DEFAULT_ADAPTIVE_SEARCH_OFFSET_MAX,
+  fallbackOffsetY = currentOffsetY
+}: AutoCenteredSearchOffsetInput): number {
+  const min = Math.min(minOffsetY, maxOffsetY)
+  const max = Math.max(minOffsetY, maxOffsetY)
+  const fallback = clampNumber(fallbackOffsetY, min, max, 0)
+  const safeGap = Math.max(0, minimumGap)
+  const safeViewportTop = Number.isFinite(viewportTop) ? viewportTop : 0
+  const safeViewportBottom = Number.isFinite(viewportBottom) ? viewportBottom : safeViewportTop
+  const topCandidates = [safeViewportTop + safeGap]
+  const bottomCandidates = [safeViewportBottom - safeGap]
+
+  if (Number.isFinite(previousModuleBottom)) {
+    topCandidates.push(Number(previousModuleBottom) + safeGap)
+  }
+  if (Number.isFinite(nextModuleTop)) {
+    bottomCandidates.push(Number(nextModuleTop) - safeGap)
+  }
+
+  const availableTop = Math.max(...topCandidates)
+  const availableBottom = Math.min(...bottomCandidates)
+  const searchHeight = searchBottom - searchTop
+
+  if (
+    !Number.isFinite(currentOffsetY) ||
+    !Number.isFinite(searchTop) ||
+    !Number.isFinite(searchBottom) ||
+    !Number.isFinite(searchHeight) ||
+    searchHeight <= 0 ||
+    !Number.isFinite(availableTop) ||
+    !Number.isFinite(availableBottom) ||
+    availableBottom <= availableTop
+  ) {
+    return fallback
+  }
+
+  const centeredTop = availableTop + ((availableBottom - availableTop - searchHeight) / 2)
+  const offset = Math.round(currentOffsetY + centeredTop - searchTop)
+  return clampNumber(offset, min, max, fallback)
 }
 
 export function getAdaptiveSearchWidthBounds({

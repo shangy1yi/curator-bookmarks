@@ -56,6 +56,7 @@ import {
   getPortalQuickAccessItems,
   getNaturalSearchBookmarkSuggestionsFromIndex,
   getNewTabSourceAnchorId,
+  getAutoCenteredSearchOffsetY,
   getPopupSearchBookmarkSuggestionsFromIndex,
   prepareNewTabSearchIndex,
   getAdaptiveSearchOffsetBounds,
@@ -199,6 +200,7 @@ const DEFAULT_SEARCH_SETTINGS = {
   enabledEngines: DEFAULT_ENABLED_SEARCH_ENGINE_IDS,
   placeholder: '搜索网页或书签',
   naturalSearchEnabled: false,
+  autoVerticalCenter: false,
   width: 34,
   height: 34,
   offsetY: 0,
@@ -548,6 +550,7 @@ let folderDragGhost: HTMLElement | null = null
 let folderDragGhostFrame = 0
 let resizeLayoutFrame = 0
 let verticalCenterCollisionFrame = 0
+let searchAutoCenterFrame = 0
 let deferredRenderFrame = 0
 let bookmarkTileRenderVersion = 0
 let settingsDrawerReturnFocusElement: HTMLElement | null = null
@@ -926,6 +929,7 @@ function bindSearchSettingsEvents(): void {
   document.getElementById('search-enabled')?.addEventListener('change', handleSearchSettingsChange)
   document.getElementById('search-open-new-tab')?.addEventListener('change', handleSearchSettingsChange)
   document.getElementById('search-engine')?.addEventListener('change', handleSearchSettingsChange)
+  document.getElementById('search-auto-vertical-center')?.addEventListener('change', handleSearchSettingsChange)
   document.querySelectorAll<HTMLInputElement>('[data-search-engine-toggle]').forEach((input) => {
     input.addEventListener('change', handleSearchSettingsChange)
   })
@@ -1359,7 +1363,15 @@ function applySearchSettingsLive(): void {
 
   slot?.style.setProperty('--search-width', `${width}vw`)
   slot?.style.setProperty('--search-height', `${settings.height}px`)
-  slot?.style.setProperty('--search-offset-y', `${offsetY}px`)
+  if (settings.autoVerticalCenter) {
+    if (slot) {
+      slot.dataset.searchAutoVerticalCenter = 'true'
+    }
+    scheduleSearchAutoVerticalCenterUpdate()
+  } else if (slot) {
+    slot.dataset.searchAutoVerticalCenter = 'false'
+    slot.style.setProperty('--search-offset-y', `${offsetY}px`)
+  }
   form?.style.setProperty('--search-width', `${width}vw`)
   form?.style.setProperty('--search-height', `${settings.height}px`)
   form?.style.setProperty('--search-bg-alpha', String(settings.background / 100))
@@ -3615,12 +3627,35 @@ function cancelScheduledAdaptiveNewTabLayoutUpdate(): void {
   verticalCenterCollisionFrame = 0
 }
 
+function cancelScheduledSearchAutoVerticalCenterUpdate(): void {
+  if (!searchAutoCenterFrame) {
+    return
+  }
+
+  window.cancelAnimationFrame(searchAutoCenterFrame)
+  searchAutoCenterFrame = 0
+}
+
 function scheduleAdaptiveNewTabLayoutUpdate(): void {
   cancelScheduledAdaptiveNewTabLayoutUpdate()
   verticalCenterCollisionFrame = window.requestAnimationFrame(() => {
     verticalCenterCollisionFrame = 0
     updateAdaptiveSearchOffsetBounds()
     updateVerticalCenterCollisionOffset()
+    scheduleSearchAutoVerticalCenterUpdate()
+  })
+}
+
+function scheduleSearchAutoVerticalCenterUpdate(): void {
+  if (!state.searchSettings.autoVerticalCenter) {
+    cancelScheduledSearchAutoVerticalCenterUpdate()
+    return
+  }
+
+  cancelScheduledSearchAutoVerticalCenterUpdate()
+  searchAutoCenterFrame = window.requestAnimationFrame(() => {
+    searchAutoCenterFrame = 0
+    updateSearchAutoVerticalCenterOffset()
   })
 }
 
@@ -3648,7 +3683,7 @@ function updateAdaptiveSearchOffsetBounds(): void {
   const viewportBottom = shellRect?.bottom ??
     (document.documentElement.clientHeight || window.innerHeight || 0)
   const bounds = getAdaptiveSearchOffsetBounds({
-    currentOffsetY: state.searchSettings.offsetY,
+    currentOffsetY: getCurrentSearchOffsetY(slot),
     searchTop: slotRect.top,
     searchBottom: slotRect.bottom,
     viewportTop,
@@ -3670,12 +3705,69 @@ function updateAdaptiveSearchOffsetBounds(): void {
     '--search-width',
     `${clampNumber(state.searchSettings.width, widthBounds.min, widthBounds.max, DEFAULT_SEARCH_SETTINGS.width)}vw`
   )
-  slot.style.setProperty(
-    '--search-offset-y',
-    `${clampNumber(state.searchSettings.offsetY, bounds.min, bounds.max, DEFAULT_SEARCH_SETTINGS.offsetY)}px`
-  )
+  if (!state.searchSettings.autoVerticalCenter) {
+    slot.style.setProperty(
+      '--search-offset-y',
+      `${clampNumber(state.searchSettings.offsetY, bounds.min, bounds.max, DEFAULT_SEARCH_SETTINGS.offsetY)}px`
+    )
+  }
   syncSearchWidthControl()
   syncSearchOffsetControl()
+}
+
+function updateSearchAutoVerticalCenterOffset(): void {
+  const page = root?.querySelector<HTMLElement>('.newtab-page')
+  const slot = page?.querySelector<HTMLElement>('.newtab-search-slot')
+  if (!page || !slot || !state.searchSettings.enabled || !state.searchSettings.autoVerticalCenter) {
+    return
+  }
+
+  const shellRect = root?.getBoundingClientRect()
+  const slotRect = slot.getBoundingClientRect()
+  const bounds = state.searchOffsetBounds || SEARCH_OFFSET_BOUNDS_FALLBACK
+  const currentOffsetY = getCurrentSearchOffsetY(slot)
+  const viewportTop = shellRect?.top ?? 0
+  const viewportBottom = shellRect?.bottom ??
+    (document.documentElement.clientHeight || window.innerHeight || 0)
+  const previousModule = slot.previousElementSibling instanceof HTMLElement
+    ? slot.previousElementSibling
+    : null
+  const nextModule = getSearchAutoVerticalCenterNextModule(page, slot)
+  const offsetY = getAutoCenteredSearchOffsetY({
+    currentOffsetY,
+    searchTop: slotRect.top,
+    searchBottom: slotRect.bottom,
+    viewportTop,
+    viewportBottom,
+    previousModuleBottom: previousModule?.getBoundingClientRect().bottom,
+    nextModuleTop: nextModule?.getBoundingClientRect().top,
+    minimumGap: NEWTAB_LAYOUT_SAFE_GAP,
+    minOffsetY: bounds.min,
+    maxOffsetY: bounds.max,
+    fallbackOffsetY: currentOffsetY
+  })
+
+  slot.dataset.searchAutoVerticalCenter = 'true'
+  slot.style.setProperty('--search-offset-y', `${offsetY}px`)
+}
+
+function getCurrentSearchOffsetY(slot: HTMLElement): number {
+  const value = Number.parseFloat(slot.style.getPropertyValue('--search-offset-y'))
+  if (Number.isFinite(value)) {
+    return value
+  }
+  return state.searchSettings.offsetY
+}
+
+function getSearchAutoVerticalCenterNextModule(page: HTMLElement, slot: HTMLElement): HTMLElement | null {
+  const nextUtilityModule = slot.nextElementSibling instanceof HTMLElement
+    ? slot.nextElementSibling
+    : null
+  if (nextUtilityModule) {
+    return nextUtilityModule
+  }
+
+  return page.querySelector<HTMLElement>(':scope > .newtab-primary-slot > :first-child')
 }
 
 function updateVerticalCenterCollisionOffset(): void {
@@ -3753,6 +3845,7 @@ function createSearchWidget(): HTMLElement | null {
   slot.style.setProperty('--search-width', `${settings.width}vw`)
   slot.style.setProperty('--search-height', `${settings.height}px`)
   slot.style.setProperty('--search-offset-y', `${settings.offsetY}px`)
+  slot.dataset.searchAutoVerticalCenter = String(settings.autoVerticalCenter)
   slot.setAttribute('aria-label', '搜索网页或书签')
 
   const form = document.createElement('form')
@@ -5857,6 +5950,8 @@ function cleanupNewTabRuntime(): void {
   resizeLayoutFrame = 0
   window.cancelAnimationFrame(verticalCenterCollisionFrame)
   verticalCenterCollisionFrame = 0
+  window.cancelAnimationFrame(searchAutoCenterFrame)
+  searchAutoCenterFrame = 0
   window.cancelAnimationFrame(deferredRenderFrame)
   deferredRenderFrame = 0
   removeBookmarkDragGhost()
@@ -7644,6 +7739,7 @@ function normalizeSearchSettings(rawSettings: unknown): typeof DEFAULT_SEARCH_SE
     enabledEngines: normalizeEnabledSearchEngineIds(settings.enabledEngines, engine),
     placeholder,
     naturalSearchEnabled: settings.naturalSearchEnabled === true,
+    autoVerticalCenter: settings.autoVerticalCenter === true,
     width: clampNumber(settings.width, 16, 72, DEFAULT_SEARCH_SETTINGS.width),
     height: clampNumber(settings.height, 28, 56, DEFAULT_SEARCH_SETTINGS.height),
     offsetY: clampNumber(
@@ -7671,6 +7767,7 @@ function readSearchSettingsFromControls(): typeof DEFAULT_SEARCH_SETTINGS {
   const widthInput = document.getElementById('search-width')
   const heightInput = document.getElementById('search-height')
   const offsetYInput = document.getElementById('search-offset-y')
+  const autoVerticalCenterInput = document.getElementById('search-auto-vertical-center')
   const backgroundInput = document.getElementById('search-background')
 
   return normalizeSearchSettings({
@@ -7686,6 +7783,9 @@ function readSearchSettingsFromControls(): typeof DEFAULT_SEARCH_SETTINGS {
     width: widthInput instanceof HTMLInputElement ? Number(widthInput.value) : state.searchSettings.width,
     height: heightInput instanceof HTMLInputElement ? Number(heightInput.value) : state.searchSettings.height,
     offsetY: offsetYInput instanceof HTMLInputElement ? Number(offsetYInput.value) : state.searchSettings.offsetY,
+    autoVerticalCenter: autoVerticalCenterInput instanceof HTMLInputElement
+      ? autoVerticalCenterInput.checked
+      : state.searchSettings.autoVerticalCenter,
     background: backgroundInput instanceof HTMLInputElement ? Number(backgroundInput.value) : state.searchSettings.background
   })
 }
@@ -7702,6 +7802,7 @@ function syncSearchSettingsControls(): void {
   const widthInput = document.getElementById('search-width')
   const heightInput = document.getElementById('search-height')
   const offsetYInput = document.getElementById('search-offset-y')
+  const autoVerticalCenterInput = document.getElementById('search-auto-vertical-center')
   const backgroundInput = document.getElementById('search-background')
   const dependentControls = [
     openInput,
@@ -7710,7 +7811,7 @@ function syncSearchSettingsControls(): void {
     placeholderInput,
     widthInput,
     heightInput,
-    offsetYInput,
+    autoVerticalCenterInput,
     backgroundInput
   ]
 
@@ -7743,6 +7844,10 @@ function syncSearchSettingsControls(): void {
     heightInput.disabled = !settings.enabled
   }
   syncSearchOffsetControl()
+  if (autoVerticalCenterInput instanceof HTMLInputElement) {
+    autoVerticalCenterInput.checked = settings.autoVerticalCenter
+    autoVerticalCenterInput.disabled = !settings.enabled
+  }
   if (backgroundInput instanceof HTMLInputElement) {
     backgroundInput.value = String(settings.background)
     backgroundInput.disabled = !settings.enabled
@@ -7788,13 +7893,17 @@ function syncSearchOffsetControl(): void {
     DEFAULT_SEARCH_SETTINGS.offsetY
   )
   if (offsetYInput instanceof HTMLInputElement) {
+    const disabled = !state.searchSettings.enabled || state.searchSettings.autoVerticalCenter
     offsetYInput.min = String(bounds.min)
     offsetYInput.max = String(bounds.max)
     offsetYInput.value = String(value)
-    offsetYInput.disabled = !state.searchSettings.enabled
+    offsetYInput.disabled = disabled
     updateSettingRangeVisual(offsetYInput)
+    offsetYInput
+      .closest<HTMLElement>('.setting-row')
+      ?.classList.toggle('setting-row-disabled', disabled)
   }
-  setTextContent('search-offset-y-value', `${value}px`)
+  setTextContent('search-offset-y-value', state.searchSettings.autoVerticalCenter ? '自动' : `${value}px`)
 }
 
 async function saveSearchSettings(): Promise<void> {
