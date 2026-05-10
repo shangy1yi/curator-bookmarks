@@ -434,7 +434,7 @@ interface BookmarkLazyExpansionTarget {
 
 type MenuActionIcon = 'trash' | 'refresh' | 'save' | 'plus' | 'copy' | 'pin'
 type SettingsSaveState = 'idle' | 'saving' | 'saved' | 'error'
-type SettingsDrawerSection = 'folder'
+type SettingsDrawerSection = 'source' | 'appearance' | 'search' | 'modules' | 'advanced'
 
 interface LastDeletedBookmarkState {
   bookmark: chrome.bookmarks.BookmarkTreeNode
@@ -511,6 +511,18 @@ const state = {
   dragOriginalOrderIds: [] as string[],
   dragPendingInsertIndex: -1,
   dragSuppressClick: false,
+  speedDialDraggingBookmarkId: '',
+  speedDialDragPointerId: 0,
+  speedDialDragLongPressTimer: 0,
+  speedDialDragClientX: 0,
+  speedDialDragClientY: 0,
+  speedDialDragOffsetX: 0,
+  speedDialDragOffsetY: 0,
+  speedDialDragOriginalOrderIds: [] as string[],
+  speedDialDragPendingInsertIndex: -1,
+  speedDialDragSuppressClick: false,
+  reorderingSpeedDial: false,
+  speedDialReorderError: '',
   draggingFolderId: '',
   folderDragPointerId: 0,
   folderDragLongPressTimer: 0,
@@ -544,6 +556,7 @@ const state = {
   timeSettings: { ...DEFAULT_TIME_SETTINGS } as NewTabTimeSettings,
   settingsSaveState: 'idle' as SettingsSaveState,
   settingsSaveMessage: '',
+  activeSettingsGroup: 'source' as SettingsDrawerSection,
   dashboardOpen: false,
   dashboardFrameLoaded: false,
   dashboardFrameReady: false,
@@ -576,6 +589,8 @@ let activeBackgroundObjectUrl = ''
 let lastAppliedBackgroundMediaSignature = ''
 let bookmarkDragGhost: HTMLElement | null = null
 let bookmarkDragGhostFrame = 0
+let speedDialDragGhost: HTMLElement | null = null
+let speedDialDragGhostFrame = 0
 let folderDragGhost: HTMLElement | null = null
 let folderDragGhostFrame = 0
 let resizeLayoutFrame = 0
@@ -601,6 +616,8 @@ let preloadedBackgroundSettings: typeof DEFAULT_BACKGROUND_SETTINGS | null = nul
 let backgroundSettingsMutationVersion = 0
 let bookmarkDragSlotRects = new Map<string, DOMRect>()
 let bookmarkDragSlotOrderIds: string[] = []
+let speedDialDragSlotRects = new Map<string, DOMRect>()
+let speedDialDragSlotOrderIds: string[] = []
 let dashboardReturnFocusTarget: HTMLElement | null = null
 let newTabDomContentLoadedRecorded = false
 let newTabSkeletonRenderRecorded = false
@@ -722,6 +739,7 @@ function bindEvents(): void {
   bindSearchSettingsEvents()
   bindIconSettingsEvents()
   bindTimeSettingsEvents()
+  bindSettingsGroupTabs()
   bindSettingsRangeVisuals()
   dashboardTrigger?.addEventListener('click', (event) => {
     event.preventDefault()
@@ -776,6 +794,7 @@ function bindEvents(): void {
   window.addEventListener('resize', () => {
     closeBookmarkMenu()
     closeAddBookmarkMenu()
+    cancelSpeedDialDrag()
     cancelBookmarkDrag()
     cancelFolderDrag()
     if (!resizeLayoutFrame) {
@@ -803,6 +822,7 @@ function bindEvents(): void {
 
     if (
       (state.dragSuppressClick && target.closest('[data-bookmark-id]')) ||
+      (state.speedDialDragSuppressClick && target.closest('[data-speed-dial-bookmark-id]')) ||
       (state.folderDragSuppressClick && target.closest('[data-folder-drag-handle]'))
     ) {
       event.preventDefault()
@@ -829,15 +849,19 @@ function bindEvents(): void {
       return
     }
   })
+  root?.addEventListener('pointerdown', handleSpeedDialPointerDown)
   root?.addEventListener('pointerdown', handleFolderPointerDown)
   root?.addEventListener('pointerdown', handleBookmarkPointerDown)
+  window.addEventListener('pointermove', handleSpeedDialPointerMove)
   window.addEventListener('pointermove', handleBookmarkPointerMove)
   window.addEventListener('pointermove', handleFolderPointerMove)
   window.addEventListener('pointerup', (event) => {
+    void finishSpeedDialDrag(event)
     void finishBookmarkDrag(event)
     void finishFolderDrag(event)
   })
   window.addEventListener('pointercancel', () => {
+    cancelSpeedDialDrag({ keepSuppressClick: true })
     cancelBookmarkDrag({ keepSuppressClick: true })
     cancelFolderDrag({ keepSuppressClick: true })
   })
@@ -850,6 +874,8 @@ function bindEvents(): void {
     if (
       state.draggingBookmarkId ||
       state.dragSuppressClick ||
+      state.speedDialDraggingBookmarkId ||
+      state.speedDialDragSuppressClick ||
       state.draggingFolderId ||
       state.folderDragSuppressClick
     ) {
@@ -1168,6 +1194,14 @@ function bindFolderSettingsEvents(): void {
     ?.addEventListener('click', handleModuleSettingsClick)
 }
 
+function bindSettingsGroupTabs(): void {
+  document.querySelectorAll<HTMLElement>('[data-settings-group-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setActiveSettingsGroup(normalizeSettingsDrawerSection(button.dataset.settingsGroupTab))
+    })
+  })
+}
+
 function handleGeneralSettingsChange(): void {
   const previousSettings = state.generalSettings
   state.generalSettings = readGeneralSettingsFromControls()
@@ -1205,6 +1239,14 @@ function handleFolderSettingsChange(): void {
 function toggleFolderCandidates(): void {
   state.folderCandidatesExpanded = !state.folderCandidatesExpanded
   syncFolderSettingsControls()
+  if (state.folderCandidatesExpanded) {
+    window.requestAnimationFrame(() => {
+      const searchInput = document.getElementById('folder-candidate-search')
+      if (searchInput instanceof HTMLInputElement) {
+        searchInput.focus({ preventScroll: true })
+      }
+    })
+  }
 }
 
 function handleFolderCandidateSearch(event: Event): void {
@@ -1647,6 +1689,7 @@ function handleTimeSettingsChange(): void {
 
 function openSettingsDrawer(options?: { focusFirstControl?: boolean; section?: SettingsDrawerSection }): void {
   const focusFirstControl = options?.focusFirstControl !== false
+  setActiveSettingsGroup(options?.section || state.activeSettingsGroup || 'source', { scrollToTop: false })
   settingsDrawerReturnFocusElement = document.activeElement instanceof HTMLElement
     ? document.activeElement
     : null
@@ -1688,18 +1731,22 @@ function openSettingsDrawer(options?: { focusFirstControl?: boolean; section?: S
 function openFolderSourceSettings(): void {
   state.folderCandidatesExpanded = true
   state.folderCandidateQuery = ''
-  openSettingsDrawer({ focusFirstControl: false, section: 'folder' })
+  openSettingsDrawer({ focusFirstControl: false, section: 'source' })
   syncFolderSettingsControls()
 }
 
 function focusSettingsSection(section: SettingsDrawerSection): void {
   const titleIdBySection: Record<SettingsDrawerSection, string> = {
-    folder: 'settings-folder-title'
+    source: 'settings-folder-title',
+    appearance: 'settings-background-title',
+    search: 'settings-search-title',
+    modules: 'settings-speed-dial-title',
+    advanced: 'settings-general-title'
   }
   const targetSection = document.getElementById(titleIdBySection[section])?.closest('.settings-section')
   targetSection?.scrollIntoView({ block: 'start', behavior: 'smooth' })
 
-  if (section === 'folder') {
+  if (section === 'source') {
     const searchInput = document.getElementById('folder-candidate-search')
     if (searchInput instanceof HTMLInputElement) {
       searchInput.focus()
@@ -1709,6 +1756,42 @@ function focusSettingsSection(section: SettingsDrawerSection): void {
 
   const firstControl = targetSection?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
   firstControl?.focus()
+}
+
+function setActiveSettingsGroup(
+  section: SettingsDrawerSection,
+  { scrollToTop = true }: { scrollToTop?: boolean } = {}
+): void {
+  const nextSection = normalizeSettingsDrawerSection(section)
+  state.activeSettingsGroup = nextSection
+  settingsDrawer?.setAttribute('data-active-settings-group', nextSection)
+
+  document.querySelectorAll<HTMLElement>('[data-settings-group-tab]').forEach((tab) => {
+    const active = normalizeSettingsDrawerSection(tab.dataset.settingsGroupTab) === nextSection
+    tab.classList.toggle('active', active)
+    tab.setAttribute('aria-pressed', String(active))
+  })
+
+  document.querySelectorAll<HTMLElement>('[data-settings-group]').forEach((panel) => {
+    const active = normalizeSettingsDrawerSection(panel.dataset.settingsGroup) === nextSection
+    panel.hidden = !active
+    panel.setAttribute('aria-hidden', String(!active))
+  })
+
+  if (scrollToTop) {
+    const scrollHost = settingsDrawer?.querySelector<HTMLElement>('.settings-drawer-scroll')
+    scrollHost?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+function normalizeSettingsDrawerSection(value: unknown): SettingsDrawerSection {
+  const section = String(value || '')
+  return section === 'appearance' ||
+    section === 'search' ||
+    section === 'modules' ||
+    section === 'advanced'
+    ? section
+    : 'source'
 }
 
 function closeSettingsDrawer(): void {
@@ -1963,8 +2046,475 @@ function closeAddBookmarkMenu({ animate = true } = {}): void {
   }
 }
 
+function handleSpeedDialPointerDown(event: PointerEvent): void {
+  if (
+    state.draggingBookmarkId ||
+    state.dragLongPressTimer ||
+    state.draggingFolderId ||
+    state.folderDragLongPressTimer
+  ) {
+    return
+  }
+
+  if (event.pointerType === 'mouse' && event.button !== 0) {
+    return
+  }
+
+  const target = event.target
+  if (!(target instanceof Element) || target.closest('.bookmark-edit-menu')) {
+    return
+  }
+
+  const card = target.closest('[data-speed-dial-bookmark-id]')
+  if (!(card instanceof HTMLElement)) {
+    return
+  }
+
+  const bookmarkId = String(card.dataset.speedDialBookmarkId || '').trim()
+  if (!bookmarkId || !getBookmarkById(bookmarkId)) {
+    return
+  }
+
+  cancelSpeedDialDrag({ keepSuppressClick: true })
+  state.speedDialDragPointerId = event.pointerId
+  state.speedDialDraggingBookmarkId = bookmarkId
+  state.speedDialDragClientX = event.clientX
+  state.speedDialDragClientY = event.clientY
+  try {
+    card.setPointerCapture(event.pointerId)
+  } catch {
+    // Pointer capture can fail if the browser has already released this pointer.
+  }
+  state.speedDialDragLongPressTimer = window.setTimeout(() => {
+    beginSpeedDialDrag()
+  }, BOOKMARK_DRAG_LONG_PRESS_MS)
+}
+
+function beginSpeedDialDrag(): void {
+  if (!state.speedDialDraggingBookmarkId || !getBookmarkById(state.speedDialDraggingBookmarkId)) {
+    cancelSpeedDialDrag()
+    return
+  }
+
+  const originalOrderIds = getActiveWorkspacePinnedIds()
+    .filter((bookmarkId) => Boolean(getBookmarkById(bookmarkId)?.url))
+  if (originalOrderIds.length < 2 || !originalOrderIds.includes(state.speedDialDraggingBookmarkId)) {
+    cancelSpeedDialDrag()
+    return
+  }
+
+  closeBookmarkMenu()
+  closeAddBookmarkMenu()
+  state.speedDialDragLongPressTimer = 0
+  state.speedDialDragOriginalOrderIds = originalOrderIds
+  state.speedDialDragSuppressClick = true
+  document.body.classList.add('speed-dial-dragging')
+  const sourceCard = getActiveSpeedDialDragCard()
+  createSpeedDialDragGhost(sourceCard)
+  captureSpeedDialDragLayout()
+  sourceCard?.classList.add('dragging')
+  document.body.classList.add('bookmark-drag-preview-initializing')
+  syncSpeedDialDragVisualPreview()
+  window.requestAnimationFrame(() => {
+    document.body.classList.remove('bookmark-drag-preview-initializing')
+  })
+}
+
+function handleSpeedDialPointerMove(event: PointerEvent): void {
+  if (!state.speedDialDraggingBookmarkId || event.pointerId !== state.speedDialDragPointerId) {
+    return
+  }
+
+  state.speedDialDragClientX = event.clientX
+  state.speedDialDragClientY = event.clientY
+
+  if (state.speedDialDragLongPressTimer) {
+    return
+  }
+
+  event.preventDefault()
+  updateSpeedDialDragGhost()
+  const insertIndex = getSpeedDialInsertIndex(event.clientX, event.clientY)
+  setSpeedDialDragPendingInsertIndex(insertIndex)
+}
+
+async function finishSpeedDialDrag(event: PointerEvent): Promise<void> {
+  if (!state.speedDialDraggingBookmarkId || event.pointerId !== state.speedDialDragPointerId) {
+    return
+  }
+
+  window.clearTimeout(state.speedDialDragLongPressTimer)
+  state.speedDialDragLongPressTimer = 0
+
+  const wasDragging = Boolean(state.speedDialDragOriginalOrderIds.length)
+  const originalOrderIds = [...state.speedDialDragOriginalOrderIds]
+  const pendingInsertIndex = state.speedDialDragPendingInsertIndex >= 0
+    ? state.speedDialDragPendingInsertIndex
+    : getSpeedDialInsertIndex(event.clientX, event.clientY)
+  const finalOrderIds = wasDragging && pendingInsertIndex >= 0
+    ? applyDraggedSpeedDialInsertInState(pendingInsertIndex)
+    : getActiveWorkspacePinnedIds()
+  clearSpeedDialDragState({ keepSuppressClick: wasDragging })
+
+  if (!wasDragging) {
+    return
+  }
+
+  render()
+  updateClockText()
+
+  if (areStringArraysEqual(originalOrderIds, finalOrderIds)) {
+    return
+  }
+
+  await persistSpeedDialOrder(originalOrderIds, finalOrderIds)
+}
+
+function cancelSpeedDialDrag({ keepSuppressClick = false } = {}): void {
+  if (!state.speedDialDraggingBookmarkId && !state.speedDialDragLongPressTimer) {
+    return
+  }
+
+  window.clearTimeout(state.speedDialDragLongPressTimer)
+  clearSpeedDialDragState({ keepSuppressClick })
+  render()
+  updateClockText()
+}
+
+function clearSpeedDialDragState({ keepSuppressClick = false } = {}): void {
+  getActiveSpeedDialDragCard()?.classList.remove('dragging')
+  state.speedDialDraggingBookmarkId = ''
+  state.speedDialDragPointerId = 0
+  state.speedDialDragLongPressTimer = 0
+  state.speedDialDragClientX = 0
+  state.speedDialDragClientY = 0
+  state.speedDialDragOffsetX = 0
+  state.speedDialDragOffsetY = 0
+  state.speedDialDragOriginalOrderIds = []
+  state.speedDialDragPendingInsertIndex = -1
+  removeSpeedDialDragGhost()
+  clearSpeedDialDragVisualPreview()
+  document.body.classList.remove('bookmark-drag-preview-initializing')
+  document.body.classList.remove('speed-dial-dragging')
+
+  if (keepSuppressClick) {
+    state.speedDialDragSuppressClick = true
+    window.setTimeout(() => {
+      state.speedDialDragSuppressClick = false
+    }, 250)
+  } else {
+    state.speedDialDragSuppressClick = false
+  }
+}
+
+function createSpeedDialDragGhost(sourceCard = getActiveSpeedDialDragCard()): void {
+  removeSpeedDialDragGhost()
+
+  if (!sourceCard) {
+    return
+  }
+
+  const rect = sourceCard.getBoundingClientRect()
+  const ghost = sourceCard.cloneNode(true) as HTMLElement
+  ghost.classList.remove('dragging')
+  ghost.classList.add('speed-dial-drag-ghost')
+  ghost.removeAttribute('href')
+  ghost.removeAttribute('data-speed-dial-bookmark-id')
+  ghost.setAttribute('aria-hidden', 'true')
+  copyBookmarkDragGhostVariables(sourceCard, ghost)
+  ghost.style.width = `${rect.width}px`
+  ghost.style.height = `${rect.height}px`
+  ghost.style.visibility = 'hidden'
+  speedDialDragGhost = ghost
+  document.body.appendChild(ghost)
+  syncSpeedDialDragOffsetToGhostIcon(ghost, rect)
+  updateSpeedDialDragGhost({ immediate: true })
+  ghost.style.visibility = ''
+}
+
+function syncSpeedDialDragOffsetToGhostIcon(ghost: HTMLElement, sourceRect: DOMRect): void {
+  const ghostRect = ghost.getBoundingClientRect()
+  const iconRect = ghost.querySelector('.bookmark-icon-shell')?.getBoundingClientRect()
+  if (iconRect && ghostRect.width && ghostRect.height) {
+    state.speedDialDragOffsetX = iconRect.left + iconRect.width / 2 - ghostRect.left
+    state.speedDialDragOffsetY = iconRect.top + iconRect.height / 2 - ghostRect.top
+    return
+  }
+
+  state.speedDialDragOffsetX = sourceRect.width / 2
+  state.speedDialDragOffsetY = sourceRect.height / 2
+}
+
+function getActiveSpeedDialDragCard(): HTMLElement | null {
+  if (!state.speedDialDraggingBookmarkId) {
+    return null
+  }
+
+  return document.querySelector<HTMLElement>(
+    `.newtab-speed-dial-card[data-speed-dial-bookmark-id="${CSS.escape(state.speedDialDraggingBookmarkId)}"]`
+  )
+}
+
+function updateSpeedDialDragGhost({ immediate = false } = {}): void {
+  if (immediate) {
+    updateSpeedDialDragGhostPosition()
+    return
+  }
+
+  if (speedDialDragGhostFrame) {
+    return
+  }
+
+  speedDialDragGhostFrame = window.requestAnimationFrame(() => {
+    speedDialDragGhostFrame = 0
+    updateSpeedDialDragGhostPosition()
+  })
+}
+
+function updateSpeedDialDragGhostPosition(): void {
+  if (!speedDialDragGhost) {
+    return
+  }
+
+  const left = state.speedDialDragClientX - state.speedDialDragOffsetX
+  const top = state.speedDialDragClientY - state.speedDialDragOffsetY
+  speedDialDragGhost.style.transform = `translate3d(${left}px, ${top}px, 0)`
+}
+
+function removeSpeedDialDragGhost(): void {
+  window.cancelAnimationFrame(speedDialDragGhostFrame)
+  speedDialDragGhostFrame = 0
+  speedDialDragGhost?.remove()
+  speedDialDragGhost = null
+}
+
+function setSpeedDialDragPendingInsertIndex(insertIndex: number): void {
+  const nextInsertIndex = hasSpeedDialInsertChange(insertIndex) ? insertIndex : -1
+  if (state.speedDialDragPendingInsertIndex === nextInsertIndex) {
+    return
+  }
+
+  state.speedDialDragPendingInsertIndex = nextInsertIndex
+  syncSpeedDialDragVisualPreview()
+}
+
+function getSpeedDialInsertIndex(clientX: number, clientY: number): number {
+  const slots = getSpeedDialDragLayoutSlots()
+  if (!slots.length) {
+    return -1
+  }
+
+  return resolveBookmarkDragInsertIndex(
+    slots,
+    state.speedDialDraggingBookmarkId,
+    { x: clientX, y: clientY }
+  )
+}
+
+function hasSpeedDialInsertChange(insertIndex: number): boolean {
+  if (insertIndex < 0 || !state.speedDialDraggingBookmarkId) {
+    return false
+  }
+
+  const currentOrderIds = getActiveWorkspacePinnedIds()
+  const finalOrderIds = buildBookmarkOrderAfterInsert(
+    currentOrderIds,
+    state.speedDialDraggingBookmarkId,
+    insertIndex
+  )
+  return !areStringArraysEqual(currentOrderIds, finalOrderIds)
+}
+
+function getPreviewSpeedDialOrderIds(): string[] {
+  const currentOrderIds = getActiveWorkspacePinnedIds()
+  if (state.speedDialDragPendingInsertIndex < 0 || !state.speedDialDraggingBookmarkId) {
+    return currentOrderIds
+  }
+
+  return buildBookmarkOrderAfterInsert(
+    currentOrderIds,
+    state.speedDialDraggingBookmarkId,
+    state.speedDialDragPendingInsertIndex
+  )
+}
+
+function captureSpeedDialDragLayout(): void {
+  speedDialDragSlotRects = new Map()
+  speedDialDragSlotOrderIds = []
+  const grid = getSpeedDialGrid()
+  if (!grid) {
+    return
+  }
+
+  for (const card of grid.querySelectorAll<HTMLElement>(':scope > .newtab-speed-dial-card[data-speed-dial-bookmark-id]')) {
+    const bookmarkId = String(card.dataset.speedDialBookmarkId || '').trim()
+    if (!bookmarkId) {
+      continue
+    }
+    speedDialDragSlotOrderIds.push(bookmarkId)
+    speedDialDragSlotRects.set(bookmarkId, card.getBoundingClientRect())
+  }
+}
+
+function getSpeedDialGrid(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.newtab-speed-dial-grid')
+}
+
+function getSpeedDialDragLayoutSlots(): BookmarkDragSlotRectLike[] {
+  if (speedDialDragSlotOrderIds.length && speedDialDragSlotRects.size) {
+    return speedDialDragSlotOrderIds
+      .map((bookmarkId) => {
+        const rect = speedDialDragSlotRects.get(bookmarkId)
+        return rect ? {
+          id: bookmarkId,
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height
+        } : null
+      })
+      .filter((slot): slot is BookmarkDragSlotRectLike => Boolean(slot))
+  }
+
+  const grid = getSpeedDialGrid()
+  if (!grid) {
+    return []
+  }
+
+  return Array
+    .from(grid.querySelectorAll<HTMLElement>(':scope > .newtab-speed-dial-card[data-speed-dial-bookmark-id]'))
+    .map((card) => {
+      const rect = card.getBoundingClientRect()
+      return {
+        id: String(card.dataset.speedDialBookmarkId || ''),
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height
+      }
+    })
+    .filter((slot) => slot.id)
+}
+
+function syncSpeedDialDragVisualPreview(): void {
+  const grid = getSpeedDialGrid()
+  if (!grid || !speedDialDragSlotOrderIds.length) {
+    return
+  }
+
+  const cardByBookmarkId = new Map<string, HTMLElement>()
+  for (const card of grid.querySelectorAll<HTMLElement>(':scope > .newtab-speed-dial-card[data-speed-dial-bookmark-id]')) {
+    const bookmarkId = String(card.dataset.speedDialBookmarkId || '').trim()
+    if (bookmarkId) {
+      cardByBookmarkId.set(bookmarkId, card)
+    }
+  }
+
+  const targetSlotByBookmarkId = new Map<string, DOMRect>()
+  const targetOrderIds = getPreviewSpeedDialOrderIds().filter((bookmarkId) => speedDialDragSlotRects.has(bookmarkId))
+  if (targetOrderIds.length !== speedDialDragSlotOrderIds.length) {
+    return
+  }
+
+  for (let index = 0; index < targetOrderIds.length; index += 1) {
+    const slotBookmarkId = speedDialDragSlotOrderIds[index]
+    const targetRect = speedDialDragSlotRects.get(slotBookmarkId)
+    if (!targetRect) {
+      return
+    }
+    targetSlotByBookmarkId.set(targetOrderIds[index], targetRect)
+  }
+
+  for (const bookmarkId of targetOrderIds) {
+    const card = cardByBookmarkId.get(bookmarkId)
+    const originalRect = speedDialDragSlotRects.get(bookmarkId)
+    const targetRect = targetSlotByBookmarkId.get(bookmarkId)
+    if (!card || !originalRect || !targetRect) {
+      continue
+    }
+
+    const deltaX = targetRect.left - originalRect.left
+    const deltaY = targetRect.top - originalRect.top
+    const isDraggedCard = bookmarkId === state.speedDialDraggingBookmarkId
+    card.style.transform = buildBookmarkPreviewTransform(deltaX, deltaY, isDraggedCard)
+    card.style.zIndex = isDraggedCard ? '1' : ''
+  }
+}
+
+function clearSpeedDialDragVisualPreview(): void {
+  for (const card of document.querySelectorAll<HTMLElement>('.newtab-speed-dial-card[data-speed-dial-bookmark-id]')) {
+    card.style.transform = ''
+    card.style.zIndex = ''
+  }
+  speedDialDragSlotRects = new Map()
+  speedDialDragSlotOrderIds = []
+}
+
+function applyDraggedSpeedDialInsertInState(insertIndex: number): string[] {
+  const currentOrderIds = getActiveWorkspacePinnedIds()
+  const finalOrderIds = buildBookmarkOrderAfterInsert(
+    currentOrderIds,
+    state.speedDialDraggingBookmarkId,
+    insertIndex
+  )
+  if (areStringArraysEqual(currentOrderIds, finalOrderIds)) {
+    return currentOrderIds
+  }
+
+  const activeWorkspace = getActiveNewTabWorkspace(state.workspaceSettings)
+  state.workspaceSettings = updateNewTabWorkspace(
+    state.workspaceSettings,
+    activeWorkspace.id,
+    { pinnedIds: finalOrderIds },
+    { validBookmarkIds: state.allBookmarkMap.keys() }
+  )
+  return getActiveWorkspacePinnedIds()
+}
+
+async function persistSpeedDialOrder(
+  originalBookmarkIds: string[],
+  finalBookmarkIds: string[]
+): Promise<void> {
+  if (areStringArraysEqual(originalBookmarkIds, finalBookmarkIds)) {
+    return
+  }
+
+  state.reorderingSpeedDial = true
+  state.speedDialReorderError = ''
+  syncSpeedDialReorderBusyState()
+  try {
+    await saveNewTabWorkspaceSettings()
+    postDashboardSpeedDialState()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Speed Dial 排序保存失败，请刷新后重试。'
+    const activeWorkspace = getActiveNewTabWorkspace(state.workspaceSettings)
+    state.workspaceSettings = updateNewTabWorkspace(
+      state.workspaceSettings,
+      activeWorkspace.id,
+      { pinnedIds: originalBookmarkIds },
+      { validBookmarkIds: state.allBookmarkMap.keys() }
+    )
+    state.speedDialReorderError = message
+    render()
+    updateClockText()
+  } finally {
+    state.reorderingSpeedDial = false
+    syncSpeedDialReorderBusyState()
+  }
+}
+
+function syncSpeedDialReorderBusyState(): void {
+  const section = document.querySelector<HTMLElement>('.newtab-speed-dial')
+  section?.setAttribute('aria-busy', state.reorderingSpeedDial ? 'true' : 'false')
+}
+
 function handleBookmarkPointerDown(event: PointerEvent): void {
-  if (state.draggingFolderId || state.folderDragLongPressTimer) {
+  if (
+    state.speedDialDraggingBookmarkId ||
+    state.speedDialDragLongPressTimer ||
+    state.draggingFolderId ||
+    state.folderDragLongPressTimer
+  ) {
     return
   }
 
@@ -4589,7 +5139,7 @@ function createSearchWidget(): HTMLElement | null {
   savedSearches.className = 'newtab-saved-searches hidden'
   savedSearches.setAttribute('aria-label', '已保存搜索')
 
-  suggestionsPanel.append(searchChips, savedSearches, suggestionsHeading, suggestions, suggestionsHint)
+  suggestionsPanel.append(searchChips, suggestionsHeading, suggestions, suggestionsHint, savedSearches)
 
   let searchSuggestions: NewTabSearchSuggestion[] = []
   let activeSuggestionIndex = -1
@@ -4625,6 +5175,7 @@ function createSearchWidget(): HTMLElement | null {
   } = {}) => {
     const trimmedQuery = String(query || '').trim()
     const previousActiveIndex = activeSuggestionIndex
+    const advancedSearch = isNewTabAdvancedSearchQuery(trimmedQuery)
     renderNewTabSearchChips(searchChips, trimmedQuery)
     renderNewTabSavedSearches(savedSearches, trimmedQuery, input, () => {
       syncSearchInputActions(input, clearButton, separator, submitButton)
@@ -4642,7 +5193,7 @@ function createSearchWidget(): HTMLElement | null {
       }
 
       if (state.searchSettings.webSearchEnabled === false) {
-        suggestionsHeading.textContent = '本地书签'
+        suggestionsHeading.textContent = advancedSearch ? '语法搜索匹配' : '关键词书签匹配'
         suggestionsHeading.hidden = false
         suggestionsHint.textContent = '未找到本地书签。网页搜索已关闭，可在设置中重新启用。'
         suggestionsHint.hidden = false
@@ -4663,7 +5214,9 @@ function createSearchWidget(): HTMLElement | null {
     suggestions.hidden = false
     suggestionsHeading.textContent = searchSuggestions.some(isCommandSuggestion)
       ? '书签与命令'
-      : '书签匹配'
+      : advancedSearch
+        ? '语法搜索匹配'
+        : '关键词书签匹配'
     activeSuggestionIndex = preserveActive && previousActiveIndex >= 0
       ? Math.min(previousActiveIndex, searchSuggestions.length - 1)
       : -1
@@ -4956,6 +5509,21 @@ function renderNewTabSearchChips(container: HTMLElement, query: string): void {
   }))
 }
 
+function isNewTabAdvancedSearchQuery(query: string): boolean {
+  const value = String(query || '').trim()
+  if (!value) {
+    return false
+  }
+
+  if (parseSearchQuery(value).chips.length > 0) {
+    return true
+  }
+
+  return /\b(?:site|domain|url|folder|path|type|kind):\s*\S/i.test(value) ||
+    /(^|\s)-(?=\S)/.test(value) ||
+    /(最近\s*\d+\s*(?:天|日|周|星期|礼拜|个月|月|年)|今天|今日|昨天|昨日|前天|本周|这周|上周|本月|这个月|上月|上个月|今年)/.test(value)
+}
+
 async function toggleNewTabNaturalSearch({
   input,
   updateNaturalButton,
@@ -5011,7 +5579,7 @@ function renderNewTabSavedSearches(
     ? getSavedSearchesForScope(state.savedSearches, 'popup')
     : []
   const normalizedQuery = normalizeNewTabSearchText(query)
-  const canSaveCurrent = Boolean(normalizedQuery)
+  const canSaveCurrent = Boolean(normalizedQuery && isNewTabAdvancedSearchQuery(query))
   const hasCurrentSaved = canSaveCurrent && savedSearches.some((item) => normalizeNewTabSearchText(item.query) === normalizedQuery)
   const show = canSaveCurrent || savedSearches.length > 0 || state.savedSearchesError
 
@@ -6075,7 +6643,8 @@ function renderSpeedDialPanel(
 ): void {
   const meta = section.querySelector<HTMLElement>('.newtab-module-heading span')
   if (meta) {
-    meta.textContent = `${items.length} 个固定入口`
+    meta.textContent = state.speedDialReorderError || `${items.length} 个固定入口`
+    meta.dataset.tone = state.speedDialReorderError ? 'error' : ''
   }
 
   const content = document.createDocumentFragment()
@@ -6087,6 +6656,7 @@ function renderSpeedDialPanel(
 
   const list = document.createElement('div')
   list.className = 'newtab-speed-dial-grid'
+  list.setAttribute('aria-busy', state.reorderingSpeedDial ? 'true' : 'false')
   for (const item of items) {
     const bookmark = getBookmarkById(item.id)
     if (!bookmark?.url) {
@@ -6132,19 +6702,51 @@ function createSpeedDialLink(
   item: SpeedDialItem,
   bookmark: chrome.bookmarks.BookmarkTreeNode
 ): HTMLAnchorElement {
+  const customIcon = state.customIcons[String(item.id)]
   const link = document.createElement('a')
   link.className = 'newtab-speed-dial-card'
   link.href = item.url
   link.title = item.title
   link.draggable = false
   link.dataset.bookmarkId = item.id
+  link.dataset.speedDialBookmarkId = item.id
+  link.setAttribute('aria-label', `打开固定入口：${item.title}。长按拖拽调整 Speed Dial 顺序`)
   bindBookmarkNavigation(link, bookmark)
-  applyCachedFaviconAccent(link, item.id, item.url)
+  if (!customIcon) {
+    applyCachedFaviconAccent(link, item.id, item.url)
+  }
+  if (String(item.id) === state.speedDialDraggingBookmarkId && state.speedDialDragOriginalOrderIds.length) {
+    link.classList.add('dragging')
+  }
 
   const mark = document.createElement('span')
-  mark.className = 'newtab-speed-dial-mark'
+  mark.className = 'newtab-speed-dial-mark bookmark-icon-shell'
   mark.setAttribute('aria-hidden', 'true')
-  mark.textContent = item.fallbackLabel
+
+  const icon = document.createElement('img')
+  icon.className = 'bookmark-favicon'
+  if (customIcon) {
+    icon.classList.add('custom-icon')
+  }
+  icon.src = customIcon || getFaviconUrl(item.url, item.id)
+  icon.alt = ''
+  icon.draggable = false
+  icon.loading = 'eager'
+  icon.decoding = 'async'
+  icon.setAttribute('fetchpriority', 'high')
+  icon.addEventListener('error', () => {
+    mark.classList.add('favicon-missing')
+  })
+  if (!customIcon) {
+    icon.addEventListener('load', () => {
+      scheduleFaviconAccentExtraction(icon, link, item.id, item.url, true)
+    }, { once: true })
+  }
+
+  const fallback = document.createElement('span')
+  fallback.className = 'bookmark-fallback'
+  fallback.textContent = item.fallbackLabel
+  mark.append(icon, fallback)
 
   const copy = document.createElement('span')
   copy.className = 'newtab-speed-dial-copy'
@@ -6927,6 +7529,8 @@ function cleanupNewTabRuntime(): void {
   dashboardFrameReadyTimeout = 0
   window.clearTimeout(state.dragLongPressTimer)
   state.dragLongPressTimer = 0
+  window.clearTimeout(state.speedDialDragLongPressTimer)
+  state.speedDialDragLongPressTimer = 0
   window.clearTimeout(state.folderDragLongPressTimer)
   state.folderDragLongPressTimer = 0
   window.cancelAnimationFrame(resizeLayoutFrame)
@@ -6938,6 +7542,7 @@ function cleanupNewTabRuntime(): void {
   window.cancelAnimationFrame(deferredRenderFrame)
   deferredRenderFrame = 0
   removeBookmarkDragGhost()
+  removeSpeedDialDragGhost()
   removeFolderDragGhost()
   disconnectBookmarkLazyExpansionObserver()
   setActiveBackgroundObjectUrl('')
@@ -6970,8 +7575,10 @@ function bindBookmarkNavigation(
   link.addEventListener('click', (event) => {
     if (
       state.dragSuppressClick ||
+      state.speedDialDragSuppressClick ||
       state.folderDragSuppressClick ||
       state.draggingBookmarkId ||
+      state.speedDialDraggingBookmarkId ||
       state.draggingFolderId
     ) {
       return

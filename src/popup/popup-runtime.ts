@@ -187,6 +187,9 @@ function bindEvents() {
   dom.naturalSearchToggle.addEventListener('click', () => {
     void toggleNaturalLanguageSearch()
   })
+  dom.searchHelpToggle.addEventListener('click', toggleSearchHelpPopover)
+  dom.searchHelpToggle.addEventListener('keydown', handleSearchHelpKeydown)
+  dom.searchHelpPopover.addEventListener('keydown', handleSearchHelpPopoverKeydown)
 
   dom.clearSearch.addEventListener('click', () => {
     setSearchQuery('', { immediate: true })
@@ -511,6 +514,37 @@ function handleAutoAnalyzeStatusClick(event) {
   if (action === 'history') {
     void openBookmarkHistoryPage()
   }
+}
+
+function toggleSearchHelpPopover(): void {
+  const open = dom.searchHelpPopover.classList.contains('hidden')
+  setSearchHelpPopoverOpen(open)
+  if (open) {
+    dom.searchHelpPopover.focus()
+  }
+}
+
+function setSearchHelpPopoverOpen(open: boolean): void {
+  dom.searchHelpPopover.classList.toggle('hidden', !open)
+  dom.searchHelpToggle.setAttribute('aria-expanded', String(open))
+}
+
+function handleSearchHelpKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'ArrowDown') {
+    return
+  }
+  event.preventDefault()
+  setSearchHelpPopoverOpen(true)
+  dom.searchHelpPopover.focus()
+}
+
+function handleSearchHelpPopoverKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') {
+    return
+  }
+  event.preventDefault()
+  setSearchHelpPopoverOpen(false)
+  dom.searchHelpToggle.focus()
 }
 
 function renderAutoAnalyzeStatus() {
@@ -1531,9 +1565,9 @@ function renderSavedSearches() {
     ? getSavedSearchesForScope(state.savedSearches, 'popup')
     : []
   const normalizedQuery = normalizeQuery(state.searchQuery)
-  const canSaveCurrent = Boolean(normalizedQuery)
+  const canSaveCurrent = Boolean(normalizedQuery && queryHasAdvancedSearchSyntax(state.searchQuery))
   const hasCurrentSaved = canSaveCurrent && savedSearches.some((item) => normalizeQuery(item.query) === normalizedQuery)
-  const show = canSaveCurrent || savedSearches.length > 0 || state.savedSearchesError
+  const show = savedSearches.length > 0 || state.savedSearchesError || canSaveCurrent
 
   dom.savedSearches.classList.toggle('hidden', !show)
   if (!show) {
@@ -1563,6 +1597,17 @@ function renderSavedSearches() {
     ${status}
     ${items ? `<div class="saved-search-list">${items}</div>` : ''}
   `
+}
+
+function queryHasAdvancedSearchSyntax(query: string): boolean {
+  const value = String(query || '').trim()
+  if (!value) {
+    return false
+  }
+
+  return /\b(?:site|folder|type):\s*\S/i.test(value) ||
+    /(^|\s)-(?=\S)/.test(value) ||
+    /(最近\s*\d+\s*(?:天|周|月|年)|昨天|前天|上个月|本周|本月|今年)/.test(value)
 }
 
 function renderSavedSearchChip(search: SavedSearch) {
@@ -3393,11 +3438,12 @@ function closeActionMenu({ restoreFocus = false, focusBookmarkId = state.activeM
 }
 
 function handleDocumentPointerDown(event) {
-  if (!state.activeMenuBookmarkId) {
-    return
+  const target = event.target
+  if (target instanceof Element && !target.closest('#search-help-toggle, #search-help-popover')) {
+    setSearchHelpPopoverOpen(false)
   }
 
-  if (!event.target.closest('.menu-anchor')) {
+  if (state.activeMenuBookmarkId && !target.closest('.menu-anchor')) {
     closeActionMenu()
   }
 }
@@ -3460,6 +3506,12 @@ function handleDocumentKeydown(event) {
 }
 
 function handleEscapeAction() {
+  if (!dom.searchHelpPopover.classList.contains('hidden')) {
+    setSearchHelpPopoverOpen(false)
+    dom.searchHelpToggle.focus()
+    return true
+  }
+
   if (hasOpenModal()) {
     closeDialogs()
     return true

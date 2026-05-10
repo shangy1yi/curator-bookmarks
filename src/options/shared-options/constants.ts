@@ -1,4 +1,8 @@
 export const SECTION_META = {
+  overview: {
+    label: 'Overview',
+    title: '概览'
+  },
   general: {
     label: 'General',
     title: '通用设置'

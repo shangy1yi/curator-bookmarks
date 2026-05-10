@@ -61,6 +61,10 @@ export interface DashboardFaviconCacheStore {
   markFailed: (pageUrl: string, now?: number) => void
 }
 
+export interface DashboardFaviconWarmOptions {
+  canFetchRemote?: (pageUrl: string) => Promise<boolean> | boolean
+}
+
 export function getDashboardFaviconCacheKey(pageUrl: string): string {
   try {
     return new URL(pageUrl).href
@@ -228,23 +232,35 @@ export function buildDashboardFaviconWarmupItems({
   remoteCache = {},
   size = DASHBOARD_FAVICON_SIZE
 }: Pick<DashboardFaviconWarmupQueueOptions, 'bookmarks' | 'faviconEndpointUrl' | 'remoteCache' | 'size'>): DashboardFaviconWarmupItem[] {
-  const seenUrls = new Set<string>()
+  const now = Date.now()
+  const seenPageUrls = new Set<string>()
+  const seenOrigins = new Set<string>()
+  const seenFaviconUrls = new Set<string>()
   const items: DashboardFaviconWarmupItem[] = []
 
   for (const bookmark of bookmarks) {
     const pageUrl = String(bookmark.url || '').trim()
     const cacheKey = getDashboardFaviconCacheKey(pageUrl)
     const cachedEntry = cacheKey ? remoteCache[cacheKey] : null
-    const now = Date.now()
+    const originKey = getDashboardFaviconOriginKey(pageUrl)
+    const defaultFaviconUrl = getDashboardDefaultRemoteFaviconUrl(pageUrl)
     if (
       !pageUrl ||
       !isDashboardRemoteFaviconPageUrl(pageUrl) ||
-      seenUrls.has(cacheKey || pageUrl) ||
-      hasFreshDashboardFaviconCacheEntryForEntry(cachedEntry, now)
+      seenPageUrls.has(cacheKey || pageUrl) ||
+      (originKey && seenOrigins.has(originKey)) ||
+      (defaultFaviconUrl && seenFaviconUrls.has(defaultFaviconUrl)) ||
+      shouldSkipDashboardRemoteFaviconFetchForEntry(cachedEntry, now)
     ) {
       continue
     }
-    seenUrls.add(cacheKey || pageUrl)
+    seenPageUrls.add(cacheKey || pageUrl)
+    if (originKey) {
+      seenOrigins.add(originKey)
+    }
+    if (defaultFaviconUrl) {
+      seenFaviconUrls.add(defaultFaviconUrl)
+    }
     items.push({
       id: String(bookmark.id || pageUrl),
       pageUrl: cacheKey || pageUrl,
@@ -403,7 +419,8 @@ export function preloadDashboardFavicon(url: string): Promise<HTMLImageElement> 
 export async function warmDashboardFavicon(
   chromeFaviconUrl: string,
   item: DashboardFaviconWarmupItem,
-  cacheStore: DashboardFaviconCacheStore
+  cacheStore: DashboardFaviconCacheStore,
+  options: DashboardFaviconWarmOptions = {}
 ): Promise<void> {
   try {
     await preloadDashboardFavicon(chromeFaviconUrl)
@@ -413,6 +430,12 @@ export async function warmDashboardFavicon(
     hasFreshDashboardFaviconCacheEntry(cacheStore.getCache(), item.pageUrl) ||
     shouldSkipDashboardRemoteFaviconFetch(cacheStore.getCache(), item.pageUrl)
   ) {
+    return
+  }
+
+  const canFetchRemote = await Promise.resolve(options.canFetchRemote?.(item.pageUrl) ?? true)
+  if (!canFetchRemote) {
+    cacheStore.markFailed(item.pageUrl)
     return
   }
 
@@ -519,6 +542,14 @@ function waitForDashboardIdle(callback: () => void): void {
 function getDashboardDefaultRemoteFaviconUrl(pageUrl: string): string {
   try {
     return new URL('/favicon.ico', pageUrl).href
+  } catch {
+    return ''
+  }
+}
+
+function getDashboardFaviconOriginKey(pageUrl: string): string {
+  try {
+    return new URL(pageUrl).origin
   } catch {
     return ''
   }

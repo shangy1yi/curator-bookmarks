@@ -246,7 +246,7 @@ export const state: PopupState = {
   smartRunId: 0,
   smartPermissionRequest: null,
   autoAnalyzeStatus: null,
-  autoAnalyzeCollapsed: false,
+  autoAnalyzeCollapsed: true,
   lastDeletedBookmark: null,
   toasts: [],
   toastTimers: new Map()

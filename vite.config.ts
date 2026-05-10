@@ -17,6 +17,47 @@ export default defineConfig(({ mode }) => {
             if (id.includes('pinyin-pro')) {
               return 'vendor-pinyin'
             }
+            if (
+              id.includes('/src/options/sections/dashboard-runtime.ts') ||
+              id.includes('/src/options/sections/dashboard.ts') ||
+              id.includes('/src/options/sections/dashboard-virtual.ts') ||
+              id.includes('/src/options/sections/dashboard-favicons.ts')
+            ) {
+              return 'options-dashboard'
+            }
+            if (id.includes('/src/options/sections/dashboard-lazy.ts')) {
+              return 'options-dashboard-loader'
+            }
+            if (
+              id.includes('/src/options/sections/availability-runner.ts') ||
+              id.includes('/src/options/sections/classifier.ts')
+            ) {
+              return 'options-availability-engine'
+            }
+            if (
+              id.includes('/src/options/sections/content-extraction.ts') ||
+              id.includes('/src/options/sections/ai-settings.ts') ||
+              id.includes('/src/shared/ai-response.ts') ||
+              id.includes('/src/shared/ai-provider-url.ts') ||
+              id.includes('/src/shared/content-snapshots.ts') ||
+              id.includes('/src/shared/backup.ts') ||
+              id.includes('/src/shared/bookmark-tags.ts') ||
+              id.includes('/src/shared/recycle-bin.ts')
+            ) {
+              return 'options-data-ai-engine'
+            }
+            if (
+              id.includes('/src/options/sections/ignore.ts') ||
+              id.includes('/src/options/sections/recycle.ts') ||
+              id.includes('/src/options/sections/duplicates.ts') ||
+              id.includes('/src/options/sections/folder-cleanup.ts') ||
+              id.includes('/src/options/sections/redirects.ts') ||
+              id.includes('/src/options/sections/history.ts') ||
+              id.includes('/src/options/sections/bookmark-add-history.ts') ||
+              id.includes('/src/options/sections/tag-management.ts')
+            ) {
+              return 'options-task-sections'
+            }
             if (id.includes('/src/newtab/content-state.ts')) {
               return 'newtab-content-state'
             }

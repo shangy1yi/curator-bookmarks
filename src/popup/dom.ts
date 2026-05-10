@@ -26,6 +26,7 @@ export function cacheDom(): void {
   dom.naturalSearchToggle = byId('natural-search-toggle')
   dom.clearSearch = byId('clear-search')
   dom.searchHelpToggle = byId('search-help-toggle')
+  dom.searchHelpPopover = byId('search-help-popover')
   dom.searchChips = byId('search-chips')
   dom.savedSearches = byId('saved-searches')
   dom.viewCaption = byId('view-caption')

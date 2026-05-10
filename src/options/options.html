@@ -9,7 +9,7 @@
   <body>
     <div class="options-shell">
       <header class="options-header">
-        <a class="options-brand" href="#general" data-section-link="general" aria-label="跳转到通用设置">
+        <a class="options-brand" href="#overview" data-section-link="overview" aria-label="跳转到概览">
           <span class="options-brand-mark" aria-hidden="true">
             <img src="../assets/icon128.png" alt="">
           </span>
@@ -56,7 +56,6 @@
                 </div>
               </div>
               <a class="options-nav-link" href="#duplicates" data-section-link="duplicates">重复书签检测</a>
-              <a class="options-nav-link" href="#tags" data-section-link="tags">标签管理中心</a>
               <a class="options-nav-link" href="#folder-cleanup" data-section-link="folder-cleanup">文件夹清理</a>
               <a class="options-nav-link" href="#recycle" data-section-link="recycle">回收站</a>
             </nav>
@@ -65,6 +64,7 @@
             <p id="options-ai-nav-label" class="options-sidebar-label">AI功能</p>
             <nav class="options-nav" aria-labelledby="options-ai-nav-label">
               <a class="options-nav-link" href="#ai" data-section-link="ai">书签智能分析</a>
+              <a class="options-nav-link" href="#tags" data-section-link="tags">标签管理中心</a>
               <a class="options-nav-link" href="#bookmark-history" data-section-link="bookmark-history">自动分析添加历史</a>
             </nav>
           </div>
@@ -75,6 +75,69 @@
         </aside>
 
         <main class="options-main">
+          <section
+            id="overview"
+            class="options-panel"
+            data-section-panel="overview"
+            aria-labelledby="overview-title"
+            hidden
+          >
+            <p class="options-section-label">Overview</p>
+            <h1 id="overview-title">概览</h1>
+            <p class="options-description">先看当前书签状态，再选择发现、清理、恢复或智能增强任务。所有会修改书签树的操作都走预览、确认、自动备份和回收站路径。</p>
+
+            <div class="options-overview-hero">
+              <div>
+                <span class="options-chip muted">建议下一步</span>
+                <strong id="overview-next-step-title">正在读取书签目录</strong>
+                <p id="overview-next-step-copy">读取完成后这里会显示建议下一步和当前影响范围。</p>
+              </div>
+              <a class="options-button small" href="#availability" data-section-link="availability">开始可用性检测</a>
+            </div>
+
+            <div class="detect-summary-grid compact-grid options-overview-metrics">
+              <article class="summary-card compact metric-card metric-total">
+                <span class="summary-label">书签总数</span>
+                <strong id="overview-total-bookmarks">读取中</strong>
+              </article>
+              <article class="summary-card compact metric-card metric-info">
+                <span class="summary-label">可检测链接</span>
+                <strong id="overview-checkable-bookmarks">读取中</strong>
+              </article>
+              <article class="summary-card compact metric-card metric-warning">
+                <span class="summary-label">待处理问题</span>
+                <strong id="overview-issue-count">0</strong>
+              </article>
+              <article class="summary-card compact metric-card metric-success">
+                <span class="summary-label">回收站</span>
+                <strong id="overview-recycle-count">0</strong>
+              </article>
+            </div>
+
+            <div class="options-overview-grid">
+              <a class="options-overview-task" href="#availability" data-section-link="availability">
+                <span class="options-chip muted">发现问题</span>
+                <strong>先检测可用性</strong>
+                <p>申请范围权限后检测链接；异常项先进入复核列表，不自动修改。</p>
+              </a>
+              <a class="options-overview-task" href="#duplicates" data-section-link="duplicates">
+                <span class="options-chip muted">整理与清理</span>
+                <strong>预览重复书签</strong>
+                <p>按策略选择候选，删除前确认并移入回收站。</p>
+              </a>
+              <a class="options-overview-task" href="#backup" data-section-link="backup">
+                <span class="options-chip muted">恢复与备份</span>
+                <strong>导出本地备份</strong>
+                <p>重要清理前保留快照，恢复前先预览影响范围。</p>
+              </a>
+              <a class="options-overview-task" href="#ai" data-section-link="ai">
+                <span class="options-chip muted">智能增强</span>
+                <strong>配置后再运行 AI</strong>
+                <p>未配置 API Key 时不会启动必然失败的 AI 批处理。</p>
+              </a>
+            </div>
+          </section>
+
           <section
             id="general"
             class="options-panel"
@@ -435,28 +498,32 @@
             <div class="options-group dashboard-toolbar">
               <div class="dashboard-search-box">
                 <label class="options-search dashboard-search">
-                  <span class="options-search-label">搜索书签</span>
-                  <span class="dashboard-query-row">
-                    <span class="dashboard-search-input-field">
-                      <input id="dashboard-query" class="options-search-input" type="search" spellcheck="false" placeholder="">
-                    </span>
+	                  <span class="options-search-label">搜索书签</span>
+	                  <span class="dashboard-query-row">
+	                    <span class="dashboard-search-input-field">
+	                      <span class="dashboard-search-icon" aria-hidden="true"></span>
+	                      <input id="dashboard-query" class="dashboard-search-input" type="search" spellcheck="false" placeholder="">
+	                    </span>
                     <button id="dashboard-natural-search-toggle" class="dashboard-natural-search-toggle" type="button" data-dashboard-action="toggle-natural-search" aria-pressed="false" aria-label="开启 Dashboard 自然语言搜索">语义</button>
                     <button
-                      id="dashboard-search-help-toggle"
-                      class="dashboard-help-button"
-                      type="button"
-                      aria-label="查看高级搜索语法"
-                      aria-describedby="dashboard-search-help-description"
-                      data-tooltip="高级搜索语法&#10;site:github.com 或 site: github.com 限定站点。&#10;folder:&quot;前端 资料&quot; 限定文件夹路径。&#10;type:文档 限定 AI 识别的内容类型。&#10;最近 2 周、昨天、上个月限定添加时间。&#10;-youtube 或 -&quot;短视频&quot; 排除结果。"
-                    >
-                      ?
-                    </button>
-                    <button id="dashboard-select-visible-top" class="options-button secondary small" type="button" data-dashboard-action="select-visible" aria-label="选择当前可见的 Dashboard 书签">选择当前可见</button>
-                  </span>
-                </label>
-                <p id="dashboard-search-help-description" class="sr-only">
-                  高级搜索语法：site:github.com 或 site: github.com 限定站点。folder:"前端 资料" 限定文件夹路径。type:文档 限定 AI 识别的内容类型。最近 2 周、昨天、上个月限定添加时间。-youtube 或 -"短视频" 排除结果。
-                </p>
+	                      id="dashboard-search-help-toggle"
+	                      class="dashboard-help-button"
+	                      type="button"
+	                      aria-label="查看高级搜索语法"
+	                      aria-describedby="dashboard-search-help-popover"
+	                    >
+	                      ?
+	                    </button>
+	                  </span>
+	                </label>
+	                <div id="dashboard-search-help-popover" class="dashboard-help-popover" role="tooltip">
+	                  <strong>高级搜索语法</strong>
+	                  <span>site:github.com 限定站点</span>
+	                  <span>folder:"前端资料" 限定文件夹</span>
+	                  <span>type:文档 限定内容类型</span>
+	                  <span>最近 2 周、昨天、上个月限定时间</span>
+	                  <span>-youtube 或 -"短视频" 排除结果</span>
+	                </div>
                 <div id="dashboard-search-chips" class="dashboard-search-chips hidden" aria-label="当前搜索条件"></div>
                 <div id="dashboard-saved-searches" class="dashboard-saved-searches hidden" aria-label="已保存搜索"></div>
                 <nav id="dashboard-folder-breadcrumbs" class="dashboard-folder-breadcrumbs hidden" aria-label="当前 Dashboard 文件夹路径"></nav>
@@ -477,11 +544,14 @@
               </div>
             </div>
 
-            <section class="options-group dashboard-results-group" aria-labelledby="dashboard-cards-title">
-              <div class="dashboard-results-head">
-                <strong id="dashboard-cards-title">书签栏</strong>
-                <p class="detect-results-subtitle">拖动卡片空白区域可拖入目标文件夹；按钮、链接和复选框不会触发拖拽。</p>
-              </div>
+	            <section class="options-group dashboard-results-group" aria-labelledby="dashboard-cards-title">
+	              <div class="dashboard-results-head">
+	                <div class="dashboard-results-copy">
+	                  <strong id="dashboard-cards-title">书签栏</strong>
+	                  <p class="detect-results-subtitle">拖动卡片空白区域可拖入目标文件夹；按钮、链接和复选框不会触发拖拽。</p>
+	                </div>
+	                <button id="dashboard-select-visible-top" class="options-button secondary small" type="button" data-dashboard-action="select-visible" aria-label="选择当前可见的 Dashboard 书签">选择当前可见</button>
+	              </div>
               <div class="dashboard-content-layout">
                 <aside id="dashboard-folder-sidebar" class="dashboard-folder-sidebar" aria-labelledby="dashboard-folder-sidebar-title" aria-label="书签文件夹">
                   <div class="dashboard-folder-sidebar-head">
@@ -613,6 +683,7 @@
                 <button id="availability-action" class="options-button" type="button">
                   开始检测全部书签
                 </button>
+                <span class="risk-action-note">预览结果，不自动修改书签</span>
                 <button id="availability-pause-action" class="options-button secondary small hidden" type="button" disabled>
                   暂停检测
                 </button>
@@ -891,6 +962,7 @@
               <div class="detect-toolbar-actions">
                 <a id="ai-config-link" class="options-button secondary small ai-config-link" href="#general:ai-provider" data-section-link="general">配置 API Key</a>
                 <button id="ai-action" class="options-button" type="button">开始分析并生成建议</button>
+                <span class="risk-action-note">先预览建议，应用前确认</span>
                 <button id="ai-pause-action" class="options-button secondary small hidden" type="button" disabled>暂停生成</button>
                 <button id="ai-stop-action" class="options-button secondary small hidden" type="button" disabled>停止本次生成</button>
               </div>
@@ -1244,6 +1316,7 @@
               <div class="duplicate-toolbar">
                 <div id="duplicate-strategy-controls" class="duplicate-strategy-controls duplicate-primary-action-row" aria-label="重复书签选择策略">
                   <button class="options-button small duplicate-primary-action" type="button" data-duplicate-strategy="recommended" aria-label="按推荐选择重复书签当前结果">按推荐选择当前结果</button>
+                  <span class="risk-action-note">删除前确认，进入回收站</span>
                   <button class="options-button secondary small" type="button" data-duplicate-strategy="newest" aria-label="保留重复书签中的最新项">保留最新</button>
                   <button class="options-button secondary small" type="button" data-duplicate-strategy="oldest" aria-label="保留重复书签中的最早项">保留最早</button>
                   <button class="options-button secondary small" type="button" data-duplicate-strategy="shorter-path" aria-label="保留重复书签中路径最短的项">保留路径最短</button>

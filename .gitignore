@@ -4,6 +4,10 @@ dist/
 .perf-fixtures/
 .perf-results/
 .e2e-results/
+e2e/
+playwright.config.ts
+playwright-report/
+test-results/
 release/
 *.log
 .DS_Store

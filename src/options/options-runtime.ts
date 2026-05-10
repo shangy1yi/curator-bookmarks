@@ -293,12 +293,13 @@ const AVAILABILITY_FILTERS = new Set([
   'ignored'
 ])
 const AI_REJECTED_SUGGESTIONS_LIMIT = 500
-const COLLAPSIBLE_NAV_GROUP_SECTIONS: Record<string, Set<string>> = {
-  'availability-tools': new Set(['availability', 'history', 'redirects', 'ignore'])
-}
 let confirmModalResolve: ((confirmed: boolean) => void) | null = null
 let activeManagedModalKey = ''
 let modalReturnFocusElement = null
+const COLLAPSIBLE_NAV_ANIMATION_MS = 240
+const COLLAPSIBLE_NAV_GROUP_SECTIONS: Record<string, Set<string>> = {
+  'availability-tools': new Set(['availability', 'history', 'redirects', 'ignore'])
+}
 
 const MODAL_FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -736,18 +737,69 @@ function syncCollapsibleNavGroups(activeSectionKey) {
 
     const isActive = sectionKeys.has(String(activeSectionKey))
     if (isActive) {
-      setCollapsibleNavGroupExpanded(trigger, panel, true)
+      setCollapsibleNavGroupExpanded(trigger, panel, true, { animated: false })
     } else {
-      setCollapsibleNavGroupExpanded(trigger, panel, trigger.getAttribute('aria-expanded') !== 'false')
+      setCollapsibleNavGroupExpanded(
+        trigger,
+        panel,
+        trigger.getAttribute('aria-expanded') !== 'false',
+        { animated: false }
+      )
     }
-    trigger.classList.toggle('active', isActive)
+    trigger.classList.remove('active')
   })
 }
 
-function setCollapsibleNavGroupExpanded(trigger: HTMLButtonElement, panel: HTMLElement, expanded: boolean) {
+function setCollapsibleNavGroupExpanded(
+  trigger: HTMLButtonElement,
+  panel: HTMLElement,
+  expanded: boolean,
+  options: { animated?: boolean } = {}
+) {
+  const animated = options.animated !== false
+  const wasExpanded = trigger.getAttribute('aria-expanded') !== 'false' && !panel.hidden
   trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false')
   trigger.classList.toggle('collapsed', !expanded)
-  panel.hidden = !expanded
+
+  if (!animated || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    panel.hidden = !expanded
+    panel.style.maxHeight = ''
+    panel.style.opacity = ''
+    panel.removeAttribute('data-nav-animating')
+    return
+  }
+
+  if (expanded === wasExpanded && panel.getAttribute('data-nav-animating') !== 'true') {
+    return
+  }
+
+  panel.setAttribute('data-nav-animating', 'true')
+  panel.hidden = false
+  panel.style.overflow = 'hidden'
+
+  if (expanded) {
+    panel.style.maxHeight = '0px'
+    panel.style.opacity = '0'
+    panel.getBoundingClientRect()
+    panel.style.maxHeight = `${panel.scrollHeight}px`
+    panel.style.opacity = '1'
+  } else {
+    panel.style.maxHeight = `${panel.scrollHeight}px`
+    panel.style.opacity = '1'
+    panel.getBoundingClientRect()
+    panel.style.maxHeight = '0px'
+    panel.style.opacity = '0'
+  }
+
+  window.setTimeout(() => {
+    if (trigger.getAttribute('aria-expanded') === 'false') {
+      panel.hidden = true
+    }
+    panel.style.maxHeight = ''
+    panel.style.opacity = ''
+    panel.style.overflow = ''
+    panel.removeAttribute('data-nav-animating')
+  }, COLLAPSIBLE_NAV_ANIMATION_MS)
 }
 
 function handleCollapsibleNavGroupClick(event) {
@@ -1122,7 +1174,7 @@ function getCurrentSectionKey() {
     return 'dashboard'
   }
 
-  return window.location.hash.replace(/^#/, '').split(':')[0] || 'general'
+  return window.location.hash.replace(/^#/, '').split(':')[0] || 'overview'
 }
 
 function getCurrentSectionAnchor() {
@@ -1139,7 +1191,7 @@ function normalizeSectionKey(key: string): keyof typeof SECTION_META {
     return 'backup'
   }
 
-  return key in SECTION_META ? (key as keyof typeof SECTION_META) : 'general'
+  return key in SECTION_META ? (key as keyof typeof SECTION_META) : 'overview'
 }
 
 function handleKeydown(event) {
@@ -2742,6 +2794,11 @@ function renderActiveOptionsSection() {
     return
   }
 
+  if (activeSection === 'overview') {
+    renderOptionsOverviewSection()
+    return
+  }
+
   if (activeSection === 'dashboard') {
     renderDashboardSection()
     notifyNewTabDashboardReady()
@@ -2802,6 +2859,61 @@ function renderActiveOptionsSection() {
 
   if (activeSection === 'recycle') {
     renderRecycleSection(recycleCallbacks)
+  }
+}
+
+function renderOptionsOverviewSection(): void {
+  const totalBookmarks = availabilityState.allBookmarks.length || availabilityState.bookmarks.length
+  const checkableBookmarks = availabilityState.eligibleBookmarks || availabilityState.bookmarks.length
+  setTextContent('overview-total-bookmarks', totalBookmarks ? String(totalBookmarks) : '读取中')
+  setTextContent('overview-checkable-bookmarks', checkableBookmarks ? String(checkableBookmarks) : '读取中')
+  setTextContent('overview-issue-count', String(
+    availabilityState.failedResults.length +
+    availabilityState.reviewResults.length +
+    getRedirectSectionState(redirectsCallbacks).results.length +
+    managerState.recycleBin.length
+  ))
+  setTextContent('overview-recycle-count', String(managerState.recycleBin.length))
+  setTextContent('overview-next-step-title', getOverviewNextStepTitle())
+  setTextContent('overview-next-step-copy', getOverviewNextStepCopy())
+}
+
+function getOverviewNextStepTitle(): string {
+  if (availabilityState.catalogLoading || availabilityState.storageLoading) {
+    return '正在读取书签目录'
+  }
+  if (!availabilityState.lastCompletedAt) {
+    return '建议先运行一次可用性检测'
+  }
+  if (availabilityState.failedResults.length || availabilityState.reviewResults.length) {
+    return '先复核异常书签，再决定移动或删除'
+  }
+  if (!aiNamingManagerState.settings.apiKey) {
+    return 'AI 可稍后配置，普通整理功能可直接使用'
+  }
+  return '可以继续做重复检测或文件夹清理'
+}
+
+function getOverviewNextStepCopy(): string {
+  if (availabilityState.catalogLoading || availabilityState.storageLoading) {
+    return '读取完成后这里会显示建议下一步和当前影响范围。'
+  }
+  if (!availabilityState.lastCompletedAt) {
+    return '检测会先申请当前范围的站点权限；不会自动删除或修改书签。'
+  }
+  if (availabilityState.failedResults.length || availabilityState.reviewResults.length) {
+    return '删除类操作都会先确认、自动备份，并进入回收站；建议先重测或抽样打开。'
+  }
+  if (!aiNamingManagerState.settings.apiKey) {
+    return '配置 API Key 后才会启用 AI 分析主按钮；未配置时不会出现必然失败的执行路径。'
+  }
+  return '重复、文件夹清理和重定向更新均使用预览优先、确认执行、可恢复路径。'
+}
+
+function setTextContent(id: string, value: string): void {
+  const element = document.getElementById(id)
+  if (element) {
+    element.textContent = value
   }
 }
 
@@ -6376,8 +6488,9 @@ function getAiNamingBadgeText() {
     return '授权中'
   }
 
-  if (!aiNamingManagerState.settings.apiKey || !aiNamingManagerState.settings.model) {
-    return '待配置'
+  const readiness = getAiNamingReadinessMeta()
+  if (!readiness.ready) {
+    return readiness.badge
   }
 
   if (aiNamingState.running) {
@@ -6396,8 +6509,9 @@ function getAiNamingStatusCopy() {
     return '正在测试当前模型，请稍候。'
   }
 
-  if (!aiNamingManagerState.settings.apiKey || !aiNamingManagerState.settings.model) {
-    return '请先在“通用设置 > 自定义 AI 渠道”填写 API Key 并选择模型。'
+  const readiness = getAiNamingReadinessMeta()
+  if (!readiness.ready) {
+    return readiness.copy
   }
 
   if (aiNamingState.settingsDirty) {
@@ -6421,8 +6535,57 @@ function getAiNamingStatusCopy() {
   return '配置 AI 渠道后，可批量生成更适合收藏、检索和重命名的书签标签与标题。应用前你可以逐条预览。'
 }
 
+function getAiNamingReadinessMeta() {
+  const settings = aiNamingManagerState.settings
+  const missing: string[] = []
+  if (!String(settings.apiKey || '').trim()) {
+    missing.push('API Key')
+  }
+  if (!String(settings.model || '').trim()) {
+    missing.push('模型')
+  }
+
+  if (missing.length) {
+    return {
+      ready: false,
+      badge: '待配置',
+      copy: `请先在“通用设置 > 自定义 AI 渠道”配置 ${missing.join(' 和 ')}；未配置完成前不会启动 AI 批处理。`
+    }
+  }
+
+  if (!aiNamingState.permissionGranted) {
+    const permissionTargets = ['目标网页', 'AI 服务']
+    if (settings.allowRemoteParsing && !aiNamingState.remoteParserPermissionGranted) {
+      permissionTargets.push('Jina Reader')
+    }
+    return {
+      ready: false,
+      badge: '待授权',
+      copy: `开始分析前需要授权访问${permissionTargets.join('、')}。点击开始时会弹出权限确认；未授权不会发起抓取或 AI 请求。`
+    }
+  }
+
+  if (settings.allowRemoteParsing && !aiNamingState.remoteParserPermissionGranted) {
+    return {
+      ready: false,
+      badge: '远程解析待授权',
+      copy: '已开启 Jina Reader 远程解析，但尚未授权 r.jina.ai；开始分析前会先请求该权限，拒绝后不会运行远程解析批处理。'
+    }
+  }
+
+  return {
+    ready: true,
+    badge: '已就绪',
+    copy: ''
+  }
+}
+
 function getAiNamingProgressCopy() {
   const scopeMeta = getCurrentAiNamingScopeMeta()
+  const readiness = getAiNamingReadinessMeta()
+  if (!readiness.ready) {
+    return readiness.copy
+  }
   const remoteCopy = aiNamingManagerState.settings.allowRemoteParsing
     ? '已开启 Jina Reader 远程解析，本轮会结合本地抽取与远程解析内容。'
     : '仅使用本地网页抓取与内容抽取。'

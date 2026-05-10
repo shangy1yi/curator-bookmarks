@@ -71,8 +71,16 @@
           ></div>
         </header>
 
-        <section class="settings-section" aria-labelledby="settings-general-title">
-          <h2 id="settings-general-title">通用</h2>
+        <nav class="settings-group-tabs" aria-label="新标签页设置分组">
+          <button class="settings-group-tab" type="button" data-settings-group-tab="source" aria-pressed="true">来源</button>
+          <button class="settings-group-tab" type="button" data-settings-group-tab="appearance" aria-pressed="false">外观</button>
+          <button class="settings-group-tab" type="button" data-settings-group-tab="search" aria-pressed="false">搜索</button>
+          <button class="settings-group-tab" type="button" data-settings-group-tab="modules" aria-pressed="false">模块</button>
+          <button class="settings-group-tab" type="button" data-settings-group-tab="advanced" aria-pressed="false">高级</button>
+        </nav>
+
+        <section class="settings-section" data-settings-group="advanced" aria-labelledby="settings-general-title">
+          <h2 id="settings-general-title">高级</h2>
           <div class="settings-card">
             <label class="setting-row">
               <span class="setting-label-stack">
@@ -84,55 +92,18 @@
             </label>
             <label class="setting-row">
               <span class="setting-label-stack">
-                <span>显示今日概览</span>
-                <small>展示书签数量、来源和今天的新增/打开情况。</small>
-              </span>
-              <input id="general-show-overview" class="setting-switch-input" type="checkbox" checked>
-              <span class="setting-switch" aria-hidden="true"></span>
-            </label>
-            <label class="setting-row">
-              <span class="setting-label-stack">
-                <span>显示 Curator 常用和新近添加</span>
-                <small>仅基于当前来源内的固定、本页打开记录和添加时间，不读取浏览历史。</small>
-              </span>
-              <input id="general-show-quick-access" class="setting-switch-input" type="checkbox" checked>
-              <span class="setting-switch" aria-hidden="true"></span>
-            </label>
-            <label class="setting-row">
-              <span class="setting-label-stack">
                 <span>新标签页打开</span>
                 <small>点击书签图标时在新标签页打开，当前新标签页保持不变。</small>
               </span>
               <input id="general-open-bookmarks-new-tab" class="setting-switch-input" type="checkbox">
               <span class="setting-switch" aria-hidden="true"></span>
             </label>
-            <div
-              id="newtab-health-setting"
-              class="newtab-module-settings-list"
-              aria-label="书签健康模块"
-            ></div>
           </div>
         </section>
 
-        <section class="settings-section" aria-labelledby="settings-folder-title">
+        <section class="settings-section" data-settings-group="source" aria-labelledby="settings-folder-title">
           <h2 id="settings-folder-title">书签来源</h2>
           <div class="settings-card">
-            <label class="setting-row">
-              <span class="setting-label-stack">
-                <span>隐藏文件夹名</span>
-                <small>只保留图标网格，适合单一来源或极简布局。</small>
-              </span>
-              <input id="folder-hide-names" class="setting-switch-input" type="checkbox">
-              <span class="setting-switch" aria-hidden="true"></span>
-            </label>
-            <label class="setting-row">
-              <span class="setting-label-stack">
-                <span>显示来源导航</span>
-                <small>在多个来源之间快速跳转，不影响文件夹和书签拖拽排序。</small>
-              </span>
-              <input id="folder-show-source-navigation" class="setting-switch-input" type="checkbox" checked>
-              <span class="setting-switch" aria-hidden="true"></span>
-            </label>
             <div class="folder-source-panel">
               <div class="folder-source-summary">
                 <span>已选文件夹</span>
@@ -172,21 +143,58 @@
                 </div>
               </div>
             </div>
+            <label class="setting-row">
+              <span class="setting-label-stack">
+                <span>隐藏文件夹名</span>
+                <small>只保留图标网格，适合单一来源或极简布局。</small>
+              </span>
+              <input id="folder-hide-names" class="setting-switch-input" type="checkbox">
+              <span class="setting-switch" aria-hidden="true"></span>
+            </label>
+            <label class="setting-row">
+              <span class="setting-label-stack">
+                <span>显示来源导航</span>
+                <small>在多个来源之间快速跳转，不影响文件夹和书签拖拽排序。</small>
+              </span>
+              <input id="folder-show-source-navigation" class="setting-switch-input" type="checkbox" checked>
+              <span class="setting-switch" aria-hidden="true"></span>
+            </label>
           </div>
         </section>
 
-        <section class="settings-section" aria-labelledby="settings-speed-dial-title">
-          <h2 id="settings-speed-dial-title">Speed Dial</h2>
+        <section class="settings-section" data-settings-group="modules" aria-labelledby="settings-speed-dial-title">
+          <h2 id="settings-speed-dial-title">模块</h2>
           <div class="settings-card">
+            <label class="setting-row">
+              <span class="setting-label-stack">
+                <span>显示今日概览</span>
+                <small>展示书签数量、来源和今天的新增/打开情况。</small>
+              </span>
+              <input id="general-show-overview" class="setting-switch-input" type="checkbox" checked>
+              <span class="setting-switch" aria-hidden="true"></span>
+            </label>
+            <label class="setting-row">
+              <span class="setting-label-stack">
+                <span>显示 Curator 常用和新近添加</span>
+                <small>仅基于当前来源内的固定、本页打开记录和添加时间，不读取浏览历史。</small>
+              </span>
+              <input id="general-show-quick-access" class="setting-switch-input" type="checkbox" checked>
+              <span class="setting-switch" aria-hidden="true"></span>
+            </label>
             <div
               id="newtab-speed-dial-setting"
               class="newtab-module-settings-list"
               aria-label="Speed Dial 模块"
             ></div>
+            <div
+              id="newtab-health-setting"
+              class="newtab-module-settings-list"
+              aria-label="书签健康模块"
+            ></div>
           </div>
         </section>
 
-        <section class="settings-section" aria-labelledby="settings-background-title">
+        <section class="settings-section" data-settings-group="appearance" aria-labelledby="settings-background-title">
           <h2 id="settings-background-title">背景</h2>
           <div class="settings-card">
             <div class="setting-row">
@@ -282,7 +290,7 @@
           </div>
         </section>
 
-        <section class="settings-section" aria-labelledby="settings-icon-title">
+        <section class="settings-section" data-settings-group="appearance" aria-labelledby="settings-icon-title">
           <h2 id="settings-icon-title">书签卡片</h2>
           <div class="settings-card icon-settings-card">
             <div class="icon-live-preview-panel">
@@ -374,7 +382,7 @@
           </div>
         </section>
 
-        <section class="settings-section" aria-labelledby="settings-time-title">
+        <section class="settings-section" data-settings-group="appearance" aria-labelledby="settings-time-title">
           <h2 id="settings-time-title">时间和日期</h2>
           <div class="settings-card">
             <label class="setting-row">
@@ -465,7 +473,7 @@
           </div>
         </section>
 
-        <section class="settings-section" aria-labelledby="settings-search-title">
+        <section class="settings-section" data-settings-group="search" aria-labelledby="settings-search-title">
           <h2 id="settings-search-title">搜索栏</h2>
           <div class="settings-card">
             <p class="setting-trust-note">仅影响 Curator 新标签页内搜索，不会修改 Chrome 默认搜索引擎或启动页；搜索栏可随时关闭。</p>

@@ -380,11 +380,11 @@ button:focus-visible {
   position: absolute;
   top: 50%;
   left: 7px;
-  width: 16px;
-  height: 16px;
-  min-height: 16px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
   padding: 0;
-  border-radius: 50%;
+  border-radius: 6px;
   transform: translateY(-50%);
 }
 
@@ -445,6 +445,11 @@ button:focus-visible {
   border: 1px solid #343438;
   border-radius: 10px;
   background: #151516;
+}
+
+.auto-analyze-status:not(.collapsed) {
+  max-height: 96px;
+  overflow: hidden;
 }
 
 .auto-analyze-indicator {
@@ -735,36 +740,35 @@ button:focus-visible {
   color: var(--text);
 }
 
-.search-help-toggle::after {
-  content: attr(data-tooltip);
+.search-help-popover {
   position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
+  top: 28px;
+  left: 4px;
   z-index: 20;
-  width: min(300px, calc(100vw - 48px));
+  display: grid;
+  width: min(300px, calc(100vw - 24px));
+  gap: 4px;
   padding: 10px 12px;
   border: 1px solid var(--surface-3);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface-0);
   color: var(--text);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.6;
   text-align: left;
-  white-space: pre-line;
+  white-space: normal;
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(4px);
-  transition:
-    opacity var(--ease-standard),
-    transform var(--ease-standard);
 }
 
-.search-help-toggle:hover::after,
-.search-help-toggle:focus-visible::after {
-  opacity: 1;
-  transform: translateY(0);
+.search-help-popover strong {
+  font-size: 12px;
+  font-weight: 740;
+}
+
+.search-help-popover:focus-visible {
+  outline: 2px solid rgba(245, 245, 247, 0.38);
+  outline-offset: 2px;
 }
 
 .search-chips {
@@ -2879,9 +2883,9 @@ body::after {
 
 .hero > .search-help-toggle {
   left: 6px;
-  width: 14px;
-  height: 14px;
-  min-height: 14px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
   font-size: 10px;
 }
 

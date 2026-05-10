@@ -14,10 +14,19 @@
           class="search-help-toggle"
           type="button"
           aria-label="查看高级搜索语法"
-          data-tooltip="高级搜索语法&#10;site:github.com 或 site: github.com 限定站点。&#10;folder:&quot;前端 资料&quot; 限定文件夹路径。&#10;type:文档 限定 AI 识别的内容类型。&#10;最近 2 周、昨天、上个月限定添加时间。&#10;-youtube 或 -&quot;短视频&quot; 排除结果。"
+          aria-expanded="false"
+          aria-controls="search-help-popover"
         >
           ?
         </button>
+        <div id="search-help-popover" class="search-help-popover hidden" role="dialog" aria-label="高级搜索语法" tabindex="-1">
+          <strong>高级搜索语法</strong>
+          <span>site:github.com 限定站点</span>
+          <span>folder:"前端资料" 限定文件夹</span>
+          <span>type:文档 限定内容类型</span>
+          <span>最近 2 周、昨天、上个月限定时间</span>
+          <span>-youtube 或 -"短视频" 排除结果</span>
+        </div>
         <div class="hero-brand">
           <div class="hero-mark" aria-hidden="true">
             <img class="hero-logo" src="../assets/icon128.png" alt="">

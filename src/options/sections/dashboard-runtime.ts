@@ -173,6 +173,7 @@ interface DashboardVirtualState {
   lastScrollAt: number
   isFastScrolling: boolean
   scrollIdleTimer: number
+  scrollSettleTimer: number
 }
 
 interface DashboardModelCacheKey {
@@ -244,6 +245,12 @@ interface DashboardSearchWorkerState {
   error: string
 }
 
+interface DashboardFaviconWarmupDebugSummary {
+  skipped: number
+  firstPageUrl: string
+  firstError: string
+}
+
 interface DashboardCallbacks {
   renderAvailabilitySection: () => void
   hydrateAvailabilityCatalog: (options?: { preserveResults?: boolean }) => Promise<void>
@@ -262,8 +269,8 @@ interface DashboardCallbacks {
 }
 
 export const DASHBOARD_DRAG_MOVE_THRESHOLD = 4
-const DASHBOARD_VIRTUAL_CARD_NODE_POOL_LIMIT = 480
-const DASHBOARD_VIRTUAL_THRESHOLD = 120
+const DASHBOARD_VIRTUAL_CARD_NODE_POOL_LIMIT = 300
+const DASHBOARD_VIRTUAL_THRESHOLD = 90
 const DASHBOARD_SELECTION_MOTION_MS = 260
 const DASHBOARD_NEWTAB_EMBED_PARAM = 'newtab-dashboard'
 const DASHBOARD_NATURAL_SEARCH_CACHE_LIMIT = 24
@@ -275,10 +282,12 @@ const DASHBOARD_SEARCH_MAX_SYNC_LIMIT = 1000
 const DASHBOARD_SEARCH_SCROLL_PREFETCH_PX = 1200
 const DASHBOARD_SEARCH_SCROLL_PREFETCH_MIN_INTERVAL_MS = 450
 const DASHBOARD_SEARCH_SCROLL_PREFETCH_IDLE_TIMEOUT_MS = 650
-const DASHBOARD_SCROLL_IDLE_MS = 140
-const DASHBOARD_FAVICON_LOAD_SYNC_BATCH_SIZE = 96
+const DASHBOARD_SCROLL_IDLE_MS = 110
+const DASHBOARD_SCROLL_SETTLE_MS = 160
+const DASHBOARD_FAVICON_LOAD_SYNC_BATCH_SIZE = 64
 const DASHBOARD_FAVICON_DIRTY_SYNC_DELAY_MS = 160
 const DASHBOARD_FAVICON_DIRTY_SYNC_SCROLL_DELAY_MS = 220
+const DASHBOARD_FAVICON_WARMUP_DEBUG_DELAY_MS = 1400
 
 let dashboardStatusTimer = 0
 let dashboardResultsStableFrame = 0
@@ -304,6 +313,9 @@ let dashboardFaviconWarmupKey = ''
 let dashboardFaviconWarmupStartIndex = -1
 let dashboardFaviconWarmupEndIndex = -1
 let dashboardFaviconWarmupEndpointUrl = ''
+let dashboardFaviconWarmupPendingItems: DashboardItem[] | null = null
+let dashboardFaviconWarmupPendingStartIndex = -1
+let dashboardFaviconWarmupPendingEndIndex = -1
 let dashboardFaviconLoadSyncFrame = 0
 let dashboardFaviconLoadSyncTimer = 0
 let dashboardFaviconDirtySyncTimer = 0
@@ -311,6 +323,8 @@ const dashboardFaviconDirtyPageUrls = new Set<string>()
 let dashboardFaviconCache: DashboardFaviconCache = {}
 let dashboardFaviconCacheHydrated = false
 let dashboardFaviconCacheSaveTimer = 0
+let dashboardFaviconDebugSummaryTimer = 0
+let dashboardFaviconWarmupDebugSummary: DashboardFaviconWarmupDebugSummary | null = null
 let dashboardDropHoverCard: HTMLElement | null = null
 let dashboardSearchPrefetchIdleScheduled = false
 let dashboardSearchPrefetchRetryTimer = 0
@@ -412,7 +426,8 @@ const virtualState: DashboardVirtualState = {
   lastScrollTop: 0,
   lastScrollAt: 0,
   isFastScrolling: false,
-  scrollIdleTimer: 0
+  scrollIdleTimer: 0,
+  scrollSettleTimer: 0
 }
 
 function loadDashboardNaturalSearchModule(): Promise<typeof import('../../popup/natural-search.js')> {
@@ -622,13 +637,6 @@ export interface DashboardVirtualMetricsSnapshot {
   contentWidth: number
   containerHeight: number
   columnCount: number
-}
-
-function getDashboardGridCssVars(): string {
-  return [
-    `--dashboard-card-height: ${DASHBOARD_CARD_HEIGHT}px`,
-    `--dashboard-card-min-width: ${DASHBOARD_CARD_MIN_WIDTH}px`
-  ].join('; ')
 }
 
 function syncDashboardGridSurface(): void {
@@ -949,6 +957,7 @@ export function prepareDashboardSectionEntry(): void {
   resetDashboardPanelReveal()
   dashboardFaviconWarmupItems = null
   dashboardFaviconWarmupKey = ''
+  clearPendingDashboardFaviconWarmup()
   scheduleDashboardFaviconLoadSync()
   void hydrateDashboardSavedSearches().then(() => {
     if (!dom.dashboardPanel?.hidden) {
@@ -3706,7 +3715,11 @@ function renderDashboardCards(items: DashboardItem[], renderVersion = beginDashb
     }
     virtualState.renderedItems = items
 
-    syncDashboardFaviconWarmup(items)
+    if (isDashboardLargeVirtualSet(items)) {
+      stopDashboardFaviconWarmup()
+    } else {
+      syncDashboardFaviconWarmup(items)
+    }
     reconcileDashboardTransientUiWithRenderedItems(renderedIds)
     updateDashboardFloatingEditorPosition(renderedIds)
     endStableDashboardResultsUpdate()
@@ -3749,11 +3762,15 @@ function renderDashboardCards(items: DashboardItem[], renderVersion = beginDashb
   virtualState.scrollTop = virtualWindow.scrollTop
   virtualState.columnCount = virtualWindow.columnCount
   virtualState.rowStride = virtualWindow.rowStride
-  syncDashboardFaviconWarmup(
-    items,
-    getDashboardFaviconWarmupStartIndex(viewportWindow),
-    getDashboardFaviconWarmupEndIndex(viewportWindow, items.length)
-  )
+  if (isDashboardLargeVirtualSet(items)) {
+    stopDashboardFaviconWarmup()
+  } else {
+    scheduleDashboardFaviconWarmup(
+      items,
+      getDashboardFaviconWarmupStartIndex(viewportWindow),
+      getDashboardFaviconWarmupEndIndex(viewportWindow, items.length)
+    )
+  }
 
   if (canReuseDashboardVirtualShell(items, virtualWindow, viewportWindow)) {
     syncDashboardVirtualRenderedShellGeometry(virtualWindow)
@@ -3774,16 +3791,18 @@ function canReuseDashboardVirtualShell(
   virtualWindow: DashboardVirtualWindow,
   viewportWindow: DashboardVirtualWindow,
   {
-    validateRenderKey = true
+    validateRenderKey = true,
+    allowAnchoredGeometry = false
   }: {
     validateRenderKey?: boolean
+    allowAnchoredGeometry?: boolean
   } = {}
 ): boolean {
   if (
     virtualState.renderedStartIndex < 0 ||
     virtualState.renderedEndIndex <= virtualState.renderedStartIndex ||
     virtualState.renderedColumnCount !== virtualWindow.columnCount ||
-    virtualState.renderedTotalHeight !== virtualWindow.totalHeight
+    (!allowAnchoredGeometry && virtualState.renderedTotalHeight !== virtualWindow.totalHeight)
   ) {
     return false
   }
@@ -3807,6 +3826,17 @@ function canReuseDashboardVirtualShell(
 }
 
 function renderDashboardVirtualScrollFrame(): void {
+  renderDashboardVirtualScrollWindow()
+}
+
+function renderDashboardVirtualScrollWindow(
+  scrollTopOverride?: number,
+  {
+    syncContainerScroll = true
+  }: {
+    syncContainerScroll?: boolean
+  } = {}
+): void {
   const container = dom.dashboardResults
   const items = virtualState.items
   if (
@@ -3819,16 +3849,7 @@ function renderDashboardVirtualScrollFrame(): void {
     return
   }
 
-  const scrollTop = container.scrollTop
-  const virtualWindow = computeDashboardVirtualWindow({
-    itemCount: items.length,
-    contentWidth: virtualState.contentWidth,
-    containerHeight: virtualState.containerHeight,
-    scrollTop,
-    cardHeight: virtualState.cardHeight,
-    minCardWidth: virtualState.minCardWidth,
-    fastScrolling: virtualState.isFastScrolling
-  })
+  const scrollTop = scrollTopOverride == null ? container.scrollTop : scrollTopOverride
   const viewportWindow = computeDashboardVirtualWindow({
     itemCount: items.length,
     contentWidth: virtualState.contentWidth,
@@ -3839,32 +3860,82 @@ function renderDashboardVirtualScrollFrame(): void {
     overscanRows: 0
   })
 
-  if (container.scrollTop !== virtualWindow.scrollTop) {
+  const shouldRefreshScrollCards = getDashboardRenderedCardMode() === 'scroll' &&
+    getDashboardVirtualCardRenderMode() === 'full'
+  if (
+    !shouldRefreshScrollCards &&
+    canReuseDashboardVirtualShell(items, viewportWindow, viewportWindow, {
+      validateRenderKey: false,
+      allowAnchoredGeometry: true
+    })
+  ) {
+    virtualState.scrollTop = viewportWindow.scrollTop
+    virtualState.columnCount = viewportWindow.columnCount
+    virtualState.rowStride = viewportWindow.rowStride
+    scheduleDashboardFaviconWarmupForViewport(items, viewportWindow)
+    return
+  }
+
+  const virtualWindow = computeDashboardVirtualWindow({
+    itemCount: items.length,
+    contentWidth: virtualState.contentWidth,
+    containerHeight: virtualState.containerHeight,
+    scrollTop,
+    cardHeight: virtualState.cardHeight,
+    minCardWidth: virtualState.minCardWidth,
+    fastScrolling: virtualState.isFastScrolling
+  })
+
+  if (syncContainerScroll && container.scrollTop !== virtualWindow.scrollTop) {
     container.scrollTop = virtualWindow.scrollTop
   }
   virtualState.scrollTop = virtualWindow.scrollTop
   virtualState.columnCount = virtualWindow.columnCount
   virtualState.rowStride = virtualWindow.rowStride
 
-  syncDashboardFaviconWarmup(
-    items,
-    getDashboardFaviconWarmupStartIndex(viewportWindow),
-    getDashboardFaviconWarmupEndIndex(viewportWindow, items.length)
-  )
+  scheduleDashboardFaviconWarmupForViewport(items, viewportWindow)
 
-  if (canReuseDashboardVirtualShell(items, virtualWindow, viewportWindow, { validateRenderKey: false })) {
+  if (
+    !shouldRefreshScrollCards &&
+    canReuseDashboardVirtualShell(items, virtualWindow, viewportWindow, { validateRenderKey: false })
+  ) {
     syncDashboardVirtualRenderedShellGeometry(virtualWindow)
     reconcileDashboardVirtualTransientUiAfterScroll(items)
     return
   }
 
-  const renderedIds = commitDashboardVirtualWindow(items, virtualWindow)
+  const renderedIds = commitDashboardVirtualWindow(items, virtualWindow, { preferNodePatch: true })
   updateDashboardFloatingEditorPosition(renderedIds)
+}
+
+function isDashboardLargeVirtualSet(items = virtualState.items): boolean {
+  return items.length >= 500
+}
+
+function scheduleDashboardFaviconWarmupForViewport(
+  items: DashboardItem[],
+  viewportWindow: DashboardVirtualWindow
+): void {
+  if (isDashboardLargeVirtualSet(items)) {
+    stopDashboardFaviconWarmup()
+    return
+  }
+
+  scheduleDashboardFaviconWarmup(
+    items,
+    getDashboardFaviconWarmupStartIndex(viewportWindow),
+    getDashboardFaviconWarmupEndIndex(viewportWindow, items.length)
+  )
 }
 
 function commitDashboardVirtualWindow(
   items: DashboardItem[],
-  virtualWindow: DashboardVirtualWindow
+  virtualWindow: DashboardVirtualWindow,
+  {
+    preferNodePatch = false
+  }: {
+    preferNodePatch?: boolean
+  } = {}
 ): Set<string> {
   const renderedItems = items.slice(virtualWindow.startIndex, virtualWindow.endIndex)
   const renderedIds = new Set(renderedItems.map((item) => String(item.id)))
@@ -3883,14 +3954,17 @@ function commitDashboardVirtualWindow(
   if (!canReuseShell) {
     renderDashboardVirtualWindow({
       renderedItems,
+      renderedIds,
+      startIndex: virtualWindow.startIndex,
+      endIndex: virtualWindow.endIndex,
       totalHeight: virtualWindow.totalHeight,
       offsetY: virtualWindow.offsetY,
-      columnCount: virtualWindow.columnCount
+      columnCount: virtualWindow.columnCount,
+      preferNodePatch
     })
   } else {
     updateDashboardVirtualShellGeometry(virtualWindow)
   }
-
   virtualState.renderedItems = items
   virtualState.renderedStartIndex = virtualWindow.startIndex
   virtualState.renderedEndIndex = virtualWindow.endIndex
@@ -3930,6 +4004,7 @@ function updateDashboardVirtualShellGeometry(
     spacer.style.height = `${Math.ceil(virtualWindow.totalHeight)}px`
   }
   if (windowElement) {
+    windowElement.style.removeProperty('top')
     windowElement.style.transform = `translate3d(0, ${Math.round(virtualWindow.offsetY)}px, 0)`
     windowElement.style.gridTemplateColumns = `repeat(${virtualWindow.columnCount}, minmax(0, 1fr))`
   }
@@ -3951,6 +4026,15 @@ function reconcileDashboardVirtualTransientUiAfterScroll(items: DashboardItem[])
 }
 
 function getDashboardStaticListRenderKey(items: DashboardItem[], stateKey: string): string {
+  if (stateKey.startsWith('scroll\u0001')) {
+    return [
+      stateKey,
+      items.length,
+      items[0]?.id || '',
+      items[items.length - 1]?.id || ''
+    ].join('\u0001')
+  }
+
   return [
     stateKey,
     items.length,
@@ -3960,6 +4044,7 @@ function getDashboardStaticListRenderKey(items: DashboardItem[], stateKey: strin
 
 function getDashboardCardRenderKey(item: DashboardItem): string {
   return [
+    getDashboardVirtualCardRenderMode(),
     item.id,
     item.title,
     item.url,
@@ -3969,6 +4054,18 @@ function getDashboardCardRenderKey(item: DashboardItem): string {
     item.aiTags.length,
     ...item.tags
   ].map((value) => String(value || '')).join('\u0002')
+}
+
+function getDashboardVirtualCardRenderMode(): 'full' | 'scroll' {
+  return 'full'
+}
+
+function getDashboardRenderedCardMode(): 'full' | 'scroll' {
+  return virtualState.renderedStateKey.startsWith('scroll\u0001') ? 'scroll' : 'full'
+}
+
+function isDashboardScrollActive(): boolean {
+  return virtualState.isFastScrolling || Boolean(virtualState.scrollIdleTimer)
 }
 
 function getDashboardFaviconWarmupStartIndex(window: DashboardVirtualWindow): number {
@@ -3983,29 +4080,147 @@ function getDashboardFaviconWarmupEndIndex(window: DashboardVirtualWindow, itemC
 
 function renderDashboardVirtualWindow({
   renderedItems,
+  renderedIds,
+  startIndex,
+  endIndex,
   totalHeight,
   offsetY,
-  columnCount
+  columnCount,
+  preferNodePatch = false
 }: {
   renderedItems: DashboardItem[]
+  renderedIds: Set<string>
+  startIndex: number
+  endIndex: number
   totalHeight: number
   offsetY: number
   columnCount: number
+  preferNodePatch?: boolean
 }): void {
   const { spacer, windowElement } = ensureDashboardVirtualWindowElements()
   spacer.style.height = `${Math.ceil(totalHeight)}px`
+  windowElement.style.removeProperty('top')
   windowElement.style.transform = `translate3d(0, ${Math.round(offsetY)}px, 0)`
   windowElement.style.gridTemplateColumns = `repeat(${columnCount}, minmax(0, 1fr))`
 
+  if (
+    preferNodePatch &&
+    patchDashboardVirtualWindowNodes({
+      windowElement,
+      renderedItems,
+      startIndex,
+      endIndex,
+      columnCount
+    })
+  ) {
+    pruneDashboardVirtualCardNodePool(renderedIds)
+    return
+  }
+
   const fragment = document.createDocumentFragment()
-  const renderedIds = new Set<string>()
   for (const item of renderedItems) {
-    const bookmarkId = String(item.id)
-    renderedIds.add(bookmarkId)
     fragment.append(getDashboardVirtualCardNode(item))
   }
   windowElement.replaceChildren(fragment)
   pruneDashboardVirtualCardNodePool(renderedIds)
+}
+
+function patchDashboardVirtualWindowNodes({
+  windowElement,
+  renderedItems,
+  startIndex,
+  endIndex,
+  columnCount
+}: {
+  windowElement: HTMLElement
+  renderedItems: DashboardItem[]
+  startIndex: number
+  endIndex: number
+  columnCount: number
+}): boolean {
+  const previousStartIndex = virtualState.renderedStartIndex
+  const previousEndIndex = virtualState.renderedEndIndex
+  const previousRenderMode = getDashboardRenderedCardMode()
+  const nextRenderMode = getDashboardVirtualCardRenderMode()
+  if (
+    virtualState.renderedItems !== virtualState.items ||
+    virtualState.renderedColumnCount !== columnCount ||
+    (previousRenderMode === 'scroll' && nextRenderMode === 'full') ||
+    previousStartIndex < 0 ||
+    previousEndIndex <= previousStartIndex ||
+    startIndex >= previousEndIndex ||
+    endIndex <= previousStartIndex
+  ) {
+    return false
+  }
+
+  const previousCount = previousEndIndex - previousStartIndex
+  if (windowElement.childElementCount !== previousCount) {
+    return false
+  }
+
+  if (startIndex > previousStartIndex) {
+    removeDashboardVirtualWindowEdgeNodes(windowElement, startIndex - previousStartIndex, 'start')
+  } else if (startIndex < previousStartIndex) {
+    prependDashboardVirtualWindowNodes(windowElement, renderedItems, startIndex, previousStartIndex)
+  }
+
+  if (endIndex < previousEndIndex) {
+    removeDashboardVirtualWindowEdgeNodes(windowElement, previousEndIndex - endIndex, 'end')
+  } else if (endIndex > previousEndIndex) {
+    appendDashboardVirtualWindowNodes(windowElement, renderedItems, startIndex, previousEndIndex, endIndex)
+  }
+
+  return windowElement.childElementCount === endIndex - startIndex
+}
+
+function prependDashboardVirtualWindowNodes(
+  windowElement: HTMLElement,
+  renderedItems: DashboardItem[],
+  startIndex: number,
+  previousStartIndex: number
+): void {
+  const fragment = document.createDocumentFragment()
+  for (let index = startIndex; index < previousStartIndex; index += 1) {
+    const item = renderedItems[index - startIndex]
+    if (item) {
+      fragment.append(getDashboardVirtualCardNode(item))
+    }
+  }
+  windowElement.prepend(fragment)
+}
+
+function appendDashboardVirtualWindowNodes(
+  windowElement: HTMLElement,
+  renderedItems: DashboardItem[],
+  startIndex: number,
+  previousEndIndex: number,
+  endIndex: number
+): void {
+  const fragment = document.createDocumentFragment()
+  for (let index = previousEndIndex; index < endIndex; index += 1) {
+    const item = renderedItems[index - startIndex]
+    if (item) {
+      fragment.append(getDashboardVirtualCardNode(item))
+    }
+  }
+  windowElement.append(fragment)
+}
+
+function removeDashboardVirtualWindowEdgeNodes(
+  windowElement: HTMLElement,
+  count: number,
+  edge: 'start' | 'end'
+): void {
+  for (let index = 0; index < count; index += 1) {
+    const child = edge === 'start'
+      ? windowElement.firstElementChild
+      : windowElement.lastElementChild
+    if (!child) {
+      return
+    }
+    child.remove()
+  }
 }
 
 function ensureDashboardVirtualWindowElements(): {
@@ -4204,6 +4419,10 @@ function resetDashboardVirtualRenderCache({
     window.clearTimeout(virtualState.scrollIdleTimer)
     virtualState.scrollIdleTimer = 0
   }
+  if (virtualState.scrollSettleTimer) {
+    window.clearTimeout(virtualState.scrollSettleTimer)
+    virtualState.scrollSettleTimer = 0
+  }
   if (virtualState.measureRetryFrame) {
     window.cancelAnimationFrame(virtualState.measureRetryFrame)
     virtualState.measureRetryFrame = 0
@@ -4272,6 +4491,16 @@ function markDashboardVirtualFilterChange(reason: DashboardVirtualFilterChangeRe
 }
 
 function getDashboardVirtualRenderStateKey(renderedItems: DashboardItem[]): string {
+  if (getDashboardVirtualCardRenderMode() === 'scroll') {
+    return [
+      'scroll',
+      availabilityState.deleting ? 'deleting' : 'idle',
+      renderedItems.length,
+      renderedItems[0]?.id || '',
+      renderedItems[renderedItems.length - 1]?.id || ''
+    ].join('\u0001')
+  }
+
   const itemState = renderedItems.map((item) => {
     const id = String(item.id)
     return [
@@ -4282,6 +4511,7 @@ function getDashboardVirtualRenderStateKey(renderedItems: DashboardItem[]): stri
   }).join('|')
 
   return [
+    getDashboardVirtualCardRenderMode(),
     availabilityState.deleting ? 'deleting' : 'idle',
     itemState
   ].join('\u0001')
@@ -4509,6 +4739,10 @@ function scheduleDashboardScrollIdle(): void {
   if (virtualState.scrollIdleTimer) {
     window.clearTimeout(virtualState.scrollIdleTimer)
   }
+  if (virtualState.scrollSettleTimer) {
+    window.clearTimeout(virtualState.scrollSettleTimer)
+    virtualState.scrollSettleTimer = 0
+  }
   if (dashboardListRenderFrame) {
     window.cancelAnimationFrame(dashboardListRenderFrame)
     dashboardListRenderFrame = 0
@@ -4518,14 +4752,21 @@ function scheduleDashboardScrollIdle(): void {
     virtualState.scrollIdleTimer = 0
     const wasFastScrolling = virtualState.isFastScrolling
     virtualState.isFastScrolling = false
-    flushDashboardFaviconDirtySync()
     if (dashboardListRenderPendingForScroll) {
       dashboardListRenderPendingForScroll = false
       scheduleDashboardListRender()
     }
-    if (wasFastScrolling && virtualState.items.length >= DASHBOARD_VIRTUAL_THRESHOLD) {
-      scheduleDashboardVirtualRender()
-    }
+    virtualState.scrollSettleTimer = window.setTimeout(() => {
+      virtualState.scrollSettleTimer = 0
+      flushPendingDashboardFaviconWarmup()
+      flushDashboardFaviconDirtySync()
+      if (
+        virtualState.items.length >= DASHBOARD_VIRTUAL_THRESHOLD &&
+        (wasFastScrolling || getDashboardRenderedCardMode() === 'scroll')
+      ) {
+        scheduleDashboardVirtualRender()
+      }
+    }, DASHBOARD_SCROLL_SETTLE_MS)
   }, DASHBOARD_SCROLL_IDLE_MS)
 }
 
@@ -5094,7 +5335,6 @@ function buildDashboardCard(item: DashboardItem): string {
       class="dashboard-bookmark-card ${selected ? 'selected' : ''} ${expanded ? 'tags-expanded' : ''}"
       data-dashboard-card
       data-dashboard-bookmark-id="${escapeAttr(item.id)}"
-      style="${escapeAttr(getDashboardGridCssVars())}"
     >
       <label class="dashboard-card-check" data-dashboard-no-drag>
         <input
@@ -5282,26 +5522,35 @@ function scheduleDashboardFaviconLoadSync(): void {
 }
 
 function syncCompletedDashboardFaviconImages(): void {
+  syncDashboardVirtualLoadWorkload()
+}
+
+function syncDashboardVirtualLoadWorkload(): void {
   const host = dom.dashboardResults?.querySelector<HTMLElement>('.dashboard-virtual-window') ||
     dom.dashboardResults ||
-    dom.dashboardPanel
+    null
+  if (!host) {
+    return
+  }
+
+  const limit = virtualState.isFastScrolling
+    ? Math.max(32, Math.floor(DASHBOARD_FAVICON_LOAD_SYNC_BATCH_SIZE / 2))
+    : DASHBOARD_FAVICON_LOAD_SYNC_BATCH_SIZE
   let processed = 0
-  host
-    ?.querySelectorAll<HTMLImageElement>('img[data-dashboard-favicon]')
-    .forEach((image) => {
-      if (processed >= DASHBOARD_FAVICON_LOAD_SYNC_BATCH_SIZE) {
-        return
-      }
-      if (!image.complete) {
-        return
-      }
-      processed += 1
-      if (image.naturalWidth && image.naturalHeight) {
-        handleDashboardFaviconLoad(image)
-        return
-      }
-      markDashboardFaviconImageFailed(image)
-    })
+  for (const image of host.querySelectorAll<HTMLImageElement>('img[data-dashboard-favicon]')) {
+    if (processed >= limit) {
+      break
+    }
+    if (!image.complete) {
+      continue
+    }
+    processed += 1
+    if (image.naturalWidth && image.naturalHeight) {
+      handleDashboardFaviconLoad(image)
+      continue
+    }
+    markDashboardFaviconImageFailed(image)
+  }
 }
 
 async function moveDashboardBookmarkToFolder(
@@ -5747,15 +5996,50 @@ function syncDashboardFaviconWarmup(
       getCache: () => dashboardFaviconCache,
       upsert: upsertDashboardRemoteFavicon,
       markFailed: markDashboardRemoteFaviconFailed
+    }, {
+      canFetchRemote: canFetchDashboardRemoteFavicon
     }),
     onWarm: (item) => {
       scheduleDashboardFaviconForPageUrlSync(item.pageUrl)
     },
-    onError: (_item, error) => {
-      console.debug?.('[Curator] Dashboard favicon warmup skipped', error)
+    onError: (item, error) => {
+      aggregateDashboardFaviconWarmupError(item.pageUrl, error)
     }
   })
   dashboardFaviconWarmupQueue.start()
+}
+
+function scheduleDashboardFaviconWarmup(
+  items: DashboardItem[],
+  startIndex = 0,
+  endIndex = items.length
+): void {
+  if (!virtualState.scrollIdleTimer) {
+    syncDashboardFaviconWarmup(items, startIndex, endIndex)
+    return
+  }
+
+  dashboardFaviconWarmupPendingItems = items
+  dashboardFaviconWarmupPendingStartIndex = startIndex
+  dashboardFaviconWarmupPendingEndIndex = endIndex
+}
+
+function flushPendingDashboardFaviconWarmup(): void {
+  const items = dashboardFaviconWarmupPendingItems
+  if (!items) {
+    return
+  }
+
+  const startIndex = dashboardFaviconWarmupPendingStartIndex
+  const endIndex = dashboardFaviconWarmupPendingEndIndex
+  clearPendingDashboardFaviconWarmup()
+  syncDashboardFaviconWarmup(items, startIndex, endIndex)
+}
+
+function clearPendingDashboardFaviconWarmup(): void {
+  dashboardFaviconWarmupPendingItems = null
+  dashboardFaviconWarmupPendingStartIndex = -1
+  dashboardFaviconWarmupPendingEndIndex = -1
 }
 
 function stopDashboardFaviconWarmup(): void {
@@ -5766,11 +6050,13 @@ function stopDashboardFaviconWarmup(): void {
   dashboardFaviconWarmupStartIndex = -1
   dashboardFaviconWarmupEndIndex = -1
   dashboardFaviconWarmupEndpointUrl = ''
+  clearPendingDashboardFaviconWarmup()
   dashboardFaviconDirtyPageUrls.clear()
   if (dashboardFaviconDirtySyncTimer) {
     globalThis.clearTimeout(dashboardFaviconDirtySyncTimer)
     dashboardFaviconDirtySyncTimer = 0
   }
+  flushDashboardFaviconWarmupDebugSummary()
 }
 
 function resetDashboardFaviconWarmupForCacheChange(): void {
@@ -5927,7 +6213,104 @@ function scheduleDashboardFaviconCacheSave(): void {
     void setLocalStorage({
       [STORAGE_KEYS.dashboardFaviconCache]: dashboardFaviconCache
     }).catch((error) => {
-      console.debug?.('[Curator] Dashboard favicon cache save skipped', error)
+      logDashboardFaviconDebug('[Curator] Dashboard favicon cache save skipped', error)
     })
   }, 600)
+}
+
+async function canFetchDashboardRemoteFavicon(pageUrl: string): Promise<boolean> {
+  const originPattern = getDashboardRemoteFaviconOriginPattern(pageUrl)
+  if (!originPattern || typeof chrome === 'undefined' || !chrome.permissions?.contains) {
+    return false
+  }
+
+  try {
+    return await chrome.permissions.contains({ origins: [originPattern] })
+  } catch {
+    return false
+  }
+}
+
+function getDashboardRemoteFaviconOriginPattern(pageUrl: string): string {
+  try {
+    const parsedUrl = new URL(pageUrl)
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return ''
+    }
+    return `${parsedUrl.origin}/*`
+  } catch {
+    return ''
+  }
+}
+
+function aggregateDashboardFaviconWarmupError(pageUrl: string, error: unknown): void {
+  if (!isDashboardFaviconDebugEnabled()) {
+    return
+  }
+
+  dashboardFaviconWarmupDebugSummary = {
+    skipped: (dashboardFaviconWarmupDebugSummary?.skipped || 0) + 1,
+    firstPageUrl: dashboardFaviconWarmupDebugSummary?.firstPageUrl || String(pageUrl || ''),
+    firstError: dashboardFaviconWarmupDebugSummary?.firstError || getDashboardFaviconErrorSummary(error)
+  }
+  if (dashboardFaviconDebugSummaryTimer || typeof window === 'undefined') {
+    return
+  }
+
+  dashboardFaviconDebugSummaryTimer = window.setTimeout(
+    () => flushDashboardFaviconWarmupDebugSummary(),
+    DASHBOARD_FAVICON_WARMUP_DEBUG_DELAY_MS
+  )
+}
+
+function flushDashboardFaviconWarmupDebugSummary(): void {
+  if (dashboardFaviconDebugSummaryTimer) {
+    window.clearTimeout(dashboardFaviconDebugSummaryTimer)
+    dashboardFaviconDebugSummaryTimer = 0
+  }
+  const summary = dashboardFaviconWarmupDebugSummary
+  dashboardFaviconWarmupDebugSummary = null
+  if (!summary || !isDashboardFaviconDebugEnabled()) {
+    return
+  }
+
+  console.debug?.('[Curator] Dashboard favicon warmup skipped', {
+    count: summary.skipped,
+    sampleUrl: summary.firstPageUrl,
+    sampleError: summary.firstError
+  })
+}
+
+function getDashboardFaviconErrorSummary(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message
+  }
+  return String(error || 'unknown error')
+}
+
+function logDashboardFaviconDebug(message: string, payload: unknown): void {
+  if (!isDashboardFaviconDebugEnabled()) {
+    return
+  }
+  console.debug?.(message, payload)
+}
+
+function isDashboardFaviconDebugEnabled(): boolean {
+  try {
+    const globalFlags = globalThis as {
+      __CURATOR_DASHBOARD_DEBUG__?: boolean
+      __CURATOR_PERF__?: boolean
+    }
+    if (globalFlags.__CURATOR_DASHBOARD_DEBUG__ === true || globalFlags.__CURATOR_PERF__ === true) {
+      return true
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    return globalThis.localStorage?.getItem('curator_dashboard_debug') === '1'
+  } catch {
+    return false
+  }
 }

@@ -158,6 +158,7 @@ html.loading-wallpaper .newtab-background-video {
 }
 
 body.bookmark-dragging,
+body.speed-dial-dragging,
 body.folder-order-dragging {
   cursor: default;
   user-select: none;
@@ -813,6 +814,14 @@ body.background-mask-enabled .newtab-background-mask {
   gap: 3px;
 }
 
+.newtab-saved-searches {
+  display: grid;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(245, 245, 247, 0.08);
+}
+
 .newtab-search-section-label {
   padding: 2px 8px 1px;
   color: rgba(245, 245, 247, 0.5);
@@ -1354,6 +1363,10 @@ body.background-mask-enabled .newtab-background-mask {
   white-space: nowrap;
 }
 
+.newtab-module-heading span[data-tone="error"] {
+  color: #ffb7b0;
+}
+
 .newtab-speed-dial,
 .newtab-bookmark-health {
   padding: 10px;
@@ -1375,6 +1388,8 @@ body.background-mask-enabled .newtab-background-mask {
 
 .newtab-speed-dial-card {
   display: grid;
+  --icon-shell-size: 34px;
+  --icon-title-lines: 1;
   min-width: 0;
   min-height: 58px;
   grid-template-columns: 34px minmax(0, 1fr);
@@ -1385,11 +1400,16 @@ body.background-mask-enabled .newtab-background-mask {
   border-radius: 7px;
   background: rgba(var(--bookmark-card-rgb, 245, 245, 247), 0.05);
   color: rgba(245, 245, 247, 0.86);
+  cursor: pointer;
   text-decoration: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
   transition:
     transform var(--ease-standard),
     border-color var(--ease-standard),
-    background-color var(--ease-standard);
+    background-color var(--ease-standard),
+    opacity var(--ease-standard);
 }
 
 .newtab-speed-dial-card:hover,
@@ -1398,6 +1418,42 @@ body.background-mask-enabled .newtab-background-mask {
   background: rgba(var(--bookmark-card-rgb, 245, 245, 247), 0.1);
   outline: none;
   transform: translateY(-1px);
+}
+
+.newtab-speed-dial-card.dragging {
+  opacity: 0.48;
+  cursor: default;
+}
+
+body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging) {
+  transition:
+    transform 150ms cubic-bezier(0.22, 0.72, 0.18, 1),
+    opacity var(--ease-standard);
+}
+
+body.bookmark-drag-preview-initializing .newtab-speed-dial-card {
+  transition: none !important;
+}
+
+body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):hover,
+body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):active,
+body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):focus-visible {
+  border-color: rgba(245, 245, 247, 0.1);
+  background: rgba(var(--bookmark-card-rgb, 245, 245, 247), 0.05);
+  transform: none;
+}
+
+.speed-dial-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 120;
+  pointer-events: none;
+  opacity: 0.96;
+  filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.42));
+  transform-origin: 0 0;
+  transition: none;
+  will-change: transform;
 }
 
 .newtab-speed-dial-mark {
@@ -1411,6 +1467,21 @@ body.background-mask-enabled .newtab-background-mask {
   font-size: 14px;
   font-weight: 840;
   line-height: 1;
+}
+
+.newtab-speed-dial-mark .bookmark-favicon {
+  width: 22px;
+  height: 22px;
+}
+
+.newtab-speed-dial-mark .bookmark-favicon.custom-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.newtab-speed-dial-mark .bookmark-fallback {
+  width: 26px;
+  height: 26px;
 }
 
 .newtab-speed-dial-copy {
@@ -2562,17 +2633,65 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   color: rgba(255, 183, 176, 0.94);
 }
 
+.settings-group-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0 -2px;
+  padding: 12px 0 10px;
+  background: #050506;
+}
+
+.settings-group-tab {
+  display: inline-grid;
+  min-width: 0;
+  min-height: 32px;
+  place-items: center;
+  padding: 0 7px;
+  border: 1px solid rgba(245, 245, 247, 0.11);
+  border-radius: 7px;
+  background: rgba(245, 245, 247, 0.035);
+  color: rgba(245, 245, 247, 0.58);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.settings-group-tab:hover,
+.settings-group-tab:focus-visible {
+  border-color: rgba(245, 245, 247, 0.2);
+  background: rgba(245, 245, 247, 0.06);
+  color: rgba(245, 245, 247, 0.88);
+  outline: none;
+}
+
+.settings-group-tab.active,
+.settings-group-tab[aria-pressed="true"] {
+  border-color: rgba(132, 218, 137, 0.3);
+  background: rgba(132, 218, 137, 0.11);
+  color: #aaf0bd;
+}
+
 .settings-section {
-  margin-top: 28px;
+  margin-top: 16px;
 }
 
 .settings-section + .settings-section {
-  padding-top: 24px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 0;
+  border-top: 0;
 }
 
 .settings-section:first-child {
   margin-top: 0;
+}
+
+.settings-section[hidden] {
+  display: none;
 }
 
 .settings-section h2 {
@@ -2750,7 +2869,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   display: grid;
   min-width: 0;
   gap: 10px;
-  padding: 12px 14px 0;
+  padding: 2px 14px 10px;
 }
 
 .folder-source-summary {
@@ -2797,11 +2916,11 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  min-height: 34px;
+  min-height: 56px;
   grid-template-columns: minmax(0, 1fr) max-content;
   align-items: start;
   gap: 8px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.035);
@@ -2810,11 +2929,11 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
 }
 
 .folder-source-selected-item {
-  padding: 5px 8px 5px 10px;
+  padding: 8px 8px 8px 10px;
 }
 
 .folder-candidate-card {
-  padding: 5px 9px 5px 10px;
+  padding: 8px 9px 8px 10px;
   text-align: left;
   cursor: pointer;
   transition:
@@ -2844,7 +2963,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   display: grid;
   max-width: 100%;
   min-width: 0;
-  gap: 1px;
+  gap: 2px;
 }
 
 .folder-source-selected-copy strong,
@@ -2856,10 +2975,13 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   color: rgba(245, 245, 247, 0.9);
   font-size: 11px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.28;
   overflow-wrap: anywhere;
   white-space: normal;
   word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .folder-source-selected-copy span,
@@ -2871,10 +2993,13 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   color: rgba(245, 245, 247, 0.4);
   font-size: 10px;
   font-weight: 500;
-  line-height: 1.2;
+  line-height: 1.32;
   overflow-wrap: anywhere;
   white-space: normal;
   word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .folder-source-remove {
@@ -3002,7 +3127,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
 }
 
 .folder-candidate-list {
-  max-height: 250px;
+  max-height: min(48vh, 360px);
   overflow-y: auto;
   padding-right: 2px;
   scrollbar-color: rgba(245, 245, 247, 0.24) transparent;
