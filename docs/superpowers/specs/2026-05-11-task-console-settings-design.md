@@ -120,6 +120,7 @@ All settings switches should adopt the selected square style with stronger state
 
 - On: white rectangular track with a black square indicator on the right.
 - Off: black rectangular track with a white square indicator on the left.
+- The square indicator must be vertically centered inside the track. Implement with layout or transform-based centering, not a visually guessed top offset.
 - Disabled: lower opacity, same geometry and state color relationship.
 - Focus-visible: thin green or white outline outside the switch.
 
@@ -202,7 +203,7 @@ Minimum verification after implementation:
 Visual checks:
 
 - No text overlaps.
-- Switches clearly show on/off states.
+- Switches clearly show on/off states, and the inner square is vertically centered in both states.
 - Focus states are visible.
 - Long Chinese labels and URLs wrap or truncate correctly.
 - The page reads black/white/geek, not blue/purple or soft rounded dashboard.
