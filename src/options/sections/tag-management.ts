@@ -7,8 +7,10 @@ import {
   type BookmarkTagUsageStat
 } from '../../shared/tag-management.js'
 import type { BookmarkRecord } from '../../shared/types.js'
+import { buildTagCloudItems, type TagCloudItem } from '../../shared/tag-cloud.js'
 import { escapeAttr, escapeHtml } from '../shared-options/html.js'
 import { dom } from '../shared-options/dom.js'
+import { startTagCloudPhysics, stopTagCloudPhysics } from './tag-cloud-runtime.js'
 
 export interface TagManagementSummary {
   totalTags: number
@@ -78,6 +80,7 @@ export function renderTagManagementSection({
   if (!dom.tagManagementResults) {
     return
   }
+  stopActiveTagCloud()
 
   const summary = buildTagUsageSummary(index, bookmarks)
   dom.tagManagementTotal.textContent = `${summary.totalTags} 个标签`
@@ -104,33 +107,67 @@ export function renderTagManagementSection({
     return
   }
 
-  dom.tagManagementResults.innerHTML = summary.stats.slice(0, 80).map((stat) => renderTagUsageCard(stat)).join('')
+  dom.tagManagementResults.innerHTML = renderTagCloud(summary.stats)
+  const cloud = dom.tagManagementResults.querySelector<HTMLElement>('[data-tag-cloud-root]')
+  if (cloud) {
+    startTagCloudPhysics(cloud)
+  }
 }
 
-function renderTagUsageCard(stat: BookmarkTagUsageStat): string {
-  const examples = stat.examples.slice(0, 3).map((record) => {
-    const title = record.title || record.url || record.bookmarkId
-    return `<li>${escapeHtml(title)}</li>`
-  }).join('')
-  const latest = stat.latestUpdatedAt ? new Date(stat.latestUpdatedAt).toLocaleString('zh-CN') : '未知'
+function renderTagCloud(stats: BookmarkTagUsageStat[]): string {
+  const widthPx = Math.max(960, Math.floor(dom.tagManagementResults?.clientWidth || 0))
+  const heightPx = Math.min(820, Math.max(520, Math.floor(window.innerHeight * 0.68)))
+  const items = buildTagCloudItems(stats, {
+    widthPx,
+    heightPx
+  })
 
   return `
-    <article class="tag-management-card">
-      <div class="tag-management-card-main">
-        <button class="tag-management-chip" type="button" data-tag-fill="${escapeAttr(stat.tag)}" aria-label="选择标签 ${escapeAttr(stat.tag)}">
-          ${escapeHtml(stat.tag)}
-        </button>
-        <div class="tag-management-card-copy">
-          <strong>${stat.count} 次使用</strong>
-          <p>手动 ${stat.manualCount} · AI ${stat.aiCount} · 最近更新 ${escapeHtml(latest)}</p>
-        </div>
-      </div>
-      <div class="tag-management-card-examples">
-        <span>示例书签</span>
-        <ul class="tag-management-examples" aria-label="${escapeAttr(stat.tag)} 标签示例书签">
-          ${examples || '<li>暂无示例书签</li>'}
-        </ul>
-      </div>
-    </article>
+    <div class="tag-management-cloud" role="list" aria-label="标签词云，字号越大表示使用越频繁" data-tag-cloud-root>
+      ${items.map((item) => renderTagCloudItem(item)).join('')}
+    </div>
   `
+}
+
+function renderTagCloudItem(item: TagCloudItem): string {
+  const style = [
+    `--tag-x: ${item.leftPercent}%`,
+    `--tag-y: ${item.topPercent}%`,
+    `--tag-size: ${item.fontSizePx}px`,
+    `--tag-alpha: ${item.opacity}`
+  ].join('; ')
+  const className = [
+    'tag-management-cloud-word',
+    `is-${item.tier}`,
+    item.accent ? 'is-prominent' : '',
+    item.tail ? 'is-tail' : ''
+  ].filter(Boolean).join(' ')
+
+  return `
+    <button
+      class="${className}"
+      type="button"
+      role="listitem"
+      data-tag-cloud-word
+      data-tag-fill="${escapeAttr(item.tag)}"
+      data-tag-x="${item.leftPercent}"
+      data-tag-y="${item.topPercent}"
+      data-tag-tier="${escapeAttr(item.tier)}"
+      data-tag-radius="${item.radiusPx}"
+      data-tag-collision-width="${item.collisionWidthPx}"
+      data-tag-collision-height="${item.collisionHeightPx}"
+      data-tag-collision-strength="${item.collisionStrength}"
+      data-tag-mass="${item.mass}"
+      data-tag-phase="${item.phase}"
+      data-tag-flow="${item.flowStrength}"
+      style="${escapeAttr(style)}"
+      title="${escapeAttr(item.tag)}"
+      aria-label="选择标签 ${escapeAttr(item.tag)}"
+    >${escapeHtml(item.tag)}</button>
+  `
+}
+
+export function stopActiveTagCloud(): void {
+  const cloud = dom.tagManagementResults?.querySelector<HTMLElement>('[data-tag-cloud-root]')
+  stopTagCloudPhysics(cloud)
 }

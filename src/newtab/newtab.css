@@ -5627,6 +5627,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   left: 12px;
   display: grid;
   width: 14px;
+  height: auto;
   place-items: center;
   border-radius: 0;
   background: transparent;
@@ -5635,22 +5636,22 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
 
 .settings-drawer .custom-select-trigger-arrow::before,
 .custom-select-setting .custom-select-trigger-arrow::before {
-  content: ">";
-  display: block;
-  width: auto;
-  height: auto;
-  border: 0;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
-  transform: translateY(1px);
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translate(-50%, -50%) rotate(-45deg);
   transition: color var(--ease-standard), transform var(--ease-standard);
 }
 
 .settings-drawer .custom-select[data-open="true"] .custom-select-trigger-arrow::before,
 .custom-select-setting[data-open="true"] .custom-select-trigger-arrow::before {
   color: #b7ff8a;
-  transform: translate(2px, 1px);
+  transform: translate(calc(-50% + 2px), -50%) rotate(45deg);
 }
 
 .settings-drawer .custom-select-trigger:hover,
@@ -5729,7 +5730,22 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   padding-left: 32px;
 }
 
-.folder-candidates-toggle::before,
+.folder-candidates-toggle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 13px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  color: rgba(247, 247, 247, 0.46);
+  transform: translateY(-50%) rotate(-45deg);
+  transition:
+    color var(--ease-standard),
+    transform var(--ease-standard);
+}
+
 .icon-advanced-toggle::before {
   content: ">";
   position: absolute;
@@ -5745,7 +5761,11 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
     transform var(--ease-standard);
 }
 
-.folder-candidates-toggle.expanded::before,
+.folder-candidates-toggle.expanded::before {
+  color: #b7ff8a;
+  transform: translate(2px, -50%) rotate(45deg);
+}
+
 .icon-advanced-toggle.expanded::before {
   color: #b7ff8a;
   transform: translate(2px, -50%);

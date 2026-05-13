@@ -1176,30 +1176,20 @@
             <p class="options-section-label">Tag Management</p>
             <h1 id="tags-title">标签管理中心</h1>
 
-            <div class="tag-management-layout">
-              <div class="tag-management-overview" aria-label="标签统计概览">
-                <article>
-                  <span>标签总数</span>
-                  <strong id="tag-management-total">0 个标签</strong>
-                </article>
-                <article>
-                  <span>已标记书签</span>
-                  <strong id="tag-management-tagged-bookmarks">0 条书签</strong>
-                </article>
-                <article>
-                  <span>手动标签</span>
-                  <strong id="tag-management-manual">0 个手动标签</strong>
-                </article>
+            <div class="options-group tag-management-usage">
+              <div class="tag-management-head">
+                <div class="tag-management-title">
+                  <strong>标签词云</strong>
+                  <p class="detect-results-subtitle">字号和明暗代表使用频率，点击标签可填入整理表单。</p>
+                </div>
+                <div class="tag-management-metrics" aria-label="标签统计概览">
+                  <span id="tag-management-total">0 个标签</span>
+                  <span id="tag-management-tagged-bookmarks">0 条书签</span>
+                  <span id="tag-management-manual">0 个手动标签</span>
+                </div>
               </div>
 
-              <div class="options-group tag-management-actions">
-                <div class="tag-management-action-head">
-                  <div>
-                    <strong>整理标签</strong>
-                    <p class="detect-results-subtitle">重命名会合并同名结果；删除只移除本地标签，不删除 Chrome 书签。</p>
-                  </div>
-                  <button id="tag-management-refresh" class="options-button secondary small" type="button" aria-label="刷新标签统计">刷新统计</button>
-                </div>
+              <div class="tag-management-toolbar">
                 <div class="tag-management-form">
                   <label>
                     <span>原标签</span>
@@ -1214,16 +1204,8 @@
                     <button id="tag-management-delete" class="options-button danger small" type="button" aria-label="删除书签标签">删除标签</button>
                   </div>
                 </div>
+                <button id="tag-management-refresh" class="options-button secondary small" type="button" aria-label="刷新标签统计">刷新统计</button>
                 <p id="tag-management-status" class="detect-status-copy"></p>
-              </div>
-            </div>
-
-            <div class="options-group tag-management-usage">
-              <div class="tag-management-usage-head">
-                <div>
-                  <strong>使用频率</strong>
-                  <p class="detect-results-subtitle">按使用次数排序，点击标签可填入整理表单。</p>
-                </div>
               </div>
               <div id="tag-management-results" class="tag-management-results">
                 <div class="detect-empty">正在读取标签统计...</div>

@@ -267,7 +267,8 @@ import {
 import {
   deleteTagFromIndex,
   renderTagManagementSection,
-  renameTagInIndex
+  renameTagInIndex,
+  stopActiveTagCloud
 } from './sections/tag-management.js'
 
 const IS_OPTIONS_DASHBOARD_EMBED_MODE =
@@ -700,6 +701,8 @@ function syncPageSection() {
 
   if (key === 'tags') {
     renderTagManagementSectionFromState()
+  } else if (previousSectionKey === 'tags') {
+    stopActiveTagCloud()
   }
 
   scrollToSectionAnchor()

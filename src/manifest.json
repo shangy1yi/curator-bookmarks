@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Curator",
   "description": "本地优先的 Chrome 书签搜索、整理、清理与新标签页扩展。",
-  "version": "1.4.34",
+  "version": "1.4.35",
   "icons": {
     "16": "src/assets/icon16.png",
     "32": "src/assets/icon32.png",
