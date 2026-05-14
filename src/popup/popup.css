@@ -2712,6 +2712,48 @@ mark {
   overflow-wrap: anywhere;
 }
 
+.modal-path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-path-row .modal-card-path {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.modal-card-path.changed {
+  color: var(--text-soft);
+}
+
+.secondary-button.compact {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.edit-folder-picker {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.edit-folder-picker.hidden {
+  display: none;
+}
+
+.modal-list.compact {
+  max-height: 170px;
+}
+
+.picker-badge.muted {
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .modal-search {
   min-height: 42px;
 }

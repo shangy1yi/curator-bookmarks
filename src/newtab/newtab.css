@@ -134,8 +134,14 @@ html.loading-wallpaper body {
   background-color: var(--wallpaper-placeholder-bg, #000000);
 }
 
-html.loading-wallpaper body {
+html.loading-wallpaper:not(.instant-wallpaper-ready) body {
   background-image: none;
+}
+
+html.instant-wallpaper-ready body {
+  background-image: var(--instant-wallpaper-image);
+  background-position: var(--instant-wallpaper-position, center);
+  background-size: var(--instant-wallpaper-size, cover);
 }
 
 html.loading-wallpaper .newtab-shell,
@@ -1324,8 +1330,7 @@ body.background-mask-enabled .newtab-background-mask {
   gap: var(--icon-folder-gap);
 }
 
-.newtab-speed-dial,
-.newtab-bookmark-health {
+.newtab-speed-dial {
   width: 100%;
   min-width: 0;
   margin-bottom: 14px;
@@ -1367,8 +1372,7 @@ body.background-mask-enabled .newtab-background-mask {
   color: #ffb7b0;
 }
 
-.newtab-speed-dial,
-.newtab-bookmark-health {
+.newtab-speed-dial {
   padding: 10px;
   border: 1px solid rgba(245, 245, 247, 0.1);
   border-radius: 8px;
@@ -1540,72 +1544,6 @@ body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):focus-visible {
   line-height: 1.45;
 }
 
-.newtab-health-grid {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-  gap: 7px;
-}
-
-.newtab-health-card {
-  display: grid;
-  min-width: 0;
-  min-height: 76px;
-  align-content: start;
-  gap: 4px;
-  padding: 9px;
-  border: 1px solid rgba(245, 245, 247, 0.1);
-  border-radius: 7px;
-  background: rgba(245, 245, 247, 0.035);
-  color: rgba(245, 245, 247, 0.84);
-  text-align: left;
-  cursor: pointer;
-}
-
-.newtab-health-card[data-severity="warning"],
-.newtab-health-card[data-severity="critical"] {
-  border-color: rgba(255, 205, 128, 0.2);
-  background: rgba(255, 205, 128, 0.06);
-}
-
-.newtab-health-card:hover,
-.newtab-health-card:focus-visible {
-  border-color: rgba(245, 245, 247, 0.24);
-  background: rgba(245, 245, 247, 0.075);
-  outline: none;
-}
-
-.newtab-health-card strong {
-  color: rgba(245, 245, 247, 0.94);
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.newtab-health-card span,
-.newtab-health-card small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.newtab-health-card span {
-  font-size: 11px;
-  font-weight: 740;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.newtab-health-card small {
-  display: -webkit-box;
-  color: rgba(245, 245, 247, 0.44);
-  font-size: 10px;
-  font-weight: 520;
-  line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
 .newtab-portal {
   --portal-card-min-height: 42px;
   --portal-card-gap: 6px;
@@ -1624,84 +1562,8 @@ body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):focus-visible {
   backdrop-filter: blur(16px);
 }
 
-.newtab-portal.overview-only {
-  width: min(356px, 100%);
-  grid-template-columns: 1fr;
-  justify-self: start;
-}
-
 .newtab-portal.quick-only {
   grid-template-columns: 1fr;
-}
-
-.newtab-portal-overview {
-  display: grid;
-  min-width: 0;
-  align-content: stretch;
-  gap: 10px;
-}
-
-.newtab-portal-heading {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.newtab-portal-heading strong {
-  color: rgba(245, 245, 247, 0.82);
-  font-size: 12.5px;
-  font-weight: 720;
-  line-height: 1.15;
-  letter-spacing: 0.01em;
-}
-
-.newtab-portal-heading span {
-  overflow: hidden;
-  color: rgba(245, 245, 247, 0.4);
-  font-size: 11px;
-  font-weight: 540;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.newtab-portal-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: minmax(var(--portal-card-min-height), 1fr);
-  gap: var(--portal-card-gap);
-}
-
-.newtab-portal-stat {
-  display: grid;
-  min-width: 0;
-  min-height: var(--portal-card-min-height);
-  align-content: center;
-  gap: 2px;
-  padding: 7px 8px;
-  border: 1px solid rgba(245, 245, 247, 0.08);
-  border-radius: 7px;
-  background: rgba(245, 245, 247, 0.04);
-}
-
-.newtab-portal-stat strong {
-  overflow: hidden;
-  color: rgba(245, 245, 247, 0.9);
-  font-size: 16px;
-  font-weight: 760;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.newtab-portal-stat span {
-  overflow: hidden;
-  color: rgba(245, 245, 247, 0.42);
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .newtab-quick-access {
@@ -3343,7 +3205,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   display: grid;
   width: min(920px, calc(100vw - 48px));
   max-height: min(760px, calc(100vh - 48px));
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid rgba(245, 245, 247, 0.14);
   border-radius: 12px;
@@ -3384,6 +3246,58 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   line-height: 1.2;
 }
 
+.featured-wallpaper-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.featured-wallpaper-toggle {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid rgba(245, 245, 247, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(245, 245, 247, 0.72);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.featured-wallpaper-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: #84da89;
+}
+
+.featured-wallpaper-action {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(245, 245, 247, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(245, 245, 247, 0.82);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.featured-wallpaper-action:hover,
+.featured-wallpaper-action:focus-visible {
+  border-color: rgba(245, 245, 247, 0.24);
+  color: rgba(245, 245, 247, 0.96);
+  outline: none;
+}
+
+.featured-wallpaper-action:disabled {
+  cursor: default;
+  opacity: 0.54;
+}
+
 .featured-wallpaper-close {
   display: inline-grid;
   width: 34px;
@@ -3414,7 +3328,30 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   outline: none;
 }
 
+.featured-wallpaper-status {
+  grid-row: 2;
+  padding: 9px 20px;
+  border-bottom: 1px solid rgba(245, 245, 247, 0.1);
+  color: rgba(245, 245, 247, 0.62);
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 1.35;
+}
+
+.featured-wallpaper-status[data-tone="success"] {
+  color: #a7f3b0;
+}
+
+.featured-wallpaper-status[data-tone="warning"] {
+  color: #f5d58a;
+}
+
+.featured-wallpaper-status[data-tone="error"] {
+  color: #ffb1aa;
+}
+
 .featured-wallpaper-grid {
+  grid-row: 3;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
   gap: 12px;
@@ -3464,11 +3401,92 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
 }
 
 .featured-wallpaper-preview {
+  position: relative;
   display: block;
   aspect-ratio: 16 / 10;
   background-color: #151515;
   background-position: center;
   background-size: cover;
+}
+
+.featured-wallpaper-hover-preview {
+  position: fixed;
+  z-index: 85;
+  overflow: hidden;
+  border: 1px solid rgba(245, 245, 247, 0.18);
+  border-radius: 8px;
+  background-color: #080809;
+  background-position: center;
+  background-size: cover;
+  box-shadow:
+    0 24px 72px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px) scale(0.985);
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.featured-wallpaper-hover-preview.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.featured-wallpaper-favorite {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(245, 245, 247, 0.2);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.48);
+  color: rgba(245, 245, 247, 0.78);
+  cursor: pointer;
+}
+
+.featured-wallpaper-favorite:hover,
+.featured-wallpaper-favorite:focus-visible,
+.featured-wallpaper-favorite.is-favorite {
+  border-color: rgba(132, 218, 137, 0.56);
+  color: #a7f3b0;
+  outline: none;
+}
+
+.featured-wallpaper-favorite svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+.featured-wallpaper-favorite.is-favorite svg {
+  fill: currentColor;
+}
+
+.featured-wallpaper-resolution {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  padding: 3px 6px;
+  border: 1px solid rgba(245, 245, 247, 0.18);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.54);
+  color: rgba(245, 245, 247, 0.82);
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .featured-wallpaper-meta {
@@ -3533,7 +3551,13 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   }
 
   .featured-wallpaper-head {
+    flex-wrap: wrap;
     padding: 15px 14px 12px;
+  }
+
+  .featured-wallpaper-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .featured-wallpaper-grid {
@@ -4608,40 +4632,17 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
     align-items: start;
   }
 
-  .newtab-speed-dial,
-  .newtab-bookmark-health {
+  .newtab-speed-dial {
     padding: 9px;
   }
 
-  .newtab-speed-dial-grid,
-  .newtab-health-grid {
+  .newtab-speed-dial-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .newtab-speed-dial-empty {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
-  }
-
-  .newtab-portal.overview-only {
-    width: 100%;
-  }
-
-  .newtab-portal-overview {
-    gap: 8px;
-  }
-
-  .newtab-portal-stats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .newtab-portal-stat {
-    min-height: 38px;
-    padding: 6px;
-  }
-
-  .newtab-portal-stat strong {
-    font-size: 14px;
   }
 
   .newtab-quick-group {
@@ -5585,6 +5586,8 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
 }
 
 .featured-wallpaper-card,
+.featured-wallpaper-toggle,
+.featured-wallpaper-action,
 .featured-wallpaper-close {
   border-color: rgba(255, 255, 255, 0.14);
   background: #0f0f10;
@@ -5593,6 +5596,8 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
 
 .featured-wallpaper-card:hover,
 .featured-wallpaper-card:focus-visible,
+.featured-wallpaper-action:hover,
+.featured-wallpaper-action:focus-visible,
 .featured-wallpaper-card.is-selected {
   border-color: rgba(183, 255, 138, 0.5);
   background: #132012;

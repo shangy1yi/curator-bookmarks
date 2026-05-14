@@ -22,6 +22,7 @@
   "scripts": {
     "dev": "vite",
     "lint": "npm run typecheck",
+    "test": "node scripts/run-tests.mjs",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "validate": "npm run typecheck && npm run build"

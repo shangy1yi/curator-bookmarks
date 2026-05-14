@@ -9,6 +9,9 @@ export interface FeaturedBackgroundItem {
   credit: string
   license: string
   accentColor: string
+  dynamic?: boolean
+  width?: number
+  height?: number
 }
 
 const DAILY_FEATURED_BACKGROUND_OPTION_COUNT = 24
@@ -323,16 +326,6 @@ export const FEATURED_BACKGROUND_ITEMS: FeaturedBackgroundItem[] = [
     credit: 'The Metropolitan Museum of Art',
     license: 'Open Access / Public Domain',
     accentColor: '#1e1510'
-  },
-  {
-    id: 'nasa-jupiter-bands',
-    title: "Jupiter's Bands",
-    provider: 'nasa',
-    imageUrl: 'https://images-assets.nasa.gov/image/PIA24818/PIA24818~small.jpg',
-    sourceUrl: 'https://images.nasa.gov/details/PIA24818',
-    credit: 'NASA/JPL-Caltech/SwRI/MSSS',
-    license: 'NASA image',
-    accentColor: '#21140d'
   }
 ]
 

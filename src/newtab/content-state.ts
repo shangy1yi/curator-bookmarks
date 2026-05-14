@@ -140,27 +140,6 @@ export interface BookmarkTreeSourceItem extends PortalBookmarkSourceItem {
   children?: BookmarkTreeSourceItem[]
 }
 
-export interface PortalOverviewInput {
-  sections: NewTabSearchIndexSection[]
-  activityRecords: Record<string, PortalBookmarkActivityRecord>
-  now: number
-}
-
-export interface PortalOverview {
-  bookmarkCount: number
-  folderCount: number
-  openedTodayCount: number
-  addedTodayCount: number
-}
-
-export type PortalPanelLayout = 'hidden' | 'full' | 'overview-only' | 'quick-only'
-
-export interface PortalPanelLayoutInput {
-  showOverview: boolean
-  hasOverviewSignal: boolean
-  hasQuickAccess: boolean
-}
-
 export interface MissingFolderViewOptions {
   creatingFolder: boolean
   reason: 'none-selected' | 'selected-unavailable'
@@ -390,23 +369,6 @@ export function resolveNewTabContentState(
   }
 
   return { type: 'bookmarks' }
-}
-
-export function resolvePortalPanelLayout({
-  showOverview,
-  hasOverviewSignal,
-  hasQuickAccess
-}: PortalPanelLayoutInput): PortalPanelLayout {
-  if (showOverview && hasOverviewSignal && hasQuickAccess) {
-    return 'full'
-  }
-  if (showOverview && hasOverviewSignal) {
-    return 'overview-only'
-  }
-  if (hasQuickAccess) {
-    return 'quick-only'
-  }
-  return 'hidden'
 }
 
 export interface NewTabSearchSuggestionOptions {
@@ -836,51 +798,6 @@ function compareSearchBookmarkSuggestions(
   return left.score - right.score || left.order - right.order
 }
 
-export function buildNewTabPortalOverview({
-  sections,
-  activityRecords,
-  now
-}: PortalOverviewInput): PortalOverview {
-  const todayStart = getLocalDayStart(now)
-  const bookmarkIds = new Set<string>()
-  let addedTodayCount = 0
-
-  for (const section of sections) {
-    for (const bookmark of section.bookmarks) {
-      const id = String(bookmark.id || '').trim()
-      const url = String(bookmark.url || '').trim()
-      if (!id || !url || bookmarkIds.has(id)) {
-        continue
-      }
-
-      bookmarkIds.add(id)
-      if (isTimestampInLocalDay(Number(bookmark.dateAdded), todayStart, now)) {
-        addedTodayCount += 1
-      }
-    }
-  }
-
-  const openedTodayIds = new Set<string>()
-  for (const record of Object.values(activityRecords)) {
-    const id = String(record.bookmarkId || '').trim()
-    if (
-      id &&
-      bookmarkIds.has(id) &&
-      Number(record.openCount) > 0 &&
-      isTimestampInLocalDay(Number(record.lastOpenedAt), todayStart, now)
-    ) {
-      openedTodayIds.add(id)
-    }
-  }
-
-  return {
-    bookmarkCount: bookmarkIds.size,
-    folderCount: sections.length,
-    openedTodayCount: openedTodayIds.size,
-    addedTodayCount
-  }
-}
-
 export function getPortalQuickAccessItems({
   bookmarks,
   pinnedIds,
@@ -1066,19 +983,6 @@ function getSearchSuggestionScore(
     return 6
   }
   return -1
-}
-
-function getLocalDayStart(timestamp: number): number {
-  const date = Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp) : new Date()
-  date.setHours(0, 0, 0, 0)
-  return date.getTime()
-}
-
-function isTimestampInLocalDay(timestamp: number, dayStart: number, now: number): boolean {
-  return Number.isFinite(timestamp) &&
-    timestamp >= dayStart &&
-    timestamp <= now &&
-    timestamp < dayStart + 24 * 60 * 60 * 1000
 }
 
 export function createNewTabPage({ modules }: NewTabPageOptions): HTMLElement {

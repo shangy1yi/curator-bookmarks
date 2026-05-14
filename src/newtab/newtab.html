@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Curator 新标签页</title>
+    <script src="/instant-wallpaper-boot.js"></script>
     <link rel="stylesheet" href="./newtab.css">
   </head>
   <body>
@@ -166,14 +167,6 @@
           <div class="settings-card">
             <label class="setting-row">
               <span class="setting-label-stack">
-                <span>显示今日概览</span>
-                <small>展示书签数量、来源和今天的新增/打开情况。</small>
-              </span>
-              <input id="general-show-overview" class="setting-switch-input" type="checkbox" checked>
-              <span class="setting-switch" aria-hidden="true"></span>
-            </label>
-            <label class="setting-row">
-              <span class="setting-label-stack">
                 <span>显示 Curator 常用和新近添加</span>
                 <small>仅基于当前来源内的固定、本页打开记录和添加时间，不读取浏览历史。</small>
               </span>
@@ -184,11 +177,6 @@
               id="newtab-speed-dial-setting"
               class="newtab-module-settings-list"
               aria-label="Speed Dial 模块"
-            ></div>
-            <div
-              id="newtab-health-setting"
-              class="newtab-module-settings-list"
-              aria-label="书签健康模块"
             ></div>
           </div>
         </section>
@@ -229,6 +217,24 @@
               <span>图片来源</span>
               <a id="background-featured-credit" class="background-featured-credit" href="https://images.nasa.gov/" target="_blank" rel="noreferrer">NASA Image and Video Library</a>
             </div>
+            <div id="background-featured-display-row" class="setting-row">
+              <span class="setting-label-stack">
+                <span>背景显示方式</span>
+                <small>宽图可按高度适配，再用垂直位置微调画面。</small>
+              </span>
+              <select id="background-featured-display-mode" class="setting-select setting-native-select" aria-label="精选图库背景显示方式">
+                <option value="width">按宽度缩放</option>
+                <option value="height">按高度缩放</option>
+              </select>
+            </div>
+            <label id="background-featured-display-size-row" class="setting-row slider-row">
+              <span>背景大小 <output id="background-featured-display-size-value" class="setting-value">100%</output></span>
+              <input id="background-featured-display-size" class="setting-range" type="range" min="50" max="180" value="100" aria-label="精选图库背景大小">
+            </label>
+            <label id="background-featured-position-y-row" class="setting-row slider-row">
+              <span>垂直位置 <output id="background-featured-position-y-value" class="setting-value">50%</output></span>
+              <input id="background-featured-position-y" class="setting-range" type="range" min="0" max="100" value="50" aria-label="精选图库背景垂直位置">
+            </label>
             <label id="background-color-row" class="setting-row">
               <span>背景颜色</span>
               <span id="background-color-control" class="setting-color">
@@ -611,12 +617,22 @@
             <p class="featured-wallpaper-kicker">Featured Gallery</p>
             <h3 id="background-featured-modal-title">选择精选图库壁纸</h3>
           </div>
-          <button id="background-featured-modal-close" class="featured-wallpaper-close" type="button" aria-label="关闭精选图库">
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <path d="m6.5 6.5 11 11M17.5 6.5l-11 11"></path>
-            </svg>
-          </button>
+          <div class="featured-wallpaper-actions">
+            <label class="featured-wallpaper-toggle" title="开启后允许拉取 1920×1080 级别图片；关闭时只拉取更高分辨率图片。">
+              <input id="background-featured-allow-1080p" type="checkbox">
+              <span>允许 1080P</span>
+            </label>
+            <button id="background-featured-refresh" class="featured-wallpaper-action" type="button">
+              刷新图库
+            </button>
+            <button id="background-featured-modal-close" class="featured-wallpaper-close" type="button" aria-label="关闭精选图库">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="m6.5 6.5 11 11M17.5 6.5l-11 11"></path>
+              </svg>
+            </button>
+          </div>
         </header>
+        <div id="background-featured-status" class="featured-wallpaper-status" role="status" aria-live="polite" hidden></div>
         <div
           id="background-featured-modal-grid"
           class="featured-wallpaper-grid"

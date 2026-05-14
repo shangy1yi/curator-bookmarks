@@ -252,8 +252,31 @@
 
         <div class="modal-bookmark-card">
           <p class="modal-card-label">来源路径</p>
-          <p id="edit-bookmark-path" class="modal-card-path"></p>
+          <div class="modal-path-row">
+            <p id="edit-bookmark-path" class="modal-card-path"></p>
+            <button id="edit-folder-picker-button" class="secondary-button compact" type="button" aria-expanded="false" aria-controls="edit-folder-picker">
+              更改
+            </button>
+          </div>
         </div>
+
+        <section id="edit-folder-picker" class="edit-folder-picker hidden" aria-label="选择新的来源路径">
+          <label class="search-shell modal-search" for="edit-folder-search-input">
+            <span class="search-icon" aria-hidden="true"></span>
+            <input
+              id="edit-folder-search-input"
+              class="search-input"
+              type="search"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="搜索目标文件夹"
+              aria-label="搜索编辑目标文件夹"
+              aria-controls="edit-folder-list"
+            >
+          </label>
+
+          <div id="edit-folder-list" class="modal-list compact" role="tree" aria-label="编辑目标文件夹"></div>
+        </section>
 
         <div class="modal-form">
           <label class="modal-field" for="edit-title-input">

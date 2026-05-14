@@ -77,6 +77,15 @@ import {
 import { requiresPinyinTokens } from '../shared/search/pinyin.js'
 import { dom, cacheDom } from './dom.js'
 import { state } from './state.js'
+import { replacePopupSectionHtml } from './render-cache.js'
+import {
+  hydratePopupBaseData,
+  hydratePopupDeferredEnhancements
+} from './popup-hydration.js'
+import {
+  getPopupEditBookmarkDraftState,
+  getPopupEditBookmarkSavePlan
+} from './edit-bookmark-draft.js'
 import { mark as perfMark, measure as perfMeasure } from '../shared/perf.js'
 
 const SEARCH_DEBOUNCE_MS = 140
@@ -107,6 +116,38 @@ let naturalSearchAiModulePromise: Promise<typeof import('./natural-search-ai.js'
 let aiSettingsModulePromise: Promise<typeof import('../options/sections/ai-settings.js')> | null = null
 let smartClassifierModulePromise: Promise<typeof import('./smart-classifier.js')> | null = null
 let recycleBinModulePromise: Promise<typeof import('../shared/recycle-bin.js')> | null = null
+let popupRefreshRunId = 0
+let currentTabHydrationPromise: Promise<void> | null = null
+
+interface PopupRefreshBaseData {
+  refreshRunId: number
+  rootNode: chrome.bookmarks.BookmarkTreeNode | null
+  bookmarksBarNode: chrome.bookmarks.BookmarkTreeNode | null
+  extracted: ReturnType<typeof extractBookmarkData>
+  indexedBookmarks: ReturnType<typeof buildLightPopupSearchIndex>
+}
+
+interface PopupRefreshDeferredData {
+  tagIndex: Awaited<ReturnType<typeof loadBookmarkTagIndex>> | null
+  snapshotState: Awaited<ReturnType<typeof loadPopupSearchIndexSnapshotState>>
+}
+
+const smartClassifierRenderState = {
+  get signature() { return state.smartClassifierRenderSignature },
+  set signature(value) { state.smartClassifierRenderSignature = value }
+}
+const searchChipsRenderState = {
+  get signature() { return state.searchChipsRenderSignature },
+  set signature(value) { state.searchChipsRenderSignature = value }
+}
+const savedSearchesRenderState = {
+  get signature() { return state.savedSearchesRenderSignature },
+  set signature(value) { state.savedSearchesRenderSignature = value }
+}
+const folderBreadcrumbsRenderState = {
+  get signature() { return state.folderBreadcrumbsRenderSignature },
+  set signature(value) { state.folderBreadcrumbsRenderSignature = value }
+}
 
 function abortNaturalSearchRequest() {
   state.naturalSearchAbortController?.abort()
@@ -233,6 +274,12 @@ function bindEvents() {
   dom.closeEditModal.addEventListener('click', closeDialogs)
   dom.cancelEdit.addEventListener('click', closeDialogs)
   dom.saveEdit.addEventListener('click', saveEditedBookmark)
+  dom.editFolderPickerButton.addEventListener('click', toggleEditFolderPicker)
+  dom.editFolderList.addEventListener('click', handleEditFolderListClick)
+  dom.editFolderSearchInput.addEventListener('input', () => {
+    state.editFolderSearchQuery = dom.editFolderSearchInput.value
+    renderEditModal()
+  })
   dom.editTitleInput.addEventListener('input', handleEditDraftInput)
   dom.editUrlInput.addEventListener('input', handleEditDraftInput)
   dom.editTitleInput.addEventListener('keydown', handleEditInputKeydown)
@@ -754,6 +801,8 @@ function focusSearchFromCommand(intent) {
 }
 
 async function runSmartClassifierFromCommand(intent) {
+  await ensureCurrentTabStateHydrated()
+
   if (hasOpenModal()) {
     closeDialogs()
   }
@@ -779,107 +828,242 @@ async function runSmartClassifierFromCommand(intent) {
 }
 
 async function refreshData({ initial = false, preserveSearch = true } = {}) {
+  const refreshRunId = popupRefreshRunId + 1
+  popupRefreshRunId = refreshRunId
+  perfMark('popup.refreshData.start')
   state.isLoading = true
   state.loadError = ''
   state.activeMenuBookmarkId = null
   render()
 
   try {
-    const tree = await getBookmarkTree()
-    perfMark('popup.bookmarkTreeLoaded')
-    const rootNode = Array.isArray(tree) ? tree[0] : tree
+    const { deferredHydration } = await hydratePopupBaseData({
+      loadBaseData: () => loadPopupBaseRefreshData(refreshRunId),
+      applyBaseData: (baseData) => {
+        if (refreshRunId !== popupRefreshRunId) {
+          return
+        }
 
-    state.rawTreeRoot = rootNode
-    state.bookmarksBarNode = findBookmarksBar(rootNode)
-
-    const extracted = extractBookmarkData(rootNode)
-    const [tagIndex, snapshotState] = await Promise.all([
-      loadBookmarkTagIndex().catch(() => null),
-      loadPopupSearchIndexSnapshotState()
-    ])
-    const indexedBookmarks = buildLightPopupSearchIndex({
-      bookmarks: extracted.bookmarks,
-      tagIndex,
-      snapshotIndex: snapshotState.index
+        applyPopupBaseRefreshData(baseData, { initial, preserveSearch })
+        perfMark('popup.refreshData.baseReady.end')
+        perfMeasure('popup.refreshData.baseReady', 'popup.refreshData.start', 'popup.refreshData.baseReady.end')
+      },
+      startDeferredHydration: (baseData) => hydratePopupDeferredRefreshData(baseData)
     })
-    perfMark('popup.indexBuilt')
-    perfMeasure('popup.indexBuildMs', 'popup.bookmarkTreeLoaded', 'popup.indexBuilt')
-    state.allBookmarks = indexedBookmarks
-    state.allFolders = extracted.folders
-    state.bookmarkMap = new Map(indexedBookmarks.map((bookmark) => [bookmark.id, bookmark]))
-    state.bookmarkDuplicateKeyMap = buildPopupBookmarkDuplicateKeyMap(indexedBookmarks)
-    state.folderMap = extracted.folderMap
-    state.searchTagIndex = tagIndex
-    state.searchSnapshotState = snapshotState
-    state.searchSnapshotFullTextReady = false
-    state.searchSnapshotFullTextPending = false
-    state.searchSnapshotFullTextRunId += 1
-    state.pinyinEnrichmentReady = false
-    state.pinyinEnrichmentPending = false
-    state.pinyinEnrichmentRunId += 1
-    clearSearchCaches()
-    await hydrateCurrentTabState()
-    await hydrateNewTabPinnedState()
-    void hydrateSavedSearches()
-
-    const folderIds = new Set(extracted.folders.map((folder) => folder.id))
-    const defaultExpanded = getDefaultExpandedFolders(state.bookmarksBarNode)
-    const allExpanded = new Set(extracted.folders.map((folder) => folder.id))
-
-    if (state.selectedFolderFilterId && !folderIds.has(state.selectedFolderFilterId)) {
-      state.selectedFolderFilterId = null
-    }
-
-    if (initial || state.expandedFolders.size === 0) {
-      state.expandedFolders = defaultExpanded
-    } else {
-      state.expandedFolders = new Set(
-        [...state.expandedFolders].filter((folderId) => folderIds.has(folderId))
-      )
-      if (!state.expandedFolders.size) {
-        state.expandedFolders = defaultExpanded
-      }
-    }
-
-    if (initial || state.moveExpandedFolders.size === 0) {
-      state.moveExpandedFolders = allExpanded
-    } else {
-      state.moveExpandedFolders = new Set(
-        [...state.moveExpandedFolders].filter((folderId) => folderIds.has(folderId))
-      )
-      if (!state.moveExpandedFolders.size) {
-        state.moveExpandedFolders = allExpanded
-      }
-    }
-
-    if (preserveSearch) {
-      state.debouncedQuery = state.searchQuery.trim()
-      runSearch()
-    } else {
-      state.searchRunId += 1
-      state.searchQuery = ''
-      state.debouncedQuery = ''
-      state.searchResults = []
-      state.activeResultIndex = 0
-      state.searchPending = false
-      state.naturalSearchPending = false
-      state.naturalSearchError = ''
-      state.naturalSearchPlan = null
-      abortNaturalSearchRequest()
-      state.searchHighlightQuery = ''
-      dom.searchInput.value = ''
-    }
+    void deferredHydration.catch((error) => {
+      console.warn('[Curator] popup 延后数据补齐失败', error)
+    })
   } catch (error) {
+    if (refreshRunId !== popupRefreshRunId) {
+      return
+    }
     state.searchRunId += 1
     state.searchPending = false
     state.naturalSearchPending = false
     state.loadError = error instanceof Error ? error.message : '书签加载失败，请稍后重试。'
     state.searchResults = []
   } finally {
+    if (refreshRunId !== popupRefreshRunId) {
+      return
+    }
     state.isLoading = false
     render()
     schedulePinyinEnrichment(state.pinyinEnrichmentRunId)
   }
+}
+
+async function loadPopupBaseRefreshData(refreshRunId: number): Promise<PopupRefreshBaseData> {
+  const tree = await getBookmarkTree()
+  perfMark('popup.bookmarkTreeLoaded')
+  const rootNode = Array.isArray(tree) ? tree[0] : tree
+  const bookmarksBarNode = findBookmarksBar(rootNode)
+  const extracted = extractBookmarkData(rootNode)
+  const indexedBookmarks = buildLightPopupSearchIndex({
+    bookmarks: extracted.bookmarks,
+    tagIndex: null,
+    snapshotIndex: null
+  })
+  perfMark('popup.indexBuilt')
+  perfMeasure('popup.indexBuildMs', 'popup.bookmarkTreeLoaded', 'popup.indexBuilt')
+
+  return {
+    refreshRunId,
+    rootNode,
+    bookmarksBarNode,
+    extracted,
+    indexedBookmarks
+  }
+}
+
+function applyPopupBaseRefreshData(
+  baseData: PopupRefreshBaseData,
+  { initial, preserveSearch }: { initial: boolean; preserveSearch: boolean }
+): void {
+  state.rawTreeRoot = baseData.rootNode
+  state.bookmarksBarNode = baseData.bookmarksBarNode
+  applyPopupIndexedBookmarkData({
+    indexedBookmarks: baseData.indexedBookmarks,
+    extracted: baseData.extracted,
+    tagIndex: null,
+    snapshotState: null
+  })
+  syncPopupExpandedFolderState(baseData.extracted, initial)
+  resetSearchForPopupRefresh(preserveSearch)
+}
+
+function applyPopupIndexedBookmarkData({
+  indexedBookmarks,
+  extracted,
+  tagIndex,
+  snapshotState
+}: {
+  indexedBookmarks: ReturnType<typeof buildLightPopupSearchIndex>
+  extracted: ReturnType<typeof extractBookmarkData>
+  tagIndex: Awaited<ReturnType<typeof loadBookmarkTagIndex>> | null
+  snapshotState: Awaited<ReturnType<typeof loadPopupSearchIndexSnapshotState>> | null
+}): void {
+  state.allBookmarks = indexedBookmarks
+  state.allFolders = extracted.folders
+  state.bookmarkMap = new Map(indexedBookmarks.map((bookmark) => [bookmark.id, bookmark]))
+  state.bookmarkDuplicateKeyMap = buildPopupBookmarkDuplicateKeyMap(indexedBookmarks)
+  state.folderMap = extracted.folderMap
+  state.searchTagIndex = tagIndex
+  state.searchSnapshotState = snapshotState
+  state.searchSnapshotFullTextReady = false
+  state.searchSnapshotFullTextPending = false
+  state.searchSnapshotFullTextRunId += 1
+  state.pinyinEnrichmentReady = false
+  state.pinyinEnrichmentPending = false
+  state.pinyinEnrichmentRunId += 1
+  clearSearchCaches()
+}
+
+function syncPopupExpandedFolderState(
+  extracted: ReturnType<typeof extractBookmarkData>,
+  initial: boolean
+): void {
+  const folderIds = new Set(extracted.folders.map((folder) => folder.id))
+  const defaultExpanded = getDefaultExpandedFolders(state.bookmarksBarNode)
+  const allExpanded = new Set(extracted.folders.map((folder) => folder.id))
+
+  if (state.selectedFolderFilterId && !folderIds.has(state.selectedFolderFilterId)) {
+    state.selectedFolderFilterId = null
+  }
+
+  if (initial || state.expandedFolders.size === 0) {
+    state.expandedFolders = defaultExpanded
+  } else {
+    state.expandedFolders = new Set(
+      [...state.expandedFolders].filter((folderId) => folderIds.has(folderId))
+    )
+    if (!state.expandedFolders.size) {
+      state.expandedFolders = defaultExpanded
+    }
+  }
+
+  if (initial || state.moveExpandedFolders.size === 0) {
+    state.moveExpandedFolders = allExpanded
+  } else {
+    state.moveExpandedFolders = new Set(
+      [...state.moveExpandedFolders].filter((folderId) => folderIds.has(folderId))
+    )
+    if (!state.moveExpandedFolders.size) {
+      state.moveExpandedFolders = allExpanded
+    }
+  }
+}
+
+function resetSearchForPopupRefresh(preserveSearch: boolean): void {
+  if (preserveSearch) {
+    state.debouncedQuery = state.searchQuery.trim()
+    runSearch()
+    return
+  }
+
+  state.searchRunId += 1
+  state.searchQuery = ''
+  state.debouncedQuery = ''
+  state.searchResults = []
+  state.activeResultIndex = 0
+  state.searchPending = false
+  state.naturalSearchPending = false
+  state.naturalSearchError = ''
+  state.naturalSearchPlan = null
+  abortNaturalSearchRequest()
+  state.searchHighlightQuery = ''
+  dom.searchInput.value = ''
+}
+
+function hydratePopupDeferredRefreshData(baseData: PopupRefreshBaseData): Promise<unknown> {
+  const indexHydration = hydratePopupDeferredEnhancements({
+    baseData,
+    loadDeferredData: loadPopupSearchEnhancementData,
+    applyDeferredData: applyPopupSearchEnhancementData
+  })
+
+  const currentTabHydration = hydrateCurrentTabState(baseData.refreshRunId)
+  currentTabHydrationPromise = currentTabHydration
+  void currentTabHydration.then(() => {
+    if (baseData.refreshRunId !== popupRefreshRunId) {
+      return
+    }
+
+    render()
+  }).finally(() => {
+    if (currentTabHydrationPromise === currentTabHydration) {
+      currentTabHydrationPromise = null
+    }
+  })
+  void hydrateNewTabPinnedState(baseData.refreshRunId).then(() => {
+    if (baseData.refreshRunId !== popupRefreshRunId) {
+      return
+    }
+
+    render()
+  })
+  void hydrateSavedSearches()
+
+  return indexHydration
+}
+
+async function loadPopupSearchEnhancementData(): Promise<PopupRefreshDeferredData> {
+  const [tagIndex, snapshotState] = await Promise.all([
+    loadBookmarkTagIndex().catch(() => null),
+    loadPopupSearchIndexSnapshotState()
+  ])
+
+  return { tagIndex, snapshotState }
+}
+
+function applyPopupSearchEnhancementData(
+  baseData: PopupRefreshBaseData,
+  deferredData: PopupRefreshDeferredData
+): void {
+  if (baseData.refreshRunId !== popupRefreshRunId) {
+    return
+  }
+
+  const indexedBookmarks = buildLightPopupSearchIndex({
+    bookmarks: baseData.extracted.bookmarks,
+    tagIndex: deferredData.tagIndex,
+    snapshotIndex: deferredData.snapshotState.index
+  })
+  applyPopupIndexedBookmarkData({
+    indexedBookmarks,
+    extracted: baseData.extracted,
+    tagIndex: deferredData.tagIndex,
+    snapshotState: deferredData.snapshotState
+  })
+  perfMark('popup.searchIndexReady.end')
+  perfMeasure('popup.searchIndexReady', 'popup.bookmarkTreeLoaded', 'popup.searchIndexReady.end')
+  if (state.currentTab) {
+    applyCurrentTabBookmarkMatch()
+  }
+  if (state.debouncedQuery) {
+    runSearch()
+  }
+  render()
+  schedulePinyinEnrichment(state.pinyinEnrichmentRunId)
 }
 
 function schedulePinyinEnrichment(runId: number): void {
@@ -952,8 +1136,26 @@ function ensurePinyinEnrichmentForQuery(query: string): void {
   schedulePinyinEnrichment(state.pinyinEnrichmentRunId)
 }
 
-async function hydrateCurrentTabState() {
-  state.currentTab = await getActiveTab().catch(() => null)
+async function hydrateCurrentTabState(refreshRunId = popupRefreshRunId) {
+  const currentTab = await getActiveTab().catch(() => null)
+  if (refreshRunId !== popupRefreshRunId) {
+    return
+  }
+
+  state.currentTab = currentTab
+  applyCurrentTabBookmarkMatch()
+}
+
+async function ensureCurrentTabStateHydrated(): Promise<void> {
+  if (currentTabHydrationPromise) {
+    await currentTabHydrationPromise
+    return
+  }
+
+  await hydrateCurrentTabState()
+}
+
+function applyCurrentTabBookmarkMatch() {
   const currentUrl = String(state.currentTab?.url || '').trim()
   const normalizedCurrentUrl = normalizeBookmarkSaveUrl(currentUrl)
   const matchedBookmark = normalizedCurrentUrl
@@ -974,15 +1176,23 @@ async function hydrateCurrentTabState() {
   }
 }
 
-async function hydrateNewTabPinnedState() {
+async function hydrateNewTabPinnedState(refreshRunId = popupRefreshRunId) {
   try {
     const stored = await getLocalStorage([STORAGE_KEYS.newTabWorkspaceSettings])
+    if (refreshRunId !== popupRefreshRunId) {
+      return
+    }
+
     const settings = normalizeNewTabWorkspaceSettings(
       stored[STORAGE_KEYS.newTabWorkspaceSettings] || POPUP_DEFAULT_WORKSPACE_STORAGE,
       { validBookmarkIds: state.bookmarkMap.keys() }
     )
     state.newTabPinnedIds = new Set(getActiveNewTabWorkspace(settings).pinnedIds)
   } catch {
+    if (refreshRunId !== popupRefreshRunId) {
+      return
+    }
+
     state.newTabPinnedIds = new Set()
   }
 }
@@ -1555,10 +1765,16 @@ function renderBanner() {
 function renderSearchTools() {
   const parsed = parseSearchQuery(state.searchQuery)
   const chips = parsed.chips
-  dom.searchChips.classList.toggle('hidden', chips.length === 0)
-  dom.searchChips.innerHTML = chips
+  const chipsHtml = chips
     .map((chip) => `<span class="search-filter-chip ${escapeAttr(chip.kind)}">${escapeHtml(chip.label)}</span>`)
     .join('')
+  dom.searchChips.classList.toggle('hidden', chips.length === 0)
+  replacePopupSectionHtml(
+    dom.searchChips,
+    searchChipsRenderState,
+    `search-chips:${chipsHtml}`,
+    chipsHtml
+  )
   renderSavedSearches()
 }
 
@@ -1573,7 +1789,12 @@ function renderSavedSearches() {
 
   dom.savedSearches.classList.toggle('hidden', !show)
   if (!show) {
-    dom.savedSearches.innerHTML = ''
+    replacePopupSectionHtml(
+      dom.savedSearches,
+      savedSearchesRenderState,
+      'saved-searches:hidden',
+      ''
+    )
     return
   }
 
@@ -1616,11 +1837,17 @@ function renderSavedSearches() {
     ? `<div id="saved-searches-list" class="saved-search-list">${items}</div>`
     : ''
 
-  dom.savedSearches.innerHTML = `
+  const html = `
     ${head}
     ${status}
     ${list}
   `
+  replacePopupSectionHtml(
+    dom.savedSearches,
+    savedSearchesRenderState,
+    `saved-searches:${html}`,
+    html
+  )
 }
 
 function queryHasAdvancedSearchSyntax(query: string): boolean {
@@ -1842,6 +2069,9 @@ function renderFilterBar() {
     ? state.folderMap.get(state.selectedFolderFilterId)
     : null
   const selectedPath = selectedFolder ? formatFolderPath(selectedFolder, state.folderMap) : ''
+  const breadcrumbsHtml = selectedFolder
+    ? renderPopupFolderBreadcrumbs(selectedFolder)
+    : ''
 
   dom.folderFilterTriggerText.textContent = selectedFolder
     ? `文件夹：${selectedPath || selectedFolder.title}`
@@ -1849,9 +2079,12 @@ function renderFilterBar() {
   dom.folderFilterTrigger.title = selectedPath || ''
   dom.clearFolderFilter.classList.toggle('hidden', !selectedFolder)
   dom.folderBreadcrumbs.classList.toggle('hidden', !selectedFolder)
-  dom.folderBreadcrumbs.innerHTML = selectedFolder
-    ? renderPopupFolderBreadcrumbs(selectedFolder)
-    : ''
+  replacePopupSectionHtml(
+    dom.folderBreadcrumbs,
+    folderBreadcrumbsRenderState,
+    `folder-breadcrumbs:${breadcrumbsHtml}`,
+    breadcrumbsHtml
+  )
 }
 
 function renderPopupFolderBreadcrumbs(folder) {
@@ -1899,11 +2132,18 @@ function renderSmartClassifier() {
   dom.smartTotal.textContent = `总计 ${state.allBookmarks.length}`
 
   if (!smartAvailable) {
+    state.smartClassifierRenderSignature = ''
     return
   }
 
   if (state.isLoading && state.smartStatus !== 'results') {
-    dom.smartClassifier.innerHTML = `<div class="state-panel">${renderPopupLoadingStack('正在读取当前网页…')}</div>`
+    const html = `<div class="state-panel">${renderPopupLoadingStack('正在读取当前网页…')}</div>`
+    replacePopupSectionHtml(
+      dom.smartClassifier,
+      smartClassifierRenderState,
+      `smart:loading-page:${currentUrl}:${state.allBookmarks.length}`,
+      html
+    )
     return
   }
 
@@ -1914,12 +2154,18 @@ function renderSmartClassifier() {
   }
 
   if (state.smartStatus === 'results') {
-    dom.smartClassifier.innerHTML = renderSmartResultCard()
+    const html = renderSmartResultCard()
+    replacePopupSectionHtml(
+      dom.smartClassifier,
+      smartClassifierRenderState,
+      `smart:results:${html}`,
+      html
+    )
     return
   }
 
   if (state.smartStatus === 'error') {
-    dom.smartClassifier.innerHTML = `
+    const html = `
       ${renderSmartPageCard()}
       <div class="smart-panel-head smart-panel-head-standalone">
         <p>智能分类失败</p>
@@ -1938,15 +2184,33 @@ function renderSmartClassifier() {
         </button>
       </div>
     `
+    replacePopupSectionHtml(
+      dom.smartClassifier,
+      smartClassifierRenderState,
+      `smart:error:${html}`,
+      html
+    )
     return
   }
 
   if (state.smartStatus === 'permission') {
-    dom.smartClassifier.innerHTML = renderSmartPermissionCard()
+    const html = renderSmartPermissionCard()
+    replacePopupSectionHtml(
+      dom.smartClassifier,
+      smartClassifierRenderState,
+      `smart:permission:${html}`,
+      html
+    )
     return
   }
 
-  dom.smartClassifier.innerHTML = renderSmartPageCard()
+  const html = renderSmartPageCard()
+  replacePopupSectionHtml(
+    dom.smartClassifier,
+    smartClassifierRenderState,
+    `smart:idle:${html}`,
+    html
+  )
 }
 
 function renderSmartPageCard() {
@@ -2115,10 +2379,16 @@ function renderSmartLoadingCard(currentProgress = state.smartProgressPercent) {
 function renderSmartLoadingState() {
   const existingCard = dom.smartClassifier.querySelector<HTMLElement>('.smart-loading-card')
   if (!existingCard) {
-    dom.smartClassifier.innerHTML = renderSmartLoadingCard(state.smartProgressPercent)
+    replacePopupSectionHtml(
+      dom.smartClassifier,
+      smartClassifierRenderState,
+      'smart:loading',
+      renderSmartLoadingCard(state.smartProgressPercent)
+    )
     return
   }
 
+  smartClassifierRenderState.signature = 'smart:loading'
   const step = Math.max(1, Math.min(state.smartStep || 1, SMART_LOADING_STEP_COUNT))
   const progress = getSmartProgressTarget()
   const label = existingCard.querySelector<HTMLElement>('.smart-loading-copy span')
@@ -2666,7 +2936,18 @@ function renderEditModal() {
     resetEditDraft(bookmark)
   }
 
-  dom.editBookmarkPath.textContent = bookmark.path || '未归档路径'
+  const draftFolder = state.editDraftParentId ? state.folderMap.get(state.editDraftParentId) : null
+  const draftPath = draftFolder
+    ? formatFolderPath(draftFolder, state.folderMap) || draftFolder.title
+    : bookmark.path || '未归档路径'
+  dom.editBookmarkPath.textContent = draftPath || '未归档路径'
+  dom.editBookmarkPath.classList.toggle('changed', state.editDraftParentId !== String(bookmark.parentId || ''))
+  dom.editFolderPickerButton.disabled = state.editSaving
+  dom.editFolderPickerButton.textContent = state.editFolderPickerOpen ? '收起' : '更改'
+  dom.editFolderPickerButton.setAttribute('aria-expanded', String(state.editFolderPickerOpen))
+  setPopupSurfaceOpen(dom.editFolderPicker, state.editFolderPickerOpen)
+  dom.editFolderSearchInput.value = state.editFolderSearchQuery
+  dom.editFolderList.innerHTML = state.editFolderPickerOpen ? renderEditFolderList(bookmark) : ''
   if (dom.editTitleInput.value !== state.editDraftTitle) {
     dom.editTitleInput.value = state.editDraftTitle
   }
@@ -2703,6 +2984,9 @@ function resetEditDraft(bookmark) {
   state.editDraftBookmarkId = String(bookmark?.id || '')
   state.editDraftTitle = String(bookmark?.title || '')
   state.editDraftUrl = String(bookmark?.url || '')
+  state.editDraftParentId = String(bookmark?.parentId || '')
+  state.editFolderPickerOpen = false
+  state.editFolderSearchQuery = ''
   state.editDraftDirty = false
   state.editSaving = false
 }
@@ -2712,6 +2996,9 @@ function clearEditDraft() {
   state.editDraftBookmarkId = ''
   state.editDraftTitle = ''
   state.editDraftUrl = ''
+  state.editDraftParentId = ''
+  state.editFolderPickerOpen = false
+  state.editFolderSearchQuery = ''
   state.editDraftDirty = false
   state.editSaving = false
 }
@@ -2769,8 +3056,12 @@ function isCurrentEditDraftDirty() {
   }
 
   return (
-    String(state.editDraftTitle || '') !== String(bookmark.title || '') ||
-    String(state.editDraftUrl || '') !== String(bookmark.url || '')
+    getPopupEditBookmarkDraftState({
+      bookmark,
+      draftTitle: state.editDraftTitle,
+      draftUrl: state.editDraftUrl,
+      draftParentId: state.editDraftParentId
+    }).dirty
   )
 }
 
@@ -2789,6 +3080,7 @@ function renderEditDraftControls() {
   dom.closeEditModal.disabled = saving
   dom.editTitleInput.disabled = saving
   dom.editUrlInput.disabled = saving
+  dom.editFolderSearchInput.disabled = saving
 }
 
 function syncBackdropVisibility() {
@@ -2875,6 +3167,20 @@ function renderMoveFolderList(bookmark) {
   const query = normalizeText(state.moveSearchQuery)
   const markup = roots
     .map((node) => renderMoveFolderNode(node, 0, query, bookmark))
+    .join('')
+
+  if (!markup.trim()) {
+    return '<div class="state-panel">未找到相关文件夹</div>'
+  }
+
+  return markup
+}
+
+function renderEditFolderList(bookmark) {
+  const roots = (state.rawTreeRoot?.children || []).filter((node) => !node.url)
+  const query = normalizeText(state.editFolderSearchQuery)
+  const markup = roots
+    .map((node) => renderEditFolderNode(node, 0, query, bookmark))
     .join('')
 
   if (!markup.trim()) {
@@ -3016,6 +3322,72 @@ function renderMoveFolderNode(node, depth, query, bookmark) {
           <span class="row-title">${highlightText(folder.title, state.moveSearchQuery)}</span>
           <span class="picker-path" title="${escapeAttr(folderPath)}">${highlightText(folderPath, state.moveSearchQuery)}</span>
           ${isCurrentFolder ? '<span class="picker-badge">当前位置</span>' : ''}
+        </span>
+      </button>
+    </div>
+    ${isExpanded ? childMarkup : ''}
+  `
+}
+
+function renderEditFolderNode(node, depth, query, bookmark) {
+  if (node.id === ROOT_ID) {
+    return ''
+  }
+
+  const folder = state.folderMap.get(node.id)
+  if (!folder) {
+    return ''
+  }
+
+  const childFolders = (node.children || []).filter((child) => !child.url)
+  const isFilterMode = Boolean(query)
+  const childMarkup = childFolders
+    .map((child) => renderEditFolderNode(child, depth + 1, query, bookmark))
+    .join('')
+
+  const matchesCurrent =
+    !query ||
+    folder.normalizedTitle.includes(query) ||
+    folder.normalizedPath.includes(query)
+
+  if (isFilterMode && !matchesCurrent && !childMarkup) {
+    return ''
+  }
+
+  const isExpanded = isFilterMode || state.moveExpandedFolders.has(node.id)
+  const isSelectedFolder = state.editDraftParentId === node.id
+  const isOriginalFolder = bookmark.parentId === node.id
+  const saving = state.editSaving || isPopupActionPending('edit', bookmark.id)
+  const folderPath = formatFolderPath(folder, state.folderMap) || folder.title || '未命名文件夹'
+  const toggleLabel = getPopupFolderToggleLabel(isExpanded ? '折叠文件夹' : '展开文件夹', folderPath)
+
+  return `
+    <div class="picker-row ${isSelectedFolder ? 'current' : ''}" style="--depth:${depth}">
+      <button
+        class="tree-toggle ${isExpanded ? 'expanded' : ''}"
+        type="button"
+        ${childFolders.length ? '' : 'data-disabled="true"'}
+        data-toggle-edit-folder="${escapeAttr(node.id)}"
+        role="treeitem"
+        aria-level="${depth + 1}"
+        aria-expanded="${childFolders.length ? String(isExpanded) : 'false'}"
+        aria-label="${escapeAttr(toggleLabel)}"
+      ></button>
+      <button
+        class="picker-folder-card"
+        type="button"
+        role="treeitem"
+        aria-level="${depth + 1}"
+        aria-selected="${isSelectedFolder ? 'true' : 'false'}"
+        data-select-edit-folder="${escapeAttr(node.id)}"
+        ${saving ? 'disabled' : ''}
+      >
+        <span class="folder-kind" aria-hidden="true"></span>
+        <span class="picker-folder-main">
+          <span class="row-title">${highlightText(folder.title, state.editFolderSearchQuery)}</span>
+          <span class="picker-path" title="${escapeAttr(folderPath)}">${highlightText(folderPath, state.editFolderSearchQuery)}</span>
+          ${isSelectedFolder ? '<span class="picker-badge">已选择</span>' : ''}
+          ${!isSelectedFolder && isOriginalFolder ? '<span class="picker-badge muted">原位置</span>' : ''}
         </span>
       </button>
     </div>
@@ -3456,6 +3828,29 @@ function handleMoveListClick(event) {
   }
 }
 
+function handleEditFolderListClick(event) {
+  const target = event.target
+  if (!(target instanceof Element)) {
+    return
+  }
+
+  const toggle = target.closest('[data-toggle-edit-folder]')
+  if (toggle && !state.editFolderSearchQuery.trim()) {
+    const folderId = toggle.getAttribute('data-toggle-edit-folder')
+    if (!toggle.hasAttribute('data-disabled')) {
+      toggleMoveFolder(folderId)
+      renderEditModal()
+    }
+    return
+  }
+
+  const folderButton = target.closest('[data-select-edit-folder]')
+  if (folderButton) {
+    const folderId = String(folderButton.getAttribute('data-select-edit-folder') || '').trim()
+    selectEditDraftFolder(folderId)
+  }
+}
+
 function handleSmartFolderListClick(event) {
   const toggle = event.target.closest('[data-toggle-smart-folder]')
   if (toggle && !state.smartFolderSearchQuery.trim()) {
@@ -3472,6 +3867,41 @@ function handleSmartFolderListClick(event) {
     const folderId = folderButton.getAttribute('data-smart-select-folder')
     void saveCurrentPageToFolder(folderId)
   }
+}
+
+function toggleEditFolderPicker() {
+  if (!state.editTargetBookmarkId || state.editSaving || hasBlockingPopupActionPending()) {
+    return
+  }
+
+  state.editFolderPickerOpen = !state.editFolderPickerOpen
+  if (!state.editFolderPickerOpen) {
+    state.editFolderSearchQuery = ''
+  }
+  renderEditModal()
+
+  if (state.editFolderPickerOpen) {
+    window.requestAnimationFrame(() => {
+      dom.editFolderSearchInput.focus()
+    })
+  }
+}
+
+function selectEditDraftFolder(folderId) {
+  const bookmark = state.editTargetBookmarkId
+    ? state.bookmarkMap.get(state.editTargetBookmarkId)
+    : null
+  if (!bookmark || state.editSaving || !folderId || !state.folderMap.has(folderId)) {
+    return
+  }
+
+  state.editDraftBookmarkId = String(bookmark.id)
+  state.editDraftParentId = folderId
+  state.editFolderPickerOpen = false
+  state.editFolderSearchQuery = ''
+  state.editDraftDirty = isCurrentEditDraftDirty()
+  clearEditDiscardGuard()
+  renderEditModal()
 }
 
 function openActionMenuFromToggle(bookmarkId, { focusLast = false } = {}) {
@@ -4452,8 +4882,14 @@ async function saveEditedBookmark() {
 
   const nextTitle = String(state.editDraftTitle || dom.editTitleInput.value).trim() || '未命名书签'
   const nextUrl = String(state.editDraftUrl || dom.editUrlInput.value).trim()
+  const savePlan = getPopupEditBookmarkSavePlan({
+    bookmark,
+    draftTitle: nextTitle,
+    draftUrl: nextUrl,
+    draftParentId: state.editDraftParentId
+  })
 
-  state.editDraftDirty = isCurrentEditDraftDirty()
+  state.editDraftDirty = savePlan.dirty
   if (!state.editDraftDirty) {
     renderEditDraftControls()
     return
@@ -4484,10 +4920,12 @@ async function saveEditedBookmark() {
   renderEditDraftControls()
 
   try {
-    await updateBookmark(bookmark.id, {
-      title: nextTitle,
-      url: nextUrl
-    })
+    if (savePlan.updateChanges) {
+      await updateBookmark(bookmark.id, savePlan.updateChanges)
+    }
+    if (savePlan.parentChanged && savePlan.parentId) {
+      await moveBookmark(bookmark.id, savePlan.parentId)
+    }
     showToast({
       type: 'success',
       message: '保存成功'

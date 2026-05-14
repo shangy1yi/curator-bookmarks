@@ -106,6 +106,10 @@ export interface PopupState {
   filteredBookmarksCacheKey: string
   filteredBookmarksCache: PopupSearchBookmark[]
   contentRenderHtml: string
+  smartClassifierRenderSignature: string
+  searchChipsRenderSignature: string
+  savedSearchesRenderSignature: string
+  folderBreadcrumbsRenderSignature: string
   activeMenuBookmarkId: string | null
   moveTargetBookmarkId: string | null
   moveSearchQuery: string
@@ -113,6 +117,9 @@ export interface PopupState {
   editDraftBookmarkId: string
   editDraftTitle: string
   editDraftUrl: string
+  editDraftParentId: string
+  editFolderPickerOpen: boolean
+  editFolderSearchQuery: string
   editDraftDirty: boolean
   editDiscardArmed: boolean
   editDiscardTimer: number | null
@@ -210,6 +217,10 @@ export const state: PopupState = {
   filteredBookmarksCacheKey: '',
   filteredBookmarksCache: [],
   contentRenderHtml: '',
+  smartClassifierRenderSignature: '',
+  searchChipsRenderSignature: '',
+  savedSearchesRenderSignature: '',
+  folderBreadcrumbsRenderSignature: '',
   activeMenuBookmarkId: null,
   moveTargetBookmarkId: null,
   moveSearchQuery: '',
@@ -217,6 +228,9 @@ export const state: PopupState = {
   editDraftBookmarkId: '',
   editDraftTitle: '',
   editDraftUrl: '',
+  editDraftParentId: '',
+  editFolderPickerOpen: false,
+  editFolderSearchQuery: '',
   editDraftDirty: false,
   editDiscardArmed: false,
   editDiscardTimer: null,

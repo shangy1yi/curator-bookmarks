@@ -11,7 +11,19 @@ import {
 } from '../shared/bookmark-tree.js'
 import { getLocalStorage, setLocalStorage } from '../shared/storage.js'
 import { initializeCustomSelects } from '../shared/custom-select.js'
+import { isBookmarkMenuInteractionTarget } from './bookmark-menu-interactions.js'
+import {
+  getSettingsGroupControlSyncActions,
+  normalizeSettingsDrawerSection,
+  type SettingsDrawerSection
+} from './settings-group-sync.js'
 import type { BookmarkRecord, ExtractedBookmarkData, FolderRecord } from '../shared/types.js'
+import {
+  buildFolderCandidateRenderSignature,
+  getCachedFolderCandidates,
+  type FolderCandidateCacheState,
+  type NewTabFolderCandidate
+} from './folder-candidate-cache.js'
 import {
   deleteSavedSearch,
   getSavedSearchesForScope,
@@ -46,12 +58,15 @@ import {
   normalizeIconSettings
 } from './icon-settings.js'
 import {
+  getIconPreviewSignature,
+  renderIconPreviewElement
+} from './icon-preview.js'
+import {
   buildNewTabSearchIndex,
   buildNewTabSourceNavigationItems,
   createMissingFolderView,
   createNewTabPage,
   createStateView,
-  buildNewTabPortalOverview,
   collectPortalBookmarkSourceItems,
   createLoadingStateView,
   getPortalQuickAccessItems,
@@ -64,10 +79,8 @@ import {
   getAdaptiveSearchWidthBounds,
   getVerticalCenterCollisionOffset,
   normalizeNewTabSearchText,
-  resolvePortalPanelLayout,
   type AdaptiveSearchOffsetBounds,
   type NewTabContentState,
-  type PortalOverview,
   type PortalQuickAccessItem,
   resolveNewTabContentState,
   type NewTabPageModule,
@@ -130,13 +143,31 @@ import {
   type NewTabModuleSettings
 } from './module-settings.js'
 import {
+  DEFAULT_FEATURED_BACKGROUND_PREFERENCES,
+  FEATURED_BACKGROUND_DISPLAY_LIMITS,
+  getFeaturedBackgroundDisplayCss,
+  normalizeFeaturedBackgroundPreferences,
+  type FeaturedBackgroundPreferences
+} from './featured-gallery-preferences.js'
+import { buildFeaturedBackgroundPickerItems } from './featured-gallery-list.js'
+import {
+  clearInstantWallpaper,
+  clearInstantWallpaperTarget,
+  createInstantWallpaperDataUrl,
+  readInstantWallpaper,
+  readInstantWallpaperTarget,
+  saveInstantWallpaper,
+  saveInstantWallpaperTarget,
+  type InstantWallpaperTargetRecord
+} from './instant-wallpaper.js'
+import {
   getActiveNewTabWorkspace,
   normalizeNewTabWorkspaceSettings,
   toggleNewTabWorkspacePin,
   updateNewTabWorkspace,
   type NewTabWorkspaceSettings
 } from './workspace-settings.js'
-import { mark as perfMark, measure as perfMeasure } from '../shared/perf.js'
+import { mark as perfMark, measure as perfMeasure, measureNow } from '../shared/perf.js'
 import { runIdle, runMicroIdle } from '../shared/idle.js'
 const FAVICON_SIZE = 64
 const MOTION_CLOSE_TOKEN = 'motionCloseToken'
@@ -227,26 +258,23 @@ type NewTabCommandSearchSuggestion = {
 type NewTabSearchSuggestion =
   | (SearchBookmarkSuggestion & { suggestionType?: 'bookmark' })
   | NewTabCommandSearchSuggestion
-type BookmarkHealthModule = typeof import('./bookmark-health.js')
-type NewTabBookmarkHealthResult = ReturnType<BookmarkHealthModule['buildNewTabBookmarkHealth']>
-type NewTabBookmarkHealthCard = NewTabBookmarkHealthResult['cards'][number]
 type BackgroundGalleryModule = typeof import('./background-gallery.js')
 type FeaturedBackgroundItem = BackgroundGalleryModule['FEATURED_BACKGROUND_ITEMS'][number]
+type BackgroundGalleryRefreshModule = typeof import('./background-gallery-refresh.js')
 type SpeedDialModule = typeof import('./speed-dial.js')
 type SpeedDialItem = ReturnType<SpeedDialModule['buildSpeedDialItems']>[number]
 type TimeSettingsModule = typeof import('./time-settings.js')
 type FaviconAccentModule = typeof import('./favicon-accent.js')
 type CustomIconPickerModule = typeof import('./custom-icon-picker.js')
 
-let bookmarkHealthModulePromise: Promise<BookmarkHealthModule> | null = null
 let backgroundGalleryModulePromise: Promise<BackgroundGalleryModule> | null = null
 let backgroundGalleryModule: BackgroundGalleryModule | null = null
+let backgroundGalleryRefreshModulePromise: Promise<BackgroundGalleryRefreshModule> | null = null
 let speedDialModulePromise: Promise<SpeedDialModule> | null = null
 let timeSettingsModulePromise: Promise<TimeSettingsModule> | null = null
 let timeSettingsModule: TimeSettingsModule | null = null
 let faviconAccentModulePromise: Promise<FaviconAccentModule> | null = null
 let customIconPickerModulePromise: Promise<CustomIconPickerModule> | null = null
-let bookmarkHealthRenderVersion = 0
 let featuredBackgroundUiVersion = 0
 let speedDialRenderVersion = 0
 let clockHydrationVersion = 0
@@ -319,11 +347,6 @@ async function removeRecycleEntryLazy(
   return removeRecycleEntry(...args)
 }
 
-function loadBookmarkHealthModule(): Promise<BookmarkHealthModule> {
-  bookmarkHealthModulePromise ||= import('./bookmark-health.js')
-  return bookmarkHealthModulePromise
-}
-
 function loadBackgroundGalleryModule(): Promise<BackgroundGalleryModule> {
   backgroundGalleryModulePromise ||= import('./background-gallery.js').then((mod) => {
     backgroundGalleryModule = mod
@@ -331,6 +354,11 @@ function loadBackgroundGalleryModule(): Promise<BackgroundGalleryModule> {
     return mod
   })
   return backgroundGalleryModulePromise
+}
+
+function loadBackgroundGalleryRefreshModule(): Promise<BackgroundGalleryRefreshModule> {
+  backgroundGalleryRefreshModulePromise ||= import('./background-gallery-refresh.js')
+  return backgroundGalleryRefreshModulePromise
 }
 
 function loadSpeedDialModule(): Promise<SpeedDialModule> {
@@ -364,7 +392,6 @@ const ACTIVITY_RECORD_LIMIT = 160
 const DASHBOARD_FRAME_READY_TIMEOUT_MS = 12000
 const DEFAULT_GENERAL_SETTINGS = {
   hideSettingsTrigger: false,
-  showPortalOverview: true,
   showQuickAccess: true,
   showSourceNavigation: true,
   openBookmarksInNewTab: false
@@ -385,16 +412,6 @@ interface NewTabFolderSection {
   path: string
   node: chrome.bookmarks.BookmarkTreeNode
   bookmarks: chrome.bookmarks.BookmarkTreeNode[]
-  directBookmarkCount: number
-  totalBookmarkCount: number
-}
-
-interface NewTabFolderCandidate {
-  id: string
-  title: string
-  path: string
-  normalizedTitle: string
-  normalizedPath: string
   directBookmarkCount: number
   totalBookmarkCount: number
 }
@@ -434,7 +451,6 @@ interface BookmarkLazyExpansionTarget {
 
 type MenuActionIcon = 'trash' | 'refresh' | 'save' | 'plus' | 'copy' | 'pin'
 type SettingsSaveState = 'idle' | 'saving' | 'saved' | 'error'
-type SettingsDrawerSection = 'source' | 'appearance' | 'search' | 'modules' | 'advanced'
 
 interface LastDeletedBookmarkState {
   bookmark: chrome.bookmarks.BookmarkTreeNode
@@ -500,6 +516,14 @@ const state = {
   backgroundUrlCachePendingUrls: new Set<string>(),
   backgroundStatus: '',
   backgroundStatusTone: 'info' as 'info' | 'success' | 'warning' | 'error',
+  featuredBackgroundGallery: [] as FeaturedBackgroundItem[],
+  featuredBackgroundFavoriteIds: [] as string[],
+  featuredBackgroundGalleryHydrated: false,
+  featuredBackgroundAllow1080p: false,
+  featuredBackgroundPreferences: { ...DEFAULT_FEATURED_BACKGROUND_PREFERENCES } as FeaturedBackgroundPreferences,
+  featuredBackgroundRefreshing: false,
+  featuredBackgroundStatus: '',
+  featuredBackgroundStatusTone: 'info' as 'info' | 'success' | 'warning' | 'error',
   draggingBookmarkId: '',
   dragPointerId: 0,
   dragLongPressTimer: 0,
@@ -546,6 +570,10 @@ const state = {
   folderSettings: { ...DEFAULT_FOLDER_SETTINGS } as NewTabFolderSettings,
   moduleSettings: { ...DEFAULT_NEW_TAB_MODULE_SETTINGS } as NewTabModuleSettings,
   workspaceSettings: normalizeNewTabWorkspaceSettings(null) as NewTabWorkspaceSettings,
+  folderCandidateCache: {
+    signature: '',
+    candidates: []
+  } as FolderCandidateCacheState,
   activity: {
     pinnedIds: [],
     records: {}
@@ -582,8 +610,16 @@ const featuredBackgroundModal = document.getElementById('background-featured-mod
 const featuredBackgroundModalGrid = document.getElementById('background-featured-modal-grid')
 const featuredBackgroundModalClose = document.getElementById('background-featured-modal-close')
 const featuredBackgroundPicker = document.getElementById('background-featured-picker')
+const featuredBackgroundRefreshButton = document.getElementById('background-featured-refresh')
+const featuredBackgroundStatus = document.getElementById('background-featured-status')
+const featuredBackgroundAllow1080pInput = document.getElementById('background-featured-allow-1080p')
+const featuredBackgroundDisplayModeInput = document.getElementById('background-featured-display-mode')
+const featuredBackgroundDisplaySizeInput = document.getElementById('background-featured-display-size')
+const featuredBackgroundPositionYInput = document.getElementById('background-featured-position-y')
 let clockTimer = 0
 let featuredBackgroundRefreshTimer = 0
+let featuredBackgroundPreferencesSaveTimer = 0
+let featuredBackgroundPreviewTimer = 0
 let backgroundApplyToken = 0
 let activeBackgroundObjectUrl = ''
 let lastAppliedBackgroundMediaSignature = ''
@@ -600,6 +636,8 @@ let deferredRenderFrame = 0
 let bookmarkTileRenderVersion = 0
 let settingsDrawerReturnFocusElement: HTMLElement | null = null
 let featuredBackgroundModalReturnFocusElement: HTMLElement | null = null
+let featuredBackgroundPreviewElement: HTMLElement | null = null
+let featuredBackgroundPreviewCard: HTMLElement | null = null
 let deferredRenderClockUpdate = false
 let searchSettingsSaveTimer = 0
 let searchSettingsSettleTimer = 0
@@ -779,12 +817,7 @@ function bindEvents(): void {
       return
     }
 
-    if (
-      target.closest('.bookmark-edit-menu') ||
-      target.closest('.bookmark-add-menu') ||
-      target.closest('.newtab-delete-toast') ||
-      target.closest('[data-bookmark-id]')
-    ) {
+    if (isBookmarkMenuInteractionTarget(target)) {
       return
     }
 
@@ -928,6 +961,15 @@ function updateAllSettingRangeVisuals(): void {
   }
 }
 
+function updateActiveSettingsGroupRangeVisuals(group: SettingsDrawerSection = state.activeSettingsGroup): void {
+  const activeGroup = normalizeSettingsDrawerSection(group)
+  for (const input of document.querySelectorAll<HTMLInputElement>(
+    `[data-settings-group="${activeGroup}"] .setting-range`
+  )) {
+    updateSettingRangeVisual(input)
+  }
+}
+
 function updateSettingRangeVisual(input: HTMLInputElement): void {
   const min = Number(input.min || 0)
   const max = Number(input.max || 100)
@@ -1066,10 +1108,24 @@ function bindTimeSettingsEvents(): void {
 function bindBackgroundSettingsEvents(): void {
   document.getElementById('background-type')?.addEventListener('change', handleBackgroundSettingsChange)
   document.getElementById('background-featured-id')?.addEventListener('change', handleBackgroundSettingsChange)
+  featuredBackgroundAllow1080pInput?.addEventListener('change', () => {
+    void handleFeaturedBackgroundPreferenceChange()
+  })
+  featuredBackgroundDisplayModeInput?.addEventListener('change', handleFeaturedBackgroundDisplayPreferenceCommit)
+  featuredBackgroundDisplaySizeInput?.addEventListener('input', handleFeaturedBackgroundDisplayPreferencePreview)
+  featuredBackgroundPositionYInput?.addEventListener('input', handleFeaturedBackgroundDisplayPreferencePreview)
+  featuredBackgroundDisplaySizeInput?.addEventListener('change', handleFeaturedBackgroundDisplayPreferenceCommit)
+  featuredBackgroundPositionYInput?.addEventListener('change', handleFeaturedBackgroundDisplayPreferenceCommit)
   featuredBackgroundPicker?.addEventListener('click', () => {
     void openFeaturedBackgroundPicker()
   })
+  featuredBackgroundRefreshButton?.addEventListener('click', () => {
+    void refreshFeaturedBackgroundGallery()
+  })
   featuredBackgroundModalClose?.addEventListener('click', closeFeaturedBackgroundPicker)
+  featuredBackgroundModalGrid?.addEventListener('scroll', () => {
+    clearFeaturedBackgroundHoverPreview()
+  })
   featuredBackgroundModal?.addEventListener('click', (event) => {
     if (event.target === featuredBackgroundModal) {
       closeFeaturedBackgroundPicker()
@@ -1142,9 +1198,6 @@ function bindGeneralSettingsEvents(): void {
     .getElementById('general-hide-settings-trigger')
     ?.addEventListener('change', handleGeneralSettingsChange)
   document
-    .getElementById('general-show-overview')
-    ?.addEventListener('change', handleGeneralSettingsChange)
-  document
     .getElementById('general-show-quick-access')
     ?.addEventListener('change', handleGeneralSettingsChange)
   document
@@ -1185,12 +1238,6 @@ function bindFolderSettingsEvents(): void {
     ?.addEventListener('change', handleModuleSettingsChange)
   document
     .getElementById('newtab-speed-dial-setting')
-    ?.addEventListener('click', handleModuleSettingsClick)
-  document
-    .getElementById('newtab-health-setting')
-    ?.addEventListener('change', handleModuleSettingsChange)
-  document
-    .getElementById('newtab-health-setting')
     ?.addEventListener('click', handleModuleSettingsClick)
 }
 
@@ -1262,7 +1309,6 @@ function handleGeneralSettingsChange(): void {
   syncGeneralSettingsControls()
   applyGeneralSettings()
   if (
-    previousSettings.showPortalOverview !== state.generalSettings.showPortalOverview ||
     previousSettings.showQuickAccess !== state.generalSettings.showQuickAccess ||
     previousSettings.showSourceNavigation !== state.generalSettings.showSourceNavigation
   ) {
@@ -1615,6 +1661,24 @@ function handleSearchSettingsCommit(): void {
   scheduleRender({ updateClock: true })
 }
 
+function handleFeaturedBackgroundDisplayPreferencePreview(): void {
+  state.featuredBackgroundPreferences = readFeaturedBackgroundPreferencesFromControls()
+  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
+  applyFeaturedBackgroundDisplayPreferences()
+  syncFeaturedBackgroundDisplayPreferenceControls()
+  scheduleFeaturedBackgroundPreferencesSave()
+}
+
+function handleFeaturedBackgroundDisplayPreferenceCommit(): void {
+  state.featuredBackgroundPreferences = readFeaturedBackgroundPreferencesFromControls()
+  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
+  applyFeaturedBackgroundDisplayPreferences()
+  syncFeaturedBackgroundDisplayPreferenceControls()
+  void saveFeaturedBackgroundPreferences().catch((error) => {
+    console.warn('精选图库显示设置保存失败。', error)
+  })
+}
+
 function applySearchSettingsLive(): void {
   const settings = state.searchSettings
   const widthBounds = state.searchWidthBounds || SEARCH_WIDTH_BOUNDS_FALLBACK
@@ -1657,12 +1721,14 @@ function handleBackgroundSettingsChange(): void {
   backgroundSettingsMutationVersion += 1
   preloadedBackgroundSettings = nextSettings
   setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(nextSettings))
+  syncInstantWallpaperTargetForSettings(nextSettings)
   void saveBackgroundSettings().catch((error) => {
     console.warn('新标签页背景设置保存失败。', error)
   })
   syncBackgroundSettingsControls()
   scheduleFeaturedBackgroundDailyRefresh()
   void applyBackgroundSettingsAfterCacheUpdate(shouldClearUrlCache)
+  scheduleFeaturedBackgroundGalleryCache()
 }
 
 async function applyBackgroundSettingsAfterCacheUpdate(shouldClearUrlCache: boolean): Promise<void> {
@@ -1719,6 +1785,7 @@ async function handleBackgroundFileChange(
     syncBackgroundSettingsControls()
     scheduleFeaturedBackgroundDailyRefresh()
     await applyBackgroundSettings()
+    scheduleFeaturedBackgroundGalleryCache()
     setBackgroundStatus(
       mediaType === 'image' ? '背景图片已保存。' : '背景视频已保存。',
       'success'
@@ -1738,52 +1805,77 @@ function handleTimeSettingsChange(): void {
   scheduleClockTick()
 }
 
+function syncActiveSettingsGroupControls(group: SettingsDrawerSection = state.activeSettingsGroup): void {
+  for (const action of getSettingsGroupControlSyncActions(group)) {
+    switch (action) {
+      case 'folder':
+        syncFolderSettingsControls()
+        break
+      case 'background':
+        syncBackgroundSettingsControls()
+        break
+      case 'featuredBackgroundDisplay':
+        syncFeaturedBackgroundDisplayPreferenceControls()
+        break
+      case 'search':
+        syncSearchSettingsControls()
+        break
+      case 'modules':
+        syncNewTabModernSettingsControls()
+        break
+      case 'general':
+        syncGeneralSettingsControls()
+        break
+      case 'icon':
+        syncIconSettingsControls()
+        break
+      case 'time':
+        syncTimeSettingsControls()
+        break
+    }
+  }
+}
+
 function openSettingsDrawer(options?: { focusFirstControl?: boolean; section?: SettingsDrawerSection }): void {
-  const focusFirstControl = options?.focusFirstControl !== false
-  setActiveSettingsGroup(options?.section || state.activeSettingsGroup || 'source', { scrollToTop: false })
-  settingsDrawerReturnFocusElement = document.activeElement instanceof HTMLElement
-    ? document.activeElement
-    : null
-  if (settingsDrawer) {
-    cancelExitMotion(settingsDrawer)
-  }
-  if (settingsBackdrop) {
-    cancelExitMotion(settingsBackdrop)
-  }
-  syncGeneralSettingsControls()
-  syncFolderSettingsControls()
-  syncBackgroundSettingsControls()
-  syncSearchSettingsControls()
-  syncIconSettingsControls()
-  syncTimeSettingsControls()
-  syncNewTabModernSettingsControls()
-  syncSettingsSaveStatus()
-  updateAllSettingRangeVisuals()
-  scheduleAdaptiveNewTabLayoutUpdate()
-  settingsDrawer?.classList.add('open')
-  settingsBackdrop?.classList.add('open')
-  settingsDrawer?.setAttribute('aria-hidden', 'false')
-  settingsDrawer?.removeAttribute('inert')
-  settingsTrigger?.setAttribute('aria-expanded', 'true')
-  document.body.classList.add('settings-open')
-  setSettingsModalBackgroundInert(true)
-  if (focusFirstControl) {
-    window.requestAnimationFrame(() => {
-      focusFirstSettingsDrawerControl()
-    })
-  }
-  if (options?.section) {
-    window.requestAnimationFrame(() => {
-      focusSettingsSection(options.section)
-    })
-  }
+  measureNow('newtab.openSettingsDrawer', () => {
+    const focusFirstControl = options?.focusFirstControl !== false
+    setActiveSettingsGroup(options?.section || state.activeSettingsGroup || 'source', { scrollToTop: false })
+    settingsDrawerReturnFocusElement = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    if (settingsDrawer) {
+      cancelExitMotion(settingsDrawer)
+    }
+    if (settingsBackdrop) {
+      cancelExitMotion(settingsBackdrop)
+    }
+    syncSettingsSaveStatus()
+    updateActiveSettingsGroupRangeVisuals()
+    scheduleAdaptiveNewTabLayoutUpdate()
+    settingsDrawer?.classList.add('open')
+    settingsBackdrop?.classList.add('open')
+    settingsDrawer?.setAttribute('aria-hidden', 'false')
+    settingsDrawer?.removeAttribute('inert')
+    settingsTrigger?.setAttribute('aria-expanded', 'true')
+    document.body.classList.add('settings-open')
+    setSettingsModalBackgroundInert(true)
+    if (focusFirstControl) {
+      window.requestAnimationFrame(() => {
+        focusFirstSettingsDrawerControl()
+      })
+    }
+    if (options?.section) {
+      window.requestAnimationFrame(() => {
+        focusSettingsSection(options.section)
+      })
+    }
+  })
 }
 
 function openFolderSourceSettings(): void {
   state.folderCandidatesExpanded = true
   state.folderCandidateQuery = ''
   openSettingsDrawer({ focusFirstControl: false, section: 'source' })
-  syncFolderSettingsControls()
 }
 
 function focusSettingsSection(section: SettingsDrawerSection): void {
@@ -1813,43 +1905,37 @@ function setActiveSettingsGroup(
   section: SettingsDrawerSection,
   { scrollToTop = true }: { scrollToTop?: boolean } = {}
 ): void {
-  const nextSection = normalizeSettingsDrawerSection(section)
-  state.activeSettingsGroup = nextSection
-  settingsDrawer?.setAttribute('data-active-settings-group', nextSection)
+  measureNow('newtab.setActiveSettingsGroup', () => {
+    const nextSection = normalizeSettingsDrawerSection(section)
+    state.activeSettingsGroup = nextSection
+    settingsDrawer?.setAttribute('data-active-settings-group', nextSection)
 
-  const settingsTabs = Array.from(document.querySelectorAll<HTMLElement>('[data-settings-group-tab]'))
-  settingsTabs[0]?.parentElement?.style.setProperty('--settings-tab-count', String(settingsTabs.length))
-  settingsTabs.forEach((tab, index) => {
-    const active = normalizeSettingsDrawerSection(tab.dataset.settingsGroupTab) === nextSection
-    tab.classList.toggle('active', active)
-    tab.setAttribute('aria-selected', String(active))
-    tab.setAttribute('aria-pressed', String(active))
-    tab.tabIndex = active ? 0 : -1
-    if (active) {
-      tab.parentElement?.style.setProperty('--settings-tab-index', String(index))
+    const settingsTabs = Array.from(document.querySelectorAll<HTMLElement>('[data-settings-group-tab]'))
+    settingsTabs[0]?.parentElement?.style.setProperty('--settings-tab-count', String(settingsTabs.length))
+    settingsTabs.forEach((tab, index) => {
+      const active = normalizeSettingsDrawerSection(tab.dataset.settingsGroupTab) === nextSection
+      tab.classList.toggle('active', active)
+      tab.setAttribute('aria-selected', String(active))
+      tab.setAttribute('aria-pressed', String(active))
+      tab.tabIndex = active ? 0 : -1
+      if (active) {
+        tab.parentElement?.style.setProperty('--settings-tab-index', String(index))
+      }
+    })
+
+    document.querySelectorAll<HTMLElement>('[data-settings-group]').forEach((panel) => {
+      const active = normalizeSettingsDrawerSection(panel.dataset.settingsGroup) === nextSection
+      panel.hidden = !active
+      panel.setAttribute('aria-hidden', String(!active))
+    })
+
+    if (scrollToTop) {
+      const scrollHost = settingsDrawer?.querySelector<HTMLElement>('.settings-drawer-scroll')
+      scrollHost?.scrollTo({ top: 0, behavior: 'smooth' })
     }
+    syncActiveSettingsGroupControls(nextSection)
+    updateActiveSettingsGroupRangeVisuals(nextSection)
   })
-
-  document.querySelectorAll<HTMLElement>('[data-settings-group]').forEach((panel) => {
-    const active = normalizeSettingsDrawerSection(panel.dataset.settingsGroup) === nextSection
-    panel.hidden = !active
-    panel.setAttribute('aria-hidden', String(!active))
-  })
-
-  if (scrollToTop) {
-    const scrollHost = settingsDrawer?.querySelector<HTMLElement>('.settings-drawer-scroll')
-    scrollHost?.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-}
-
-function normalizeSettingsDrawerSection(value: unknown): SettingsDrawerSection {
-  const section = String(value || '')
-  return section === 'appearance' ||
-    section === 'search' ||
-    section === 'modules' ||
-    section === 'advanced'
-    ? section
-    : 'source'
 }
 
 function closeSettingsDrawer(): void {
@@ -3939,6 +4025,9 @@ async function refreshNewTab(): Promise<void> {
       getBookmarkTree(),
       getLocalStorage([
         STORAGE_KEYS.newTabCustomIcons,
+        STORAGE_KEYS.newTabFeaturedBackgroundGallery,
+        STORAGE_KEYS.newTabFeaturedBackgroundFavorites,
+        STORAGE_KEYS.newTabFeaturedBackgroundPreferences,
         STORAGE_KEYS.newTabSearchSettings,
         STORAGE_KEYS.newTabIconSettings,
         STORAGE_KEYS.newTabFaviconAccentCache,
@@ -3972,6 +4061,14 @@ async function refreshNewTab(): Promise<void> {
     state.folderSections = folderSections
     refreshDerivedBookmarkState()
     state.customIcons = normalizeCustomIcons(stored[STORAGE_KEYS.newTabCustomIcons])
+    const featuredBackgroundPreferences = normalizeFeaturedBackgroundPreferences(
+      stored[STORAGE_KEYS.newTabFeaturedBackgroundPreferences]
+    )
+    state.featuredBackgroundGallery = normalizeFeaturedBackgroundGallery(stored[STORAGE_KEYS.newTabFeaturedBackgroundGallery])
+    state.featuredBackgroundFavoriteIds = normalizeFeaturedBackgroundFavoriteIds(stored[STORAGE_KEYS.newTabFeaturedBackgroundFavorites])
+    state.featuredBackgroundGalleryHydrated = true
+    state.featuredBackgroundPreferences = featuredBackgroundPreferences
+    state.featuredBackgroundAllow1080p = featuredBackgroundPreferences.allow1080p
     state.faviconAccentCache = normalizeFaviconAccentCache(stored[STORAGE_KEYS.newTabFaviconAccentCache])
     state.activity = normalizeNewTabActivity(null, state.allBookmarks)
     state.workspaceSettings = normalizeNewTabWorkspaceSettings(stored[STORAGE_KEYS.newTabWorkspaceSettings], {
@@ -3981,6 +4078,7 @@ async function refreshNewTab(): Promise<void> {
     if (backgroundMutationVersionAtStart === backgroundSettingsMutationVersion) {
       state.backgroundSettings = preloadedBackgroundSettings || state.backgroundSettings
     }
+    migrateStoredFeaturedBackgroundId()
     state.searchSettings = normalizeSearchSettings(stored[STORAGE_KEYS.newTabSearchSettings])
     state.iconSettings = normalizeIconSettings(stored[STORAGE_KEYS.newTabIconSettings])
     state.generalSettings = normalizeGeneralSettings(stored[STORAGE_KEYS.newTabGeneralSettings])
@@ -4003,8 +4101,10 @@ async function refreshNewTab(): Promise<void> {
     render()
     renderDeleteToast()
     syncBackgroundSettingsControls()
+    syncFeaturedBackgroundDisplayPreferenceControls()
     scheduleFeaturedBackgroundDailyRefresh()
     void applyBackgroundSettings()
+    scheduleFeaturedBackgroundGalleryCache()
     syncSearchSettingsControls()
     syncIconSettingsControls()
     syncGeneralSettingsControls()
@@ -4085,9 +4185,12 @@ async function preloadBackgroundSettings(): Promise<typeof DEFAULT_BACKGROUND_SE
       state.backgroundSettings = nextSettings
       preloadedBackgroundSettings = nextSettings
       setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(state.backgroundSettings))
+      syncInstantWallpaperTargetForSettings(nextSettings)
       syncBackgroundSettingsControls()
+      syncFeaturedBackgroundDisplayPreferenceControls()
       scheduleFeaturedBackgroundDailyRefresh()
       void applyBackgroundSettings()
+      scheduleFeaturedBackgroundGalleryCache()
     }
     return nextSettings
   } catch (error) {
@@ -6601,9 +6704,6 @@ function createConfigurableNewTabModule(key: NewTabModuleSettingKey): HTMLElemen
   if (key === 'speedDial') {
     return createSpeedDialPanel()
   }
-  if (key === 'health') {
-    return createBookmarkHealthPanel()
-  }
   return null
 }
 
@@ -6818,135 +6918,6 @@ function createSpeedDialLink(
   return link
 }
 
-function createBookmarkHealthPanel(): HTMLElement | null {
-  if (!state.moduleSettings.health) {
-    return null
-  }
-
-  const section = document.createElement('section')
-  section.className = 'newtab-bookmark-health'
-  section.setAttribute('aria-label', '书签健康提醒')
-  section.setAttribute('aria-busy', 'true')
-
-  const header = document.createElement('div')
-  header.className = 'newtab-module-heading'
-  const title = document.createElement('h2')
-  title.textContent = '书签健康'
-  const meta = document.createElement('span')
-  meta.textContent = '正在检查'
-  header.append(title, meta)
-
-  const list = createBookmarkHealthLoadingGrid()
-  section.append(header, list)
-
-  hydrateBookmarkHealthPanel(section)
-  return section
-}
-
-function hydrateBookmarkHealthPanel(section: HTMLElement): void {
-  const renderVersion = ++bookmarkHealthRenderVersion
-  void loadBookmarkHealthModule()
-    .then((bookmarkHealth) => {
-      if (
-        renderVersion !== bookmarkHealthRenderVersion ||
-        !section.isConnected ||
-        !state.moduleSettings.health
-      ) {
-        return
-      }
-
-      const health = bookmarkHealth.buildNewTabBookmarkHealth({
-        bookmarks: getAllBookmarkRecords(),
-        tagIndex: state.bookmarkTagIndex,
-        snapshotIndex: state.searchSnapshotIndex,
-        activity: state.activity
-      })
-
-      if (!bookmarkHealth.hasActionableBookmarkHealth(health.cards) && health.totalBookmarks <= 0) {
-        section.remove()
-        return
-      }
-
-      renderBookmarkHealthPanel(section, health, bookmarkHealth.hasActionableBookmarkHealth)
-    })
-    .catch(() => {
-      if (!section.isConnected) {
-        return
-      }
-      section.setAttribute('aria-busy', 'false')
-      const meta = section.querySelector<HTMLElement>('.newtab-module-heading span')
-      if (meta) {
-        meta.textContent = '暂时无法检查'
-      }
-    })
-}
-
-function renderBookmarkHealthPanel(
-  section: HTMLElement,
-  health: NewTabBookmarkHealthResult,
-  hasActionableBookmarkHealth: BookmarkHealthModule['hasActionableBookmarkHealth']
-): void {
-  const visibleCards = health.cards.filter((card) => card.count > 0).slice(0, 4)
-  const cards = visibleCards.length ? visibleCards : health.cards.slice(0, 3)
-  const meta = section.querySelector<HTMLElement>('.newtab-module-heading span')
-  if (meta) {
-    meta.textContent = hasActionableBookmarkHealth(health.cards)
-      ? `${visibleCards.length || cards.length} 项建议`
-      : `${health.totalBookmarks} 个书签 · 当前没有明显待处理项`
-  }
-
-  const existingList = section.querySelector<HTMLElement>('[data-health-grid="true"]')
-  const list = existingList || document.createElement('div')
-  list.className = 'newtab-health-grid'
-  list.dataset.healthGrid = 'true'
-  list.replaceChildren()
-
-  for (const card of cards) {
-    list.appendChild(createBookmarkHealthCard(card))
-  }
-
-  if (!existingList) {
-    section.appendChild(list)
-  }
-  section.setAttribute('aria-busy', 'false')
-}
-
-function createBookmarkHealthCard(card: NewTabBookmarkHealthCard): HTMLButtonElement {
-  const button = document.createElement('button')
-  button.className = 'newtab-health-card'
-  button.type = 'button'
-  button.dataset.severity = card.severity
-  button.setAttribute('aria-label', `${card.label}：${card.detail}。打开对应整理入口`)
-  button.addEventListener('click', () => {
-    openOptionsHash(card.actionHash)
-  })
-
-  const count = document.createElement('strong')
-  count.textContent = String(card.count)
-  const label = document.createElement('span')
-  label.textContent = card.label
-  const detail = document.createElement('small')
-  detail.textContent = card.detail
-  button.append(count, label, detail)
-  return button
-}
-
-function createBookmarkHealthLoadingCard(): HTMLElement {
-  const placeholder = document.createElement('div')
-  placeholder.className = 'newtab-health-card loading'
-  placeholder.setAttribute('role', 'status')
-  placeholder.textContent = '检查中'
-  return placeholder
-}
-
-function createBookmarkHealthLoadingGrid(): HTMLElement {
-  const list = document.createElement('div')
-  list.className = 'newtab-health-grid'
-  list.dataset.healthGrid = 'true'
-  list.appendChild(createBookmarkHealthLoadingCard())
-  return list
-}
-
 function appendBookmarkTilesInChunks(
   list: HTMLElement,
   section: NewTabFolderSection,
@@ -7139,123 +7110,17 @@ function createFolderAddButton(section: NewTabFolderSection): HTMLButtonElement 
 }
 
 function createPortalPanel(): HTMLElement | null {
-  const showOverview = state.generalSettings.showPortalOverview
-  const showQuickAccess = state.generalSettings.showQuickAccess
-  const overview = buildNewTabPortalOverview({
-    sections: state.folderSections,
-    activityRecords: state.activity.records,
-    now: Date.now()
-  })
   const quickAccess = createQuickAccessPanel()
-  const layout = resolvePortalPanelLayout({
-    showOverview,
-    hasOverviewSignal: hasPortalOverviewSignal(overview),
-    hasQuickAccess: Boolean(quickAccess)
-  })
-
-  if (layout === 'hidden') {
+  if (!quickAccess) {
     return null
   }
 
   const panel = document.createElement('section')
-  panel.className = layout === 'full' ? 'newtab-portal' : `newtab-portal ${layout}`
-  panel.setAttribute('aria-label', '今日门户')
-
-  if (layout === 'full' || layout === 'overview-only') {
-    panel.appendChild(createPortalOverview(overview, {
-      showQuickAccess,
-      hasQuickAccess: Boolean(quickAccess)
-    }))
-  }
-  if (quickAccess) {
-    panel.appendChild(quickAccess)
-  }
+  panel.className = 'newtab-portal quick-only'
+  panel.setAttribute('aria-label', 'Curator 常用和新近添加书签')
+  panel.appendChild(quickAccess)
 
   return panel
-}
-
-function hasPortalOverviewSignal(overview: PortalOverview): boolean {
-  return overview.openedTodayCount > 0 || overview.addedTodayCount > 0
-}
-
-function createPortalOverview(
-  overview: PortalOverview,
-  options: {
-    showQuickAccess: boolean
-    hasQuickAccess: boolean
-  }
-): HTMLElement {
-  const section = document.createElement('section')
-  section.className = 'newtab-portal-overview'
-  section.setAttribute('aria-label', '今日概览')
-
-  const heading = document.createElement('div')
-  heading.className = 'newtab-portal-heading'
-
-  const title = document.createElement('strong')
-  title.textContent = '今日'
-
-  const meta = document.createElement('span')
-  meta.textContent = createPortalSummaryText(overview, options)
-
-  heading.append(title, meta)
-
-  const stats = document.createElement('div')
-  stats.className = 'newtab-portal-stats'
-  stats.append(...createPortalStats(overview))
-  if (stats.childElementCount) {
-    section.appendChild(stats)
-  }
-
-  section.prepend(heading)
-  return section
-}
-
-function createPortalStats(overview: PortalOverview): HTMLElement[] {
-  const stats: HTMLElement[] = []
-
-  if (overview.openedTodayCount > 0) {
-    stats.push(createPortalStat('今日打开', overview.openedTodayCount))
-  }
-  if (overview.addedTodayCount > 0) {
-    stats.push(createPortalStat('今日新增', overview.addedTodayCount))
-  }
-
-  return stats
-}
-
-function createPortalSummaryText(
-  overview: PortalOverview,
-  options: {
-    showQuickAccess: boolean
-    hasQuickAccess: boolean
-  }
-): string {
-  if (options.hasQuickAccess) {
-    return 'Curator 常用和新近添加已整理'
-  }
-
-  if (overview.addedTodayCount > 0) {
-    return `今天新增 ${overview.addedTodayCount} 个书签`
-  }
-  if (overview.bookmarkCount > 0) {
-    return '从这里继续浏览'
-  }
-  return '等待添加书签'
-}
-
-function createPortalStat(label: string, value: number): HTMLElement {
-  const stat = document.createElement('span')
-  stat.className = 'newtab-portal-stat'
-
-  const number = document.createElement('strong')
-  number.textContent = String(Math.max(0, value))
-
-  const copy = document.createElement('span')
-  copy.textContent = label
-
-  stat.append(number, copy)
-  return stat
 }
 
 function createQuickAccessPanel(): HTMLElement | null {
@@ -7569,6 +7434,9 @@ function cleanupNewTabRuntime(): void {
   clockTimer = 0
   window.clearTimeout(featuredBackgroundRefreshTimer)
   featuredBackgroundRefreshTimer = 0
+  window.clearTimeout(featuredBackgroundPreferencesSaveTimer)
+  featuredBackgroundPreferencesSaveTimer = 0
+  clearFeaturedBackgroundHoverPreview()
   window.clearTimeout(searchSettingsSaveTimer)
   searchSettingsSaveTimer = 0
   window.clearTimeout(searchSettingsSettleTimer)
@@ -8500,10 +8368,74 @@ function normalizeFeaturedBackgroundId(value: unknown): string {
   if (!id) {
     return ''
   }
-  if (!backgroundGalleryModule) {
+  if (state.featuredBackgroundGallery.some((item) => item.id === id)) {
+    return id
+  }
+  if (!backgroundGalleryModule || !state.featuredBackgroundGalleryHydrated) {
     return id
   }
   return backgroundGalleryModule.getFeaturedBackgroundItemById(id)?.id || ''
+}
+
+function normalizeFeaturedBackgroundGallery(rawItems: unknown): FeaturedBackgroundItem[] {
+  if (!Array.isArray(rawItems)) {
+    return []
+  }
+
+  const items: FeaturedBackgroundItem[] = []
+  const seen = new Set<string>()
+  for (const rawItem of rawItems) {
+    const item = normalizeFeaturedBackgroundGalleryItem(rawItem)
+    if (!item || seen.has(item.id)) {
+      continue
+    }
+    seen.add(item.id)
+    items.push(item)
+  }
+  return items.slice(0, 72)
+}
+
+function normalizeFeaturedBackgroundGalleryItem(rawItem: unknown): FeaturedBackgroundItem | null {
+  if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) {
+    return null
+  }
+
+  const item = rawItem as Record<string, unknown>
+  const id = String(item.id || '').trim()
+  const title = String(item.title || '').trim()
+  const provider = String(item.provider || '')
+  const imageUrl = normalizeBackgroundImageUrl(String(item.imageUrl || ''))
+  const sourceUrl = normalizeBackgroundImageUrl(String(item.sourceUrl || ''))
+  const credit = String(item.credit || '').trim()
+  const license = String(item.license || '').trim()
+  if (!id || !title || !imageUrl || !sourceUrl || !credit || !license ||
+    (provider !== 'nasa' && provider !== 'met' && provider !== 'wikimedia')) {
+    return null
+  }
+
+  return {
+    id,
+    title,
+    provider,
+    imageUrl,
+    sourceUrl,
+    credit,
+    license,
+    accentColor: normalizeHexColor(item.accentColor, '#050506'),
+    dynamic: item.dynamic === true,
+    width: normalizePositiveDimension(item.width),
+    height: normalizePositiveDimension(item.height)
+  }
+}
+
+function normalizeFeaturedBackgroundFavoriteIds(rawIds: unknown): string[] {
+  const source = Array.isArray(rawIds) ? rawIds : []
+  return [...new Set(source.map((id) => String(id || '').trim()).filter(Boolean))].slice(0, 72)
+}
+
+function normalizePositiveDimension(value: unknown): number | undefined {
+  const dimension = Math.round(Number(value))
+  return Number.isFinite(dimension) && dimension > 0 ? dimension : undefined
 }
 
 function readBackgroundSettingsFromControls(): typeof DEFAULT_BACKGROUND_SETTINGS {
@@ -8548,6 +8480,9 @@ function syncBackgroundSettingsControls(): void {
   const featuredRow = document.getElementById('background-featured-row')
   const featuredCreditRow = document.getElementById('background-featured-credit-row')
   const featuredCredit = document.getElementById('background-featured-credit')
+  const featuredDisplayRow = document.getElementById('background-featured-display-row')
+  const featuredDisplaySizeRow = document.getElementById('background-featured-display-size-row')
+  const featuredPositionYRow = document.getElementById('background-featured-position-y-row')
   const imageRow = document.getElementById('background-image-row')
   const videoRow = document.getElementById('background-video-row')
   const urlRow = document.getElementById('background-url-row')
@@ -8589,6 +8524,15 @@ function syncBackgroundSettingsControls(): void {
   }
   if (featuredCreditRow instanceof HTMLElement) {
     featuredCreditRow.hidden = settings.type !== 'featured'
+  }
+  if (featuredDisplayRow instanceof HTMLElement) {
+    featuredDisplayRow.hidden = settings.type !== 'featured'
+  }
+  if (featuredDisplaySizeRow instanceof HTMLElement) {
+    featuredDisplaySizeRow.hidden = settings.type !== 'featured'
+  }
+  if (featuredPositionYRow instanceof HTMLElement) {
+    featuredPositionYRow.hidden = settings.type !== 'featured'
   }
   if (featuredCredit instanceof HTMLAnchorElement) {
     const featuredItem = getActiveFeaturedBackgroundItemSync(settings)
@@ -8663,9 +8607,11 @@ function syncBackgroundSettingsControls(): void {
     maskBlurRow.hidden = !settings.maskEnabled
     maskBlurRow.classList.remove('setting-row-disabled')
   }
+  syncFeaturedBackgroundDisplayPreferenceControls()
 }
 
 async function saveBackgroundSettings(): Promise<void> {
+  syncInstantWallpaperTargetForSettings(state.backgroundSettings)
   await saveSettingsWithFeedback({
     [STORAGE_KEYS.newTabBackgroundSettings]: state.backgroundSettings
   })
@@ -8680,6 +8626,9 @@ function migrateStoredFeaturedBackgroundId(gallery = backgroundGalleryModule): v
   if (gallery.getFeaturedBackgroundItemById(state.backgroundSettings.featuredId)) {
     return
   }
+  if (getStoredFeaturedBackgroundItemById(state.backgroundSettings.featuredId) || !state.featuredBackgroundGalleryHydrated) {
+    return
+  }
 
   const previousSettings = state.backgroundSettings
   const nextSettings = normalizeBackgroundSettings({
@@ -8690,6 +8639,7 @@ function migrateStoredFeaturedBackgroundId(gallery = backgroundGalleryModule): v
   backgroundSettingsMutationVersion += 1
   preloadedBackgroundSettings = nextSettings
   setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(nextSettings))
+  syncInstantWallpaperTargetForSettings(nextSettings)
   syncBackgroundSettingsControls()
   scheduleFeaturedBackgroundDailyRefresh()
   void saveBackgroundSettings().catch((error) => {
@@ -8814,6 +8764,7 @@ async function applyBackgroundSettings(): Promise<void> {
   }
   const mediaSignature = getBackgroundMediaSignature(settings)
   applyBackgroundMaskSettings(settings)
+  applyFeaturedBackgroundDisplayPreferences()
   setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(settings))
 
   if (
@@ -8828,6 +8779,8 @@ async function applyBackgroundSettings(): Promise<void> {
     clearVideoBackground()
     setActiveBackgroundObjectUrl('')
     document.body.style.backgroundImage = ''
+    clearInstantWallpaperIfSignatureChanged('')
+    syncInstantWallpaperTargetForSettings(settings, mediaSignature)
     document.documentElement.style.setProperty('--bg', settings.color)
     lastAppliedBackgroundMediaSignature = mediaSignature
     markWallpaperReady()
@@ -8839,12 +8792,15 @@ async function applyBackgroundSettings(): Promise<void> {
   if (isRemoteBackgroundType(settings.type)) {
     const imageUrl = getRemoteBackgroundImageUrl(settings)
     if (imageUrl) {
+      syncInstantWallpaperTargetForSettings(settings, mediaSignature)
       markWallpaperReady()
       void applyUrlBackgroundImage(imageUrl, applyToken, mediaSignature)
     } else {
       clearVideoBackground()
       setActiveBackgroundObjectUrl('')
       document.body.style.backgroundImage = ''
+      clearInstantWallpaperIfSignatureChanged('')
+      syncInstantWallpaperTargetForSettings(settings, mediaSignature)
       lastAppliedBackgroundMediaSignature = mediaSignature
       markWallpaperReady()
     }
@@ -8860,6 +8816,8 @@ async function applyBackgroundSettings(): Promise<void> {
   clearVideoBackground()
   setActiveBackgroundObjectUrl('')
   document.body.style.backgroundImage = ''
+  clearInstantWallpaperIfSignatureChanged('')
+  syncInstantWallpaperTargetForSettings(settings, mediaSignature)
   markWallpaperPending()
 
   const mediaType = settings.type
@@ -8889,6 +8847,7 @@ async function applyBackgroundSettings(): Promise<void> {
     if (ready) {
       document.body.style.backgroundImage = `url("${escapeCssUrl(objectUrl)}")`
       lastAppliedBackgroundMediaSignature = mediaSignature
+      void updateInstantWallpaperFromBlob(mediaRecord.blob, mediaSignature)
     } else {
       setActiveBackgroundObjectUrl('')
     }
@@ -9012,6 +8971,7 @@ async function applyUrlBackgroundImage(
       if (ready) {
         clearVideoBackground()
         lastAppliedBackgroundMediaSignature = mediaSignature
+        void updateInstantWallpaperFromBlob(cachedRecord.blob, mediaSignature)
       }
       markWallpaperReady()
       return
@@ -9020,7 +8980,7 @@ async function applyUrlBackgroundImage(
     applyDirectRemoteBackgroundImage(imageUrl, mediaSignature)
     directImageApplied = true
     markWallpaperReady()
-    void cacheBackgroundUrlImage(imageUrl)
+    void cacheBackgroundUrlImage(imageUrl, mediaSignature)
   } catch {
     if (applyToken === backgroundApplyToken) {
       if (!directImageApplied) {
@@ -9034,11 +8994,25 @@ async function applyUrlBackgroundImage(
 function applyDirectRemoteBackgroundImage(imageUrl: string, mediaSignature: string): void {
   clearVideoBackground()
   setActiveBackgroundObjectUrl('')
-  document.body.style.backgroundImage = `url("${escapeCssUrl(imageUrl)}")`
+  applyFeaturedBackgroundDisplayPreferences()
+  syncInstantWallpaperTargetForSettings(state.backgroundSettings, mediaSignature)
+  const remoteLayer = `url("${escapeCssUrl(imageUrl)}")`
+  const fallbackLayer = getInstantWallpaperFallbackLayer(mediaSignature)
+  document.body.style.backgroundImage = fallbackLayer
+    ? `${remoteLayer}, ${fallbackLayer}`
+    : remoteLayer
   lastAppliedBackgroundMediaSignature = mediaSignature
 }
 
-async function cacheBackgroundUrlImage(imageUrl: string): Promise<void> {
+function getInstantWallpaperFallbackLayer(mediaSignature = lastAppliedBackgroundMediaSignature): string {
+  const instantWallpaper = readInstantWallpaper()
+  if (!instantWallpaper || instantWallpaper.signature !== mediaSignature) {
+    return ''
+  }
+  return `url("${escapeCssUrl(instantWallpaper.dataUrl)}")`
+}
+
+async function cacheBackgroundUrlImage(imageUrl: string, mediaSignature = ''): Promise<void> {
   const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
   if (!normalizedUrl || state.backgroundUrlCachePendingUrls.has(normalizedUrl)) {
     return
@@ -9050,6 +9024,9 @@ async function cacheBackgroundUrlImage(imageUrl: string): Promise<void> {
   try {
     const blob = await fetchBackgroundUrlImage(normalizedUrl)
     await saveBackgroundUrlCache(normalizedUrl, blob)
+    if (mediaSignature) {
+      void updateInstantWallpaperFromBlob(blob, mediaSignature)
+    }
 
     state.backgroundUrlCacheStatus = `已缓存 ${formatBytes(blob.size)}`
   } catch {
@@ -9058,6 +9035,44 @@ async function cacheBackgroundUrlImage(imageUrl: string): Promise<void> {
     state.backgroundUrlCachePendingUrls.delete(normalizedUrl)
     state.backgroundUrlCacheBusy = state.backgroundUrlCachePendingUrls.size > 0
   }
+}
+
+async function cacheFeaturedBackgroundGalleryImages(): Promise<void> {
+  const urls = getFeaturedBackgroundCacheUrls()
+  for (const imageUrl of urls) {
+    await cacheBackgroundUrlImage(imageUrl)
+  }
+}
+
+function scheduleFeaturedBackgroundGalleryCache(): void {
+  if (state.backgroundSettings.type !== 'featured') {
+    return
+  }
+
+  runIdle(() => {
+    void cacheFeaturedBackgroundGalleryImages()
+  })
+}
+
+function getFeaturedBackgroundCacheUrls(): string[] {
+  const urls = new Set<string>()
+  const activeUrl = getRemoteBackgroundImageUrl(state.backgroundSettings)
+  if (activeUrl) {
+    urls.add(activeUrl)
+  }
+  for (const item of state.featuredBackgroundGallery) {
+    if (item.imageUrl) {
+      urls.add(item.imageUrl)
+    }
+  }
+  if (backgroundGalleryModule) {
+    for (const item of getFeaturedBackgroundPickerItems(backgroundGalleryModule)) {
+      if (item.imageUrl) {
+        urls.add(item.imageUrl)
+      }
+    }
+  }
+  return [...urls]
 }
 
 async function setBackgroundImageFromBlob(
@@ -9080,6 +9095,7 @@ async function setBackgroundImageFromBlob(
     if (preserveCurrentUntilReady) {
       setActiveBackgroundObjectUrl(objectUrl)
     }
+    applyFeaturedBackgroundDisplayPreferences()
     document.body.style.backgroundImage = `url("${escapeCssUrl(objectUrl)}")`
   } else {
     if (preserveCurrentUntilReady) {
@@ -9089,6 +9105,92 @@ async function setBackgroundImageFromBlob(
     }
   }
   return ready
+}
+
+async function updateInstantWallpaperFromBlob(blob: Blob, mediaSignature: string): Promise<void> {
+  if (!mediaSignature || mediaSignature !== lastAppliedBackgroundMediaSignature) {
+    return
+  }
+
+  const dataUrl = await createInstantWallpaperDataUrl(blob)
+  if (!dataUrl || mediaSignature !== lastAppliedBackgroundMediaSignature) {
+    return
+  }
+
+  const displayCss = getFeaturedBackgroundDisplayCss(state.featuredBackgroundPreferences)
+  saveInstantWallpaper({
+    signature: mediaSignature,
+    dataUrl,
+    backgroundSize: displayCss.backgroundSize,
+    backgroundPosition: displayCss.backgroundPosition,
+    updatedAt: Date.now()
+  })
+}
+
+function syncInstantWallpaperTargetForSettings(
+  settings: typeof DEFAULT_BACKGROUND_SETTINGS,
+  mediaSignature = getBackgroundMediaSignature(settings)
+): void {
+  const target = buildInstantWallpaperTargetForSettings(settings, mediaSignature)
+  if (!target) {
+    clearInstantWallpaperTarget()
+    clearInstantWallpaperIfSignatureChanged('')
+    return
+  }
+
+  const existingTarget = readInstantWallpaperTarget()
+  saveInstantWallpaperTarget(target)
+  if (existingTarget?.signature && existingTarget.signature !== target.signature) {
+    clearInstantWallpaperFallbackStyles()
+  }
+  clearInstantWallpaperIfSignatureChanged(target.signature)
+}
+
+function buildInstantWallpaperTargetForSettings(
+  settings: typeof DEFAULT_BACKGROUND_SETTINGS,
+  mediaSignature = getBackgroundMediaSignature(settings)
+): InstantWallpaperTargetRecord | null {
+  if (!mediaSignature) {
+    return null
+  }
+
+  const displayCss = getBackgroundDisplayCssForSettings(settings)
+  return {
+    signature: mediaSignature,
+    imageUrl: isRemoteBackgroundType(settings.type) ? getRemoteBackgroundImageUrl(settings) : '',
+    backgroundSize: displayCss.backgroundSize,
+    backgroundPosition: displayCss.backgroundPosition,
+    placeholderColor: getBackgroundPlaceholderColor(settings),
+    updatedAt: Date.now()
+  }
+}
+
+function getBackgroundDisplayCssForSettings(
+  settings: typeof DEFAULT_BACKGROUND_SETTINGS
+): { backgroundSize: string; backgroundPosition: string } {
+  if (settings.type === 'featured') {
+    return getFeaturedBackgroundDisplayCss(state.featuredBackgroundPreferences)
+  }
+  return {
+    backgroundSize: 'cover',
+    backgroundPosition: 'center'
+  }
+}
+
+function clearInstantWallpaperIfSignatureChanged(mediaSignature: string): void {
+  const instantWallpaper = readInstantWallpaper()
+  if (instantWallpaper && instantWallpaper.signature !== mediaSignature) {
+    clearInstantWallpaper()
+    clearInstantWallpaperFallbackStyles()
+  }
+}
+
+function clearInstantWallpaperFallbackStyles(): void {
+  const rootElement = document.documentElement
+  rootElement.classList.remove('instant-wallpaper-ready')
+  rootElement.style.removeProperty('--instant-wallpaper-image')
+  rootElement.style.removeProperty('--instant-wallpaper-size')
+  rootElement.style.removeProperty('--instant-wallpaper-position')
 }
 
 function applyBackgroundMaskSettings(settings = state.backgroundSettings): void {
@@ -9148,6 +9250,10 @@ function getRemoteBackgroundImageUrl(settings: typeof DEFAULT_BACKGROUND_SETTING
 }
 
 function getActiveFeaturedBackgroundItemSync(settings = state.backgroundSettings): FeaturedBackgroundItem | null {
+  const galleryItem = getStoredFeaturedBackgroundItemById(settings.featuredId)
+  if (galleryItem) {
+    return galleryItem
+  }
   if (!backgroundGalleryModule) {
     return null
   }
@@ -9157,10 +9263,22 @@ function getActiveFeaturedBackgroundItemSync(settings = state.backgroundSettings
 }
 
 async function getActiveFeaturedBackgroundItem(settings = state.backgroundSettings): Promise<FeaturedBackgroundItem> {
+  const galleryItem = getStoredFeaturedBackgroundItemById(settings.featuredId)
+  if (galleryItem) {
+    return galleryItem
+  }
   const gallery = await loadBackgroundGalleryModule()
   return gallery.getFeaturedBackgroundItemById(settings.featuredId) ||
     gallery.selectFeaturedBackgroundItem(getFeaturedBackgroundDateSeed()) ||
     gallery.getDefaultFeaturedBackgroundItem()
+}
+
+function getStoredFeaturedBackgroundItemById(id: unknown): FeaturedBackgroundItem | null {
+  const normalizedId = String(id || '').trim()
+  if (!normalizedId) {
+    return null
+  }
+  return state.featuredBackgroundGallery.find((item) => item.id === normalizedId) || null
 }
 
 function getFeaturedBackgroundDateSeed(): string {
@@ -9209,6 +9327,7 @@ function applyFeaturedBackgroundDailyRefreshIfNeeded(): void {
   void hydrateFeaturedBackgroundOptions(true)
   syncBackgroundSettingsControls()
   void applyBackgroundSettings()
+  scheduleFeaturedBackgroundGalleryCache()
   scheduleFeaturedBackgroundDailyRefresh()
 }
 
@@ -9218,6 +9337,9 @@ function hasExplicitFeaturedBackgroundSelection(settings = state.backgroundSetti
     return false
   }
 
+  if (getStoredFeaturedBackgroundItemById(featuredId)) {
+    return true
+  }
   return Boolean(backgroundGalleryModule?.getFeaturedBackgroundItemById(featuredId))
 }
 
@@ -9794,7 +9916,6 @@ function normalizeGeneralSettings(rawSettings: unknown): typeof DEFAULT_GENERAL_
   const legacyQuickAccess = settings.showFrequentBookmarks !== false || settings.showRecentBookmarks !== false
   return {
     hideSettingsTrigger: settings.hideSettingsTrigger === true,
-    showPortalOverview: settings.showPortalOverview !== false,
     showQuickAccess: typeof settings.showQuickAccess === 'boolean'
       ? settings.showQuickAccess
       : legacyQuickAccess,
@@ -9805,7 +9926,6 @@ function normalizeGeneralSettings(rawSettings: unknown): typeof DEFAULT_GENERAL_
 
 function readGeneralSettingsFromControls(): typeof DEFAULT_GENERAL_SETTINGS {
   const hideInput = document.getElementById('general-hide-settings-trigger')
-  const showOverviewInput = document.getElementById('general-show-overview')
   const showQuickAccessInput = document.getElementById('general-show-quick-access')
   const openBookmarksInput = document.getElementById('general-open-bookmarks-new-tab')
   const showSourceNavigationInput = document.getElementById('folder-show-source-navigation')
@@ -9814,9 +9934,6 @@ function readGeneralSettingsFromControls(): typeof DEFAULT_GENERAL_SETTINGS {
     hideSettingsTrigger: hideInput instanceof HTMLInputElement
       ? hideInput.checked
       : state.generalSettings.hideSettingsTrigger,
-    showPortalOverview: showOverviewInput instanceof HTMLInputElement
-      ? showOverviewInput.checked
-      : state.generalSettings.showPortalOverview,
     showQuickAccess: showQuickAccessInput instanceof HTMLInputElement
       ? showQuickAccessInput.checked
       : state.generalSettings.showQuickAccess,
@@ -9831,16 +9948,12 @@ function readGeneralSettingsFromControls(): typeof DEFAULT_GENERAL_SETTINGS {
 
 function syncGeneralSettingsControls(): void {
   const hideInput = document.getElementById('general-hide-settings-trigger')
-  const showOverviewInput = document.getElementById('general-show-overview')
   const showQuickAccessInput = document.getElementById('general-show-quick-access')
   const openBookmarksInput = document.getElementById('general-open-bookmarks-new-tab')
   const showSourceNavigationInput = document.getElementById('folder-show-source-navigation')
 
   if (hideInput instanceof HTMLInputElement) {
     hideInput.checked = state.generalSettings.hideSettingsTrigger
-  }
-  if (showOverviewInput instanceof HTMLInputElement) {
-    showOverviewInput.checked = state.generalSettings.showPortalOverview
   }
   if (showQuickAccessInput instanceof HTMLInputElement) {
     showQuickAccessInput.checked = state.generalSettings.showQuickAccess
@@ -9878,46 +9991,48 @@ function readFolderSettingsFromControls(): NewTabFolderSettings {
 }
 
 function syncFolderSettingsControls(): void {
-  const hideInput = document.getElementById('folder-hide-names')
-  const selectedList = document.getElementById('folder-selected-list')
-  const selectedCount = document.getElementById('folder-selected-count')
-  const toggle = document.getElementById('folder-candidates-toggle')
-  const panel = document.getElementById('folder-candidates-panel')
-  const searchInput = document.getElementById('folder-candidate-search')
-  const candidateList = document.getElementById('folder-candidate-list')
+  measureNow('newtab.syncFolderSettingsControls', () => {
+    const hideInput = document.getElementById('folder-hide-names')
+    const selectedList = document.getElementById('folder-selected-list')
+    const selectedCount = document.getElementById('folder-selected-count')
+    const toggle = document.getElementById('folder-candidates-toggle')
+    const panel = document.getElementById('folder-candidates-panel')
+    const searchInput = document.getElementById('folder-candidate-search')
+    const candidateList = document.getElementById('folder-candidate-list')
 
-  if (hideInput instanceof HTMLInputElement) {
-    hideInput.checked = state.folderSettings.hideFolderNames
-  }
-
-  if (selectedCount) {
-    selectedCount.textContent = String(state.folderSettings.selectedFolderIds.length)
-  }
-
-  if (selectedList instanceof HTMLElement) {
-    selectedList.replaceChildren(...createSelectedFolderControls())
-  }
-
-  if (toggle instanceof HTMLButtonElement) {
-    toggle.setAttribute('aria-expanded', String(state.folderCandidatesExpanded))
-    toggle.classList.toggle('expanded', state.folderCandidatesExpanded)
-    const label = toggle.querySelector('[data-folder-toggle-label]')
-    if (label) {
-      label.textContent = state.folderCandidatesExpanded ? '收起候选文件夹' : '展开候选文件夹'
+    if (hideInput instanceof HTMLInputElement) {
+      hideInput.checked = state.folderSettings.hideFolderNames
     }
-  }
 
-  if (panel instanceof HTMLElement) {
-    setRevealPanelExpanded(panel, state.folderCandidatesExpanded)
-  }
+    if (selectedCount) {
+      selectedCount.textContent = String(state.folderSettings.selectedFolderIds.length)
+    }
 
-  if (searchInput instanceof HTMLInputElement && searchInput.value !== state.folderCandidateQuery) {
-    searchInput.value = state.folderCandidateQuery
-  }
+    if (selectedList instanceof HTMLElement) {
+      selectedList.replaceChildren(...createSelectedFolderControls())
+    }
 
-  if (candidateList instanceof HTMLElement) {
-    candidateList.replaceChildren(...createFolderCandidateControls())
-  }
+    if (toggle instanceof HTMLButtonElement) {
+      toggle.setAttribute('aria-expanded', String(state.folderCandidatesExpanded))
+      toggle.classList.toggle('expanded', state.folderCandidatesExpanded)
+      const label = toggle.querySelector('[data-folder-toggle-label]')
+      if (label) {
+        label.textContent = state.folderCandidatesExpanded ? '收起候选文件夹' : '展开候选文件夹'
+      }
+    }
+
+    if (panel instanceof HTMLElement) {
+      setRevealPanelExpanded(panel, state.folderCandidatesExpanded)
+    }
+
+    if (searchInput instanceof HTMLInputElement && searchInput.value !== state.folderCandidateQuery) {
+      searchInput.value = state.folderCandidateQuery
+    }
+
+    if (candidateList instanceof HTMLElement) {
+      candidateList.replaceChildren(...createFolderCandidateControls())
+    }
+  })
 }
 
 function syncNewTabModernSettingsControls(): void {
@@ -9926,8 +10041,7 @@ function syncNewTabModernSettingsControls(): void {
 
 function syncModuleSettingsControls(): void {
   const containerIdByKey: Record<NewTabModuleSettingKey, string> = {
-    speedDial: 'newtab-speed-dial-setting',
-    health: 'newtab-health-setting'
+    speedDial: 'newtab-speed-dial-setting'
   }
 
   const rows = buildNewTabModuleSettingRows(state.moduleSettings)
@@ -10142,13 +10256,25 @@ function createFolderCandidateControls(): HTMLElement[] {
 
 function getFilteredFolderCandidates(): NewTabFolderCandidate[] {
   const query = normalizeSettingSearchText(state.folderCandidateQuery)
-  return getFolderCandidates().filter((folder) => {
+  return getFolderCandidatesForCurrentRender().filter((folder) => {
     if (!query) {
       return true
     }
 
     return folder.normalizedTitle.includes(query) || folder.normalizedPath.includes(query)
   })
+}
+
+function getFolderCandidatesForCurrentRender(): NewTabFolderCandidate[] {
+  const signature = buildFolderCandidateRenderSignature({
+    rootNode: state.rootNode,
+    folderData: state.folderData,
+    folderNodeMap: state.folderNodeMap,
+    folderCandidateQuery: state.folderCandidateQuery,
+    selectedFolderIds: state.folderSettings.selectedFolderIds,
+    folderCandidatesExpanded: state.folderCandidatesExpanded
+  })
+  return getCachedFolderCandidates(state.folderCandidateCache, signature, getFolderCandidates)
 }
 
 function getFolderCandidates(): NewTabFolderCandidate[] {
@@ -10173,7 +10299,7 @@ function getFolderCandidates(): NewTabFolderCandidate[] {
 }
 
 function getFolderCandidateMap(): Map<string, NewTabFolderCandidate> {
-  return new Map(getFolderCandidates().map((folder) => [folder.id, folder]))
+  return new Map(getFolderCandidatesForCurrentRender().map((folder) => [folder.id, folder]))
 }
 
 function formatFolderCandidateCountSummary(folder: NewTabFolderCandidate): string {
@@ -10270,66 +10396,68 @@ function readIconSettingsFromControls(): IconSettings {
 }
 
 function syncIconSettingsControls(): void {
-  const settings = state.iconSettings
-  const pageWidthInput = document.getElementById('icon-page-width')
-  const tileWidthInput = document.getElementById('icon-tile-width')
-  const iconShellSizeInput = document.getElementById('icon-shell-size')
-  const columnGapInput = document.getElementById('icon-column-gap')
-  const rowGapInput = document.getElementById('icon-row-gap')
-  const folderGapInput = document.getElementById('icon-folder-gap')
-  const columnsInput = document.getElementById('icon-columns')
-  const verticalCenterInput = document.getElementById('icon-vertical-center')
-  const showTitlesInput = document.getElementById('icon-show-titles')
-  const tileWidthRow = document.getElementById('icon-tile-width-row')
-  const titleLinesRow = document.getElementById('icon-title-lines-row')
-  const columnsRow = document.getElementById('icon-columns-row')
+  measureNow('newtab.syncIconSettingsControls', () => {
+    const settings = state.iconSettings
+    const pageWidthInput = document.getElementById('icon-page-width')
+    const tileWidthInput = document.getElementById('icon-tile-width')
+    const iconShellSizeInput = document.getElementById('icon-shell-size')
+    const columnGapInput = document.getElementById('icon-column-gap')
+    const rowGapInput = document.getElementById('icon-row-gap')
+    const folderGapInput = document.getElementById('icon-folder-gap')
+    const columnsInput = document.getElementById('icon-columns')
+    const verticalCenterInput = document.getElementById('icon-vertical-center')
+    const showTitlesInput = document.getElementById('icon-show-titles')
+    const tileWidthRow = document.getElementById('icon-tile-width-row')
+    const titleLinesRow = document.getElementById('icon-title-lines-row')
+    const columnsRow = document.getElementById('icon-columns-row')
 
-  if (pageWidthInput instanceof HTMLInputElement) {
-    pageWidthInput.value = String(settings.pageWidth)
-  }
-  if (tileWidthInput instanceof HTMLInputElement) {
-    tileWidthInput.value = String(settings.tileWidth)
-    tileWidthInput.disabled = !settings.showTitles
-  }
-  if (iconShellSizeInput instanceof HTMLInputElement) {
-    iconShellSizeInput.value = String(settings.iconShellSize)
-  }
-  if (columnGapInput instanceof HTMLInputElement) {
-    columnGapInput.value = String(settings.columnGap)
-  }
-  if (rowGapInput instanceof HTMLInputElement) {
-    rowGapInput.value = String(settings.rowGap)
-  }
-  if (folderGapInput instanceof HTMLInputElement) {
-    folderGapInput.value = String(settings.folderGap)
-  }
-  if (columnsInput instanceof HTMLInputElement) {
-    columnsInput.value = String(settings.columns)
-    columnsInput.disabled = settings.layoutMode !== 'fixed'
-  }
-  if (verticalCenterInput instanceof HTMLInputElement) {
-    verticalCenterInput.checked = settings.verticalCenter
-  }
-  if (showTitlesInput instanceof HTMLInputElement) {
-    showTitlesInput.checked = settings.showTitles
-  }
+    if (pageWidthInput instanceof HTMLInputElement) {
+      pageWidthInput.value = String(settings.pageWidth)
+    }
+    if (tileWidthInput instanceof HTMLInputElement) {
+      tileWidthInput.value = String(settings.tileWidth)
+      tileWidthInput.disabled = !settings.showTitles
+    }
+    if (iconShellSizeInput instanceof HTMLInputElement) {
+      iconShellSizeInput.value = String(settings.iconShellSize)
+    }
+    if (columnGapInput instanceof HTMLInputElement) {
+      columnGapInput.value = String(settings.columnGap)
+    }
+    if (rowGapInput instanceof HTMLInputElement) {
+      rowGapInput.value = String(settings.rowGap)
+    }
+    if (folderGapInput instanceof HTMLInputElement) {
+      folderGapInput.value = String(settings.folderGap)
+    }
+    if (columnsInput instanceof HTMLInputElement) {
+      columnsInput.value = String(settings.columns)
+      columnsInput.disabled = settings.layoutMode !== 'fixed'
+    }
+    if (verticalCenterInput instanceof HTMLInputElement) {
+      verticalCenterInput.checked = settings.verticalCenter
+    }
+    if (showTitlesInput instanceof HTMLInputElement) {
+      showTitlesInput.checked = settings.showTitles
+    }
 
-  setTextContent('icon-page-width-value', `${settings.pageWidth}%`)
-  setTextContent('icon-tile-width-value', `${settings.tileWidth}px`)
-  setTextContent('icon-shell-size-value', `${settings.iconShellSize}px`)
-  setTextContent('icon-column-gap-value', `${getIconGapPx(settings.columnGap)}px`)
-  setTextContent('icon-row-gap-value', `${getIconRowGapPx(settings.rowGap)}px`)
-  setTextContent('icon-folder-gap-value', `${getFolderGapPx(settings.folderGap)}px`)
-  setTextContent('icon-columns-value', String(settings.columns))
+    setTextContent('icon-page-width-value', `${settings.pageWidth}%`)
+    setTextContent('icon-tile-width-value', `${settings.tileWidth}px`)
+    setTextContent('icon-shell-size-value', `${settings.iconShellSize}px`)
+    setTextContent('icon-column-gap-value', `${getIconGapPx(settings.columnGap)}px`)
+    setTextContent('icon-row-gap-value', `${getIconRowGapPx(settings.rowGap)}px`)
+    setTextContent('icon-folder-gap-value', `${getFolderGapPx(settings.folderGap)}px`)
+    setTextContent('icon-columns-value', String(settings.columns))
 
-  syncIconSegmentButtons('[data-icon-layout-mode]', settings.layoutMode)
-  syncIconSegmentButtons('[data-icon-title-lines]', String(settings.titleLines), !settings.showTitles)
-  tileWidthRow?.classList.toggle('setting-row-disabled', !settings.showTitles)
-  titleLinesRow?.classList.toggle('setting-row-disabled', !settings.showTitles)
-  columnsRow?.classList.toggle('setting-row-disabled', settings.layoutMode !== 'fixed')
-  syncPresetCardSelection()
-  syncIconAdvancedPanel()
-  renderIconPreview()
+    syncIconSegmentButtons('[data-icon-layout-mode]', settings.layoutMode)
+    syncIconSegmentButtons('[data-icon-title-lines]', String(settings.titleLines), !settings.showTitles)
+    tileWidthRow?.classList.toggle('setting-row-disabled', !settings.showTitles)
+    titleLinesRow?.classList.toggle('setting-row-disabled', !settings.showTitles)
+    columnsRow?.classList.toggle('setting-row-disabled', settings.layoutMode !== 'fixed')
+    syncPresetCardSelection()
+    syncIconAdvancedPanel()
+    renderIconPreviewIfNeeded()
+  })
 }
 
 async function saveIconSettings(): Promise<void> {
@@ -10535,66 +10663,35 @@ function syncIconSegmentButtons(selector: string, selectedValue: string, disable
   }
 }
 
+function isAppearanceSettingsGroupActive(): boolean {
+  return state.activeSettingsGroup === 'appearance'
+}
+
+function renderIconPreviewIfNeeded(): void {
+  const preview = document.getElementById('icon-live-preview')
+  if (!preview) {
+    return
+  }
+
+  const signature = getIconPreviewSignature(state.iconSettings)
+  if (preview.dataset.iconPreviewSignature === signature && preview.firstElementChild) {
+    return
+  }
+
+  renderIconPreview()
+}
+
 function renderIconPreview(): void {
   const preview = document.getElementById('icon-live-preview')
   if (!preview) {
     return
   }
 
-  const settings = state.iconSettings
-  const previewColumnGap = Math.max(4, Math.round(getIconGapPx(settings.columnGap) * 0.34))
-  const previewRowGap = Math.max(4, Math.round(getIconRowGapPx(settings.rowGap) * 0.34))
-  const effectiveTileWidth = getEffectiveIconTileWidthPx(settings)
-  const previewTileWidth = Math.max(48, Math.round(effectiveTileWidth * 0.42))
-  const previewShellSize = Math.max(18, Math.round(settings.iconShellSize * 0.62))
-  const previewColumns = settings.layoutMode === 'fixed'
-    ? Math.max(2, Math.min(6, settings.columns))
-    : Math.max(2, Math.min(4, Math.round(settings.pageWidth / 24)))
-  const previewGridMaxWidth = previewColumns * previewTileWidth + (previewColumns - 1) * previewColumnGap
-  const sampleCount = Math.max(4, Math.min(8, previewColumns * 2))
-  const summary = [
-    settings.layoutMode === 'fixed' ? `${settings.columns} 列固定` : '自动适配',
-    `${settings.tileWidth}px 卡片`,
-    `${settings.iconShellSize}px 图标区`,
-    settings.showTitles ? `${settings.titleLines} 行标题` : '图标模式'
-  ].join(' · ')
-
-  preview.dataset.iconLayoutMode = settings.layoutMode
-  preview.dataset.iconShowTitles = String(settings.showTitles)
-  preview.style.setProperty('--preview-page-width', `${settings.pageWidth}%`)
-  preview.style.setProperty('--preview-column-gap', `${previewColumnGap}px`)
-  preview.style.setProperty('--preview-row-gap', `${previewRowGap}px`)
-  preview.style.setProperty('--preview-tile-width', `${previewTileWidth}px`)
-  preview.style.setProperty('--preview-shell-size', `${previewShellSize}px`)
-  preview.style.setProperty('--preview-title-lines', String(settings.titleLines))
-  preview.style.setProperty('--preview-grid-max-width', `${previewGridMaxWidth}px`)
-  setTextContent('icon-live-preview-summary', summary)
-
-  const grid = document.createElement('div')
-  grid.className = 'icon-live-preview-grid'
-  grid.style.gridTemplateColumns = `repeat(${previewColumns}, minmax(0, 1fr))`
-
-  const names = ['阅读', '工作台', '邮箱', '文档', '设计', '数据', '日程', '收藏']
-  for (let index = 0; index < sampleCount; index++) {
-    const tile = document.createElement('span')
-    tile.className = 'icon-live-preview-tile'
-
-    const shell = document.createElement('span')
-    shell.className = 'icon-live-preview-shell'
-    const mark = document.createElement('span')
-    mark.className = 'icon-live-preview-mark'
-    mark.textContent = names[index]?.slice(0, 1) || '*'
-    shell.appendChild(mark)
-
-    const title = document.createElement('span')
-    title.className = 'icon-live-preview-title'
-    title.textContent = names[index]
-
-    tile.append(shell, title)
-    grid.appendChild(tile)
-  }
-
-  preview.replaceChildren(grid)
+  renderIconPreviewElement(
+    preview,
+    document.getElementById('icon-live-preview-summary'),
+    state.iconSettings
+  )
 }
 
 function renderIconPresetCards(): void {
@@ -10697,6 +10794,7 @@ function closeFeaturedBackgroundPicker(): void {
     return
   }
 
+  clearFeaturedBackgroundHoverPreview()
   featuredBackgroundModal.classList.remove('open')
   featuredBackgroundModal.setAttribute('aria-hidden', 'true')
   featuredBackgroundModal.setAttribute('inert', '')
@@ -10720,10 +10818,12 @@ function renderFeaturedBackgroundPicker(gallery: BackgroundGalleryModule): void 
     return
   }
 
+  clearFeaturedBackgroundHoverPreview()
   const currentDateSeed = getFeaturedBackgroundDateSeed()
   const dailyItem = gallery.selectFeaturedBackgroundItem(currentDateSeed)
   const selectedId = state.backgroundSettings.featuredId
   const fragment = document.createDocumentFragment()
+  syncFeaturedBackgroundModalControls()
   fragment.appendChild(createFeaturedBackgroundCard({
     value: '',
     title: '每日精选',
@@ -10731,10 +10831,12 @@ function renderFeaturedBackgroundPicker(gallery: BackgroundGalleryModule): void 
     imageUrl: dailyItem.imageUrl,
     source: dailyItem.credit,
     selected: !selectedId,
-    daily: true
+    daily: true,
+    width: dailyItem.width,
+    height: dailyItem.height
   }))
 
-  for (const item of gallery.FEATURED_BACKGROUND_ITEMS) {
+  for (const item of getFeaturedBackgroundPickerItems(gallery)) {
     fragment.appendChild(createFeaturedBackgroundCard({
       value: item.id,
       title: item.title,
@@ -10742,11 +10844,23 @@ function renderFeaturedBackgroundPicker(gallery: BackgroundGalleryModule): void 
       imageUrl: item.imageUrl,
       source: item.license,
       selected: selectedId === item.id,
-      daily: false
+      daily: false,
+      favorite: isFeaturedBackgroundFavorite(item.id),
+      width: item.width,
+      height: item.height
     }))
   }
 
   featuredBackgroundModalGrid.replaceChildren(fragment)
+}
+
+function getFeaturedBackgroundPickerItems(gallery: BackgroundGalleryModule): FeaturedBackgroundItem[] {
+  return buildFeaturedBackgroundPickerItems({
+    storedItems: state.featuredBackgroundGallery,
+    staticItems: gallery.FEATURED_BACKGROUND_ITEMS,
+    favoriteIds: state.featuredBackgroundFavoriteIds,
+    selectedId: state.backgroundSettings.featuredId
+  })
 }
 
 function createFeaturedBackgroundCard({
@@ -10756,7 +10870,10 @@ function createFeaturedBackgroundCard({
   imageUrl,
   source,
   selected,
-  daily
+  daily,
+  favorite = false,
+  width,
+  height
 }: {
   value: string
   title: string
@@ -10765,11 +10882,17 @@ function createFeaturedBackgroundCard({
   source: string
   selected: boolean
   daily: boolean
-}): HTMLButtonElement {
-  const card = document.createElement('button')
+  favorite?: boolean
+  width?: number
+  height?: number
+}): HTMLElement {
+  const card = document.createElement('div')
   card.className = 'featured-wallpaper-card'
-  card.type = 'button'
+  card.setAttribute('role', 'button')
+  card.setAttribute('tabindex', '0')
   card.dataset.featuredBackgroundId = value
+  card.dataset.featuredBackgroundPreviewUrl = imageUrl
+  card.dataset.featuredBackgroundPreviewTitle = title
   card.setAttribute('aria-pressed', String(selected))
   card.classList.toggle('is-selected', selected)
   if (daily) {
@@ -10779,6 +10902,32 @@ function createFeaturedBackgroundCard({
   const preview = document.createElement('span')
   preview.className = 'featured-wallpaper-preview'
   preview.style.backgroundImage = `url("${escapeCssUrl(imageUrl)}")`
+  const resolution = document.createElement('span')
+  resolution.className = 'featured-wallpaper-resolution'
+  const resolutionText = formatFeaturedBackgroundResolution({ width, height })
+  resolution.textContent = resolutionText || '检测中'
+  resolution.hidden = !resolutionText
+  preview.appendChild(resolution)
+  if (!resolutionText) {
+    void hydrateFeaturedBackgroundCardResolution(imageUrl, resolution)
+  }
+
+  if (!daily && value) {
+    const favoriteButton = document.createElement('button')
+    favoriteButton.className = 'featured-wallpaper-favorite'
+    favoriteButton.type = 'button'
+    favoriteButton.setAttribute('aria-pressed', String(favorite))
+    favoriteButton.setAttribute('aria-label', favorite ? '取消收藏这张精选图' : '收藏这张精选图')
+    favoriteButton.classList.toggle('is-favorite', favorite)
+    favoriteButton.appendChild(createFeaturedFavoriteIcon())
+    favoriteButton.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      clearFeaturedBackgroundHoverPreview(card)
+      void toggleFeaturedBackgroundFavorite(value)
+    })
+    preview.appendChild(favoriteButton)
+  }
 
   const meta = document.createElement('span')
   meta.className = 'featured-wallpaper-meta'
@@ -10794,10 +10943,167 @@ function createFeaturedBackgroundCard({
 
   meta.append(name, detail, provider)
   card.append(preview, meta)
+  card.addEventListener('pointerenter', (event) => {
+    if (event.pointerType !== 'mouse') {
+      return
+    }
+    scheduleFeaturedBackgroundHoverPreview(card)
+  })
+  card.addEventListener('pointerleave', () => {
+    clearFeaturedBackgroundHoverPreview(card)
+  })
+  card.addEventListener('focusin', () => {
+    scheduleFeaturedBackgroundHoverPreview(card)
+  })
+  card.addEventListener('focusout', (event) => {
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof Node && card.contains(nextTarget)) {
+      return
+    }
+    clearFeaturedBackgroundHoverPreview(card)
+  })
   card.addEventListener('click', () => {
+    clearFeaturedBackgroundHoverPreview(card)
+    selectFeaturedBackgroundFromPicker(value)
+  })
+  card.addEventListener('keydown', (event) => {
+    if (event.target !== card || (event.key !== 'Enter' && event.key !== ' ')) {
+      return
+    }
+    event.preventDefault()
+    clearFeaturedBackgroundHoverPreview(card)
     selectFeaturedBackgroundFromPicker(value)
   })
   return card
+}
+
+function scheduleFeaturedBackgroundHoverPreview(card: HTMLElement): void {
+  if (!isFeaturedBackgroundPickerOpen()) {
+    return
+  }
+
+  const imageUrl = card.dataset.featuredBackgroundPreviewUrl || ''
+  if (!imageUrl) {
+    return
+  }
+
+  if (featuredBackgroundPreviewCard === card && featuredBackgroundPreviewElement?.isConnected) {
+    return
+  }
+
+  window.clearTimeout(featuredBackgroundPreviewTimer)
+  featuredBackgroundPreviewTimer = window.setTimeout(() => {
+    featuredBackgroundPreviewTimer = 0
+    showFeaturedBackgroundHoverPreview(card)
+  }, 3000)
+}
+
+function showFeaturedBackgroundHoverPreview(card: HTMLElement): void {
+  if (!isFeaturedBackgroundPickerOpen() || !card.isConnected) {
+    clearFeaturedBackgroundHoverPreview(card)
+    return
+  }
+
+  const imageUrl = card.dataset.featuredBackgroundPreviewUrl || ''
+  if (!imageUrl) {
+    return
+  }
+
+  const preview = getFeaturedBackgroundHoverPreviewElement()
+  preview.style.backgroundImage = `url("${escapeCssUrl(imageUrl)}")`
+  preview.setAttribute(
+    'aria-label',
+    `${card.dataset.featuredBackgroundPreviewTitle || '精选图库壁纸'} 大图预览`
+  )
+  preview.setAttribute('aria-hidden', 'false')
+  positionFeaturedBackgroundHoverPreview(card, preview)
+  featuredBackgroundPreviewCard = card
+  preview.classList.add('is-visible')
+}
+
+function getFeaturedBackgroundHoverPreviewElement(): HTMLElement {
+  if (featuredBackgroundPreviewElement?.isConnected) {
+    return featuredBackgroundPreviewElement
+  }
+
+  const preview = document.createElement('div')
+  preview.className = 'featured-wallpaper-hover-preview'
+  preview.setAttribute('role', 'img')
+  preview.setAttribute('aria-hidden', 'true')
+  featuredBackgroundPreviewElement = preview
+  featuredBackgroundModal?.appendChild(preview)
+  return preview
+}
+
+function positionFeaturedBackgroundHoverPreview(card: HTMLElement, preview: HTMLElement): void {
+  const cardRect = card.getBoundingClientRect()
+  const modalRect = featuredBackgroundModal instanceof HTMLElement
+    ? featuredBackgroundModal.getBoundingClientRect()
+    : document.documentElement.getBoundingClientRect()
+  const previewWidth = Math.max(180, Math.min(560, window.innerWidth - 32))
+  const previewHeight = Math.round(previewWidth * 0.625)
+  const gap = 14
+  const minLeft = modalRect.left + 16
+  const maxLeft = modalRect.right - previewWidth - 16
+  const left = Math.min(
+    Math.max(cardRect.right + gap, minLeft),
+    Math.max(minLeft, maxLeft)
+  )
+  const belowTop = cardRect.bottom + gap
+  const aboveTop = cardRect.top - previewHeight - gap
+  const maxTop = modalRect.bottom - previewHeight - 16
+  const top = belowTop <= maxTop
+    ? belowTop
+    : Math.max(modalRect.top + 16, aboveTop)
+
+  preview.style.width = `${previewWidth}px`
+  preview.style.height = `${previewHeight}px`
+  preview.style.left = `${left}px`
+  preview.style.top = `${top}px`
+}
+
+function clearFeaturedBackgroundHoverPreview(card?: HTMLElement): void {
+  if (card && featuredBackgroundPreviewCard && featuredBackgroundPreviewCard !== card) {
+    return
+  }
+
+  window.clearTimeout(featuredBackgroundPreviewTimer)
+  featuredBackgroundPreviewTimer = 0
+  featuredBackgroundPreviewCard = null
+  if (featuredBackgroundPreviewElement) {
+    featuredBackgroundPreviewElement.classList.remove('is-visible')
+    featuredBackgroundPreviewElement.setAttribute('aria-hidden', 'true')
+    featuredBackgroundPreviewElement.style.backgroundImage = ''
+  }
+}
+
+function formatFeaturedBackgroundResolution(item: Pick<FeaturedBackgroundItem, 'width' | 'height'>): string {
+  const width = Number(item.width)
+  const height = Number(item.height)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return ''
+  }
+  return `${Math.round(width)} x ${Math.round(height)}`
+}
+
+async function hydrateFeaturedBackgroundCardResolution(imageUrl: string, target: HTMLElement): Promise<void> {
+  const size = await getRemoteImageSize(imageUrl)
+  if (!target.isConnected || !size) {
+    return
+  }
+  const label = formatFeaturedBackgroundResolution(size)
+  target.textContent = label
+  target.hidden = !label
+}
+
+function createFeaturedFavoriteIcon(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('aria-hidden', 'true')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('d', 'M12 21s-7-4.4-9.2-9A5.4 5.4 0 0 1 12 6a5.4 5.4 0 0 1 9.2 6c-2.2 4.6-9.2 9-9.2 9z')
+  svg.appendChild(path)
+  return svg
 }
 
 function createFeaturedBackgroundLoadingCard(): HTMLElement {
@@ -10812,6 +11118,304 @@ function createFeaturedBackgroundErrorCard(): HTMLElement {
   card.className = 'featured-wallpaper-state'
   card.textContent = '精选图库载入失败'
   return card
+}
+
+function readFeaturedBackgroundPreferencesFromControls(): FeaturedBackgroundPreferences {
+  return normalizeFeaturedBackgroundPreferences({
+    ...state.featuredBackgroundPreferences,
+    allow1080p: featuredBackgroundAllow1080pInput instanceof HTMLInputElement
+      ? featuredBackgroundAllow1080pInput.checked
+      : state.featuredBackgroundPreferences.allow1080p,
+    displayMode: featuredBackgroundDisplayModeInput instanceof HTMLSelectElement
+      ? featuredBackgroundDisplayModeInput.value
+      : state.featuredBackgroundPreferences.displayMode,
+    displaySize: featuredBackgroundDisplaySizeInput instanceof HTMLInputElement
+      ? Number(featuredBackgroundDisplaySizeInput.value)
+      : state.featuredBackgroundPreferences.displaySize,
+    positionY: featuredBackgroundPositionYInput instanceof HTMLInputElement
+      ? Number(featuredBackgroundPositionYInput.value)
+      : state.featuredBackgroundPreferences.positionY
+  })
+}
+
+function applyFeaturedBackgroundDisplayPreferences(): void {
+  const displayCss = getFeaturedBackgroundDisplayCss(state.featuredBackgroundPreferences)
+  document.body.style.backgroundSize = displayCss.backgroundSize
+  document.body.style.backgroundPosition = displayCss.backgroundPosition
+  updateInstantWallpaperDisplayCss(lastAppliedBackgroundMediaSignature, displayCss)
+  syncInstantWallpaperTargetForSettings(state.backgroundSettings, lastAppliedBackgroundMediaSignature || undefined)
+}
+
+function updateInstantWallpaperDisplayCss(
+  mediaSignature: string,
+  displayCss = getFeaturedBackgroundDisplayCss(state.featuredBackgroundPreferences)
+): void {
+  if (!mediaSignature) {
+    return
+  }
+  const instantWallpaper = readInstantWallpaper()
+  if (!instantWallpaper || instantWallpaper.signature !== mediaSignature) {
+    return
+  }
+  saveInstantWallpaper({
+    ...instantWallpaper,
+    backgroundSize: displayCss.backgroundSize,
+    backgroundPosition: displayCss.backgroundPosition,
+    updatedAt: Date.now()
+  })
+  syncInstantWallpaperTargetForSettings(state.backgroundSettings, mediaSignature)
+}
+
+function syncFeaturedBackgroundDisplayPreferenceControls(): void {
+  const preferences = state.featuredBackgroundPreferences
+  if (featuredBackgroundDisplayModeInput instanceof HTMLSelectElement) {
+    featuredBackgroundDisplayModeInput.value = preferences.displayMode
+  }
+  if (featuredBackgroundDisplaySizeInput instanceof HTMLInputElement) {
+    featuredBackgroundDisplaySizeInput.min = String(FEATURED_BACKGROUND_DISPLAY_LIMITS.displaySize.min)
+    featuredBackgroundDisplaySizeInput.max = String(FEATURED_BACKGROUND_DISPLAY_LIMITS.displaySize.max)
+    featuredBackgroundDisplaySizeInput.value = String(preferences.displaySize)
+    updateSettingRangeVisual(featuredBackgroundDisplaySizeInput)
+  }
+  if (featuredBackgroundPositionYInput instanceof HTMLInputElement) {
+    featuredBackgroundPositionYInput.min = String(FEATURED_BACKGROUND_DISPLAY_LIMITS.positionY.min)
+    featuredBackgroundPositionYInput.max = String(FEATURED_BACKGROUND_DISPLAY_LIMITS.positionY.max)
+    featuredBackgroundPositionYInput.value = String(preferences.positionY)
+    updateSettingRangeVisual(featuredBackgroundPositionYInput)
+  }
+  setTextContent('background-featured-display-size-value', `${preferences.displaySize}%`)
+  setTextContent('background-featured-position-y-value', `${preferences.positionY}%`)
+}
+
+function syncFeaturedBackgroundModalControls(): void {
+  state.featuredBackgroundPreferences = normalizeFeaturedBackgroundPreferences(state.featuredBackgroundPreferences)
+  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
+  syncFeaturedBackgroundDisplayPreferenceControls()
+  if (featuredBackgroundAllow1080pInput instanceof HTMLInputElement) {
+    featuredBackgroundAllow1080pInput.checked = state.featuredBackgroundAllow1080p
+    featuredBackgroundAllow1080pInput.disabled = state.featuredBackgroundRefreshing
+  }
+  if (featuredBackgroundRefreshButton instanceof HTMLButtonElement) {
+    featuredBackgroundRefreshButton.disabled = state.featuredBackgroundRefreshing
+    featuredBackgroundRefreshButton.textContent = state.featuredBackgroundRefreshing ? '刷新中...' : '刷新图库'
+  }
+  if (featuredBackgroundStatus instanceof HTMLElement) {
+    featuredBackgroundStatus.textContent = state.featuredBackgroundStatus
+    featuredBackgroundStatus.hidden = !state.featuredBackgroundStatus
+    featuredBackgroundStatus.dataset.tone = state.featuredBackgroundStatusTone
+  }
+}
+
+function isFeaturedBackgroundFavorite(featuredId: string): boolean {
+  return state.featuredBackgroundFavoriteIds.includes(featuredId)
+}
+
+async function handleFeaturedBackgroundPreferenceChange(): Promise<void> {
+  const allow1080p = featuredBackgroundAllow1080pInput instanceof HTMLInputElement
+    ? featuredBackgroundAllow1080pInput.checked
+    : false
+  state.featuredBackgroundPreferences = normalizeFeaturedBackgroundPreferences({
+    ...state.featuredBackgroundPreferences,
+    allow1080p
+  })
+  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
+  await saveFeaturedBackgroundPreferences()
+  setFeaturedBackgroundStatus(
+    allow1080p ? '已允许刷新时拉取 1080P 图片。' : '已切回只拉取高分辨率图片。',
+    'info'
+  )
+  syncFeaturedBackgroundModalControls()
+}
+
+function scheduleFeaturedBackgroundPreferencesSave(): void {
+  window.clearTimeout(featuredBackgroundPreferencesSaveTimer)
+  featuredBackgroundPreferencesSaveTimer = window.setTimeout(() => {
+    featuredBackgroundPreferencesSaveTimer = 0
+    void saveFeaturedBackgroundPreferences().catch((error) => {
+      console.warn('精选图库显示设置保存失败。', error)
+    })
+  }, SETTINGS_SAVE_DEBOUNCE_MS)
+}
+
+async function saveFeaturedBackgroundPreferences(): Promise<void> {
+  window.clearTimeout(featuredBackgroundPreferencesSaveTimer)
+  featuredBackgroundPreferencesSaveTimer = 0
+  state.featuredBackgroundPreferences = normalizeFeaturedBackgroundPreferences(state.featuredBackgroundPreferences)
+  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
+  await setLocalStorage({
+    [STORAGE_KEYS.newTabFeaturedBackgroundPreferences]: state.featuredBackgroundPreferences
+  })
+}
+
+async function toggleFeaturedBackgroundFavorite(featuredId: string): Promise<void> {
+  const id = String(featuredId || '').trim()
+  if (!id) {
+    return
+  }
+
+  const favoriteSet = new Set(state.featuredBackgroundFavoriteIds)
+  if (favoriteSet.has(id)) {
+    favoriteSet.delete(id)
+  } else {
+    favoriteSet.add(id)
+  }
+  state.featuredBackgroundFavoriteIds = [...favoriteSet]
+  await saveFeaturedBackgroundFavorites()
+  const gallery = await loadBackgroundGalleryModule()
+  if (isFeaturedBackgroundPickerOpen()) {
+    renderFeaturedBackgroundPicker(gallery)
+  }
+}
+
+async function saveFeaturedBackgroundFavorites(): Promise<void> {
+  await setLocalStorage({
+    [STORAGE_KEYS.newTabFeaturedBackgroundFavorites]: state.featuredBackgroundFavoriteIds
+  })
+}
+
+async function saveFeaturedBackgroundGallery(): Promise<void> {
+  await setLocalStorage({
+    [STORAGE_KEYS.newTabFeaturedBackgroundGallery]: state.featuredBackgroundGallery
+  })
+}
+
+async function refreshFeaturedBackgroundGallery(): Promise<void> {
+  if (state.featuredBackgroundRefreshing) {
+    return
+  }
+
+  state.featuredBackgroundRefreshing = true
+  setFeaturedBackgroundStatus('正在从 NASA、The Met 与 Wikimedia 拉取高清图...', 'info')
+  syncFeaturedBackgroundModalControls()
+  try {
+    const permissionGranted = await ensureFeaturedBackgroundPermissions()
+    if (!permissionGranted) {
+      setFeaturedBackgroundStatus('未完成图库访问授权，暂时无法刷新。', 'warning')
+      return
+    }
+    const refreshModule = await loadBackgroundGalleryRefreshModule()
+    const fetchedItems = await refreshModule.fetchFreshFeaturedBackgroundItems({
+      fetchJson,
+      getImageSize: getRemoteImageSize
+    }, {
+      allow1080p: state.featuredBackgroundAllow1080p
+    })
+    if (!fetchedItems.length) {
+      setFeaturedBackgroundStatus('没有拉取到满足高清要求的新图片。', 'warning')
+      return
+    }
+
+    state.featuredBackgroundGallery = refreshModule.mergeFeaturedGalleryRefresh({
+      existingItems: state.featuredBackgroundGallery,
+      favoriteIds: state.featuredBackgroundFavoriteIds,
+      fetchedItems
+    })
+    await saveFeaturedBackgroundGallery()
+    setFeaturedBackgroundStatus(
+      `已拉取 ${fetchedItems.length} 张${state.featuredBackgroundAllow1080p ? ' 1080P 或更高' : '高分辨率'}图片，收藏图片已保留。`,
+      'success'
+    )
+    void cacheFeaturedBackgroundGalleryImages()
+    const gallery = await loadBackgroundGalleryModule()
+    renderFeaturedBackgroundPicker(gallery)
+  } catch (error) {
+    setFeaturedBackgroundStatus(getFeaturedBackgroundRefreshErrorMessage(error), 'error')
+  } finally {
+    state.featuredBackgroundRefreshing = false
+    syncFeaturedBackgroundModalControls()
+  }
+}
+
+async function ensureFeaturedBackgroundPermissions(): Promise<boolean> {
+  if (!chrome.permissions?.contains || !chrome.permissions?.request) {
+    return true
+  }
+  const refreshModule = await loadBackgroundGalleryRefreshModule()
+  const query = { origins: refreshModule.getFeaturedBackgroundRefreshRequestOrigins() }
+  if (await containsChromePermissions(query)) {
+    return true
+  }
+  return requestChromePermissions(query)
+}
+
+function containsChromePermissions(query: chrome.permissions.Permissions): Promise<boolean> {
+  return new Promise((resolve) => {
+    chrome.permissions.contains(query, (granted) => {
+      if (chrome.runtime.lastError) {
+        resolve(false)
+        return
+      }
+      resolve(Boolean(granted))
+    })
+  })
+}
+
+function requestChromePermissions(query: chrome.permissions.Permissions): Promise<boolean> {
+  return new Promise((resolve) => {
+    chrome.permissions.request(query, (granted) => {
+      if (chrome.runtime.lastError) {
+        resolve(false)
+        return
+      }
+      resolve(Boolean(granted))
+    })
+  })
+}
+
+async function fetchJson(url: string): Promise<unknown> {
+  const response = await fetch(url, { cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error(`请求失败：${response.status}`)
+  }
+  return response.json()
+}
+
+function getRemoteImageSize(imageUrl: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const image = new Image()
+    let settled = false
+    let timeout = 0
+
+    const settle = (size: { width: number; height: number } | null) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      window.clearTimeout(timeout)
+      image.onload = null
+      image.onerror = null
+      resolve(size)
+    }
+
+    timeout = window.setTimeout(() => settle(null), BACKGROUND_IMAGE_READY_TIMEOUT_MS)
+    image.onload = () => {
+      settle({
+        width: image.naturalWidth,
+        height: image.naturalHeight
+      })
+    }
+    image.onerror = () => settle(null)
+    image.src = imageUrl
+  })
+}
+
+function setFeaturedBackgroundStatus(
+  message: string,
+  tone: 'info' | 'success' | 'warning' | 'error' = 'info'
+): void {
+  state.featuredBackgroundStatus = message
+  state.featuredBackgroundStatusTone = tone
+}
+
+function getFeaturedBackgroundRefreshErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : ''
+  if (/permission|denied|权限/i.test(message)) {
+    return '图库刷新失败：没有第三方图库访问权限。'
+  }
+  if (/请求失败|status|404|403|401|500/i.test(message)) {
+    return '图库刷新失败：图库接口暂时不可用，请稍后重试。'
+  }
+  return '图库刷新失败：请检查网络后重试。'
 }
 
 function selectFeaturedBackgroundFromPicker(featuredId: string): void {
