@@ -3,7 +3,6 @@ import { getLocalStorage, setLocalStorage } from '../storage.js'
 import {
   CURATOR_DATA_STORES,
   applyCuratorDataStoreDelta,
-  clearCuratorDataStore,
   isCuratorDataDbAvailable,
   readCuratorDataStore,
   readCuratorDataStoreMeta,
@@ -13,7 +12,6 @@ import {
 } from './curator-data-db.js'
 
 const NEW_TAB_ACTIVITY_REPOSITORY_META_KEY = 'newTabActivity'
-const ACTIVITY_RECORD_LIMIT = 160
 
 export interface NewTabActivityRepositoryRecord {
   bookmarkId: string

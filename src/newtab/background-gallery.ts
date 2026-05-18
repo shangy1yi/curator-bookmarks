@@ -1,4 +1,6 @@
-export type FeaturedBackgroundProvider = 'nasa' | 'met' | 'wikimedia'
+import { isFeaturedBackgroundStyleSuitable } from './featured-background-style.js'
+
+export type FeaturedBackgroundProvider = 'nasa' | 'met' | 'wikimedia' | 'artic' | 'cleveland'
 
 export interface FeaturedBackgroundItem {
   id: string
@@ -335,22 +337,27 @@ export function getFeaturedBackgroundItemById(id: unknown): FeaturedBackgroundIt
 }
 
 export function getDefaultFeaturedBackgroundItem(): FeaturedBackgroundItem {
-  return FEATURED_BACKGROUND_ITEMS[0]
+  return getSuitableFeaturedBackgroundItems()[0] || FEATURED_BACKGROUND_ITEMS[0]
 }
 
 export function selectFeaturedBackgroundItem(seed: unknown = Date.now()): FeaturedBackgroundItem {
-  const count = FEATURED_BACKGROUND_ITEMS.length
+  const items = getSuitableFeaturedBackgroundItems()
+  const count = items.length
+  if (count <= 0) {
+    return getDefaultFeaturedBackgroundItem()
+  }
   const normalizedSeed = String(seed || '')
   const dailyIndex = getDailyFeaturedBackgroundIndex(normalizedSeed, count)
   const index = dailyIndex ?? Math.abs(hashFeaturedBackgroundSeed(normalizedSeed)) % count
-  return FEATURED_BACKGROUND_ITEMS[index] || getDefaultFeaturedBackgroundItem()
+  return items[index] || getDefaultFeaturedBackgroundItem()
 }
 
 export function getFeaturedBackgroundItemsForDate(
   seed: unknown = Date.now(),
   count = DAILY_FEATURED_BACKGROUND_OPTION_COUNT
 ): FeaturedBackgroundItem[] {
-  const total = FEATURED_BACKGROUND_ITEMS.length
+  const items = getSuitableFeaturedBackgroundItems()
+  const total = items.length
   if (total <= 0) {
     return []
   }
@@ -361,8 +368,17 @@ export function getFeaturedBackgroundItemsForDate(
   const optionCount = Math.min(Math.max(1, Math.floor(count)), total)
   return Array.from({ length: optionCount }, (_, offset) => {
     const index = (startIndex + offset) % total
-    return FEATURED_BACKGROUND_ITEMS[index] || getDefaultFeaturedBackgroundItem()
+    return items[index] || getDefaultFeaturedBackgroundItem()
   })
+}
+
+function getSuitableFeaturedBackgroundItems(): FeaturedBackgroundItem[] {
+  return FEATURED_BACKGROUND_ITEMS.filter((item) => isFeaturedBackgroundStyleSuitable({
+    title: item.title,
+    credit: item.credit,
+    provider: item.provider,
+    metadata: [item.sourceUrl]
+  }))
 }
 
 function getDailyFeaturedBackgroundIndex(seed: string, count: number): number | null {

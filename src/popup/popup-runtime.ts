@@ -2,10 +2,8 @@ import {
   AUTO_ANALYZE_STATUS_ACTIVE_EXPIRE_MS,
   AUTO_ANALYZE_STATUS_FINAL_EXPIRE_MS,
   BOOKMARKS_BAR_ID,
-  DEFAULT_INBOX_FOLDER_TITLE,
   POPUP_COMMAND_INTENT_TTL_MS,
   ROOT_ID,
-  RECYCLE_BIN_LIMIT,
   STORAGE_KEYS,
   UNDO_WINDOW_MS
 } from '../shared/constants.js'
@@ -5577,10 +5575,6 @@ function splitSmartFolderPath(value) {
 function getLastPathSegment(value) {
   const segments = splitSmartFolderPath(value)
   return segments.at(-1) || cleanSmartText(value, 60) || '推荐文件夹'
-}
-
-function formatSmartFolderPath(path) {
-  return formatBookmarkPath(path) || splitSmartFolderPath(path).join(' · ') || '未归档路径'
 }
 
 function getSmartFolderTargetPathLabel() {

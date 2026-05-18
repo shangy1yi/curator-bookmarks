@@ -7,10 +7,7 @@ import {
 import {
   buildContentSnapshotSearchMap,
   cleanContentSnapshotText as cleanText,
-  loadContentSnapshotIndex,
-  loadContentSnapshotSettings,
   normalizeContentSnapshotIndex,
-  normalizeContentSnapshotObject as normalizeObject,
   normalizeContentSnapshotSettings,
   normalizeContentSnapshotTextList as normalizeTextList,
   truncateContentSnapshotText as truncateCleanText,

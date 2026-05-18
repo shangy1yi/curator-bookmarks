@@ -757,7 +757,7 @@ button:focus-visible {
   left: 4px;
   z-index: 20;
   display: grid;
-  width: min(300px, calc(100vw - 24px));
+  width: min(312px, calc(100vw - 24px));
   gap: 6px;
   padding: 10px 12px;
   border: 1px solid var(--surface-3);
@@ -801,9 +801,9 @@ button:focus-visible {
 
 .search-help-list li {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
   font-size: 11px;
   color: var(--text-soft);
 }
@@ -812,6 +812,7 @@ button:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 44px;
   height: 16px;
   padding: 0 4px;
   border-radius: 4px;
@@ -820,6 +821,16 @@ button:focus-visible {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.search-help-example {
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  line-height: 1.45;
 }
 
 .search-help-list code {
@@ -827,6 +838,7 @@ button:focus-visible {
   font-size: 11px;
   color: var(--text);
   background: transparent;
+  white-space: nowrap;
 }
 
 .search-help-hint {

@@ -1,5 +1,4 @@
 export interface FeaturedBackgroundPreferences {
-  allow1080p: boolean
   displayMode: FeaturedBackgroundDisplayMode
   displaySize: number
   positionY: number
@@ -19,7 +18,6 @@ export const FEATURED_BACKGROUND_DISPLAY_LIMITS = {
 } as const
 
 export const DEFAULT_FEATURED_BACKGROUND_PREFERENCES: FeaturedBackgroundPreferences = {
-  allow1080p: false,
   displayMode: 'width',
   displaySize: 100,
   positionY: 50
@@ -33,7 +31,6 @@ export function normalizeFeaturedBackgroundPreferences(rawPreferences: unknown):
   const preferences = rawPreferences as Record<string, unknown>
   return {
     ...DEFAULT_FEATURED_BACKGROUND_PREFERENCES,
-    allow1080p: preferences.allow1080p === true,
     displayMode: preferences.displayMode === 'height' ? 'height' : 'width',
     displaySize: clampPreferenceDimension(
       preferences.displaySize,

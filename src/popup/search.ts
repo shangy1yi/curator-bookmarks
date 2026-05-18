@@ -309,6 +309,7 @@ function scoreBookmarkWithReasons(
   const title = bookmark.normalizedTitle
   const url = bookmark.normalizedUrl
   const domain = normalizeText(bookmark.domain || '')
+  const searchText = getBookmarkSearchText(bookmark)
   let score = 0
   let matched = false
   const reasons: string[] = []
@@ -344,20 +345,27 @@ function scoreBookmarkWithReasons(
 
   const titleIndex = normalizedQuery ? title.indexOf(normalizedQuery) : -1
   if (titleIndex !== -1) {
-    score += 300 - Math.min(titleIndex, 120)
+    score += 300 + getBoundaryMatchBonus(title, titleIndex, normalizedQuery.length, 46) - Math.min(titleIndex, 120)
     matched = true
     addReason(reasons, `命中：标题 ${normalizedQuery}`)
   }
 
-  if (normalizedQuery && (url.startsWith(normalizedQuery) || domain.startsWith(normalizedQuery))) {
+  if (normalizedQuery) {
+    const domainMatch = scoreDomainQueryMatch(domain, normalizedQuery)
+    if (domainMatch > 0) {
+      score += domainMatch
+      matched = true
+      addReason(reasons, `命中：站点 ${domain || normalizedQuery}`)
+    }
+  }
+
+  if (normalizedQuery && url.startsWith(normalizedQuery)) {
     score += 250
     matched = true
     addReason(reasons, `命中：网址 ${normalizedQuery}`)
   }
 
-  const urlIndex = normalizedQuery
-    ? Math.max(url.indexOf(normalizedQuery), domain.indexOf(normalizedQuery))
-    : -1
+  const urlIndex = normalizedQuery ? getBestSearchIndex(url, domain, normalizedQuery) : -1
   if (urlIndex !== -1) {
     score += 190 - Math.min(urlIndex, 100)
     matched = true
@@ -373,21 +381,30 @@ function scoreBookmarkWithReasons(
   }
 
   let allTermsPresent = queryTerms.length > 0
+  const unmatchedTerms: string[] = []
 
   for (const term of queryTerms) {
     let termMatched = false
     const termTitleIndex = title.indexOf(term)
-    const termUrlIndex = url.indexOf(term)
+    const termUrlIndex = getBestSearchIndex(url, domain, term)
 
     if (termTitleIndex !== -1) {
-      score += 72 - Math.min(termTitleIndex, 40)
+      score += 72 + getBoundaryMatchBonus(title, termTitleIndex, term.length, 22) - Math.min(termTitleIndex, 40)
       termMatched = true
       matched = true
       addReason(reasons, `命中：标题 ${term}`)
     }
 
+    const domainTermMatch = scoreDomainTermMatch(domain, term)
+    if (domainTermMatch > 0) {
+      score += domainTermMatch
+      termMatched = true
+      matched = true
+      addReason(reasons, `命中：站点 ${domain || term}`)
+    }
+
     if (termUrlIndex !== -1) {
-      score += 45 - Math.min(termUrlIndex, 40)
+      score += (domainTermMatch > 0 ? 22 : 45) - Math.min(termUrlIndex, 40)
       termMatched = true
       matched = true
       addReason(reasons, `命中：网址 ${term}`)
@@ -400,22 +417,41 @@ function scoreBookmarkWithReasons(
       termMatched = true
     }
 
+    if (
+      !termMatched &&
+      searchText.includes(term)
+    ) {
+      score += 16
+      termMatched = true
+      matched = true
+      addReason(reasons, `命中：网页内容 ${term}`)
+    }
+
     if (!termMatched) {
       allTermsPresent = false
+      unmatchedTerms.push(term)
     }
+  }
+
+  let approximateMatch = { score: 0, matchedCount: 0 }
+  if (unmatchedTerms.length) {
+    approximateMatch = scoreLatinApproximateTerms(bookmark, unmatchedTerms, reasons)
+  }
+
+  allTermsPresent = queryTerms.length === 0 || unmatchedTerms.length === approximateMatch.matchedCount
+
+  if (queryTerms.length > 1 && !allTermsPresent) {
+    return { score: 0, reasons: [] }
+  }
+
+  if (approximateMatch.score > 0) {
+    score += approximateMatch.score
+    matched = true
   }
 
   if (allTermsPresent && queryTerms.length > 1) {
-    score += 120
+    score += 120 + scoreOrderedTermProximity(title, queryTerms) + scoreOrderedTermProximity(domain, queryTerms)
     insertReason(reasons, buildQueryCoverageReason(queryTerms), 1)
-  }
-
-  if (!allTermsPresent) {
-    const approximateMatch = scoreLatinApproximateTerms(bookmark, queryTerms, reasons)
-    if (approximateMatch.score > 0) {
-      score += approximateMatch.score
-      matched = true
-    }
   }
 
   if (!matched) {
@@ -486,6 +522,7 @@ function scoreFastFirstBatchBookmark(
   const url = bookmark.normalizedUrl
   const domain = normalizeText(bookmark.domain || '')
   const path = bookmark.normalizedPath
+  const searchText = getBookmarkSearchText(bookmark)
   const reasons: string[] = []
   let score = 0
 
@@ -507,7 +544,7 @@ function scoreFastFirstBatchBookmark(
     score += 250
     addReason(reasons, `命中：网址 ${normalizedQuery}`)
   } else {
-    const urlIndex = Math.max(url.indexOf(normalizedQuery), domain.indexOf(normalizedQuery))
+    const urlIndex = getBestSearchIndex(url, domain, normalizedQuery)
     if (urlIndex !== -1) {
       score += 190 - Math.min(urlIndex, 100)
       addReason(reasons, `命中：网址 ${normalizedQuery}`)
@@ -519,12 +556,16 @@ function scoreFastFirstBatchBookmark(
     addReason(reasons, `命中：文件夹 ${bookmark.path || ''}`.trim())
   }
 
+  if (searchText.includes(normalizedQuery)) {
+    score += 24
+  }
+
   if (score <= 0) {
     score += Math.max(12, terms.length * 12)
     addReason(reasons, buildQueryCoverageReason(terms) || `命中：本地索引 ${normalizedQuery}`)
   }
 
-  if (terms.length > 1 && terms.every((term) => getBookmarkSearchText(bookmark).includes(term))) {
+  if (terms.length > 1 && terms.every((term) => searchText.includes(term))) {
     score += 80
     insertReason(reasons, buildQueryCoverageReason(terms), 1)
   }
@@ -745,20 +786,23 @@ function scoreLatinApproximateTerms(
   bookmark: PopupSearchBookmark,
   queryTerms: string[],
   reasons: string[]
-): { score: number } {
+): { score: number; matchedCount: number } {
   const latinTerms = queryTerms.filter(isApproximateLatinTerm)
   if (!latinTerms.length) {
-    return { score: 0 }
+    return { score: 0, matchedCount: 0 }
   }
 
   const tokens = collectApproximateSearchTokens(bookmark)
   if (!tokens.length) {
-    return { score: 0 }
+    return { score: 0, matchedCount: 0 }
   }
 
   let score = 0
+  let matchedCount = 0
   for (const term of latinTerms) {
     if (tokens.some((token) => token.includes(term))) {
+      matchedCount += 1
+      score += 14
       continue
     }
 
@@ -767,11 +811,12 @@ function scoreLatinApproximateTerms(
       continue
     }
 
+    matchedCount += 1
     score += Math.max(24, 58 - match.distance * 12)
     addReason(reasons, `命中：近似 ${match.token} / ${term}`)
   }
 
-  return { score }
+  return { score, matchedCount }
 }
 
 function isApproximateLatinTerm(term: string): boolean {
@@ -891,10 +936,6 @@ function normalizeSearchList(values: unknown): string[] {
   if (!Array.isArray(values)) {
     return []
   }
-  return [...new Set(values.map((value) => normalizeText(value)).filter(Boolean))]
-}
-
-function uniqueSearchTerms(values: string[]): string[] {
   return [...new Set(values.map((value) => normalizeText(value)).filter(Boolean))]
 }
 
@@ -1106,6 +1147,109 @@ function matchesSearchCandidateFilters(
 
 function getBookmarkSearchText(bookmark: PopupSearchBookmark): string {
   return bookmark.searchText || `${bookmark.normalizedTitle} ${bookmark.normalizedUrl}`
+}
+
+function getBestSearchIndex(left: string, right: string, term: string): number {
+  const indices = [left.indexOf(term), right.indexOf(term)].filter((index) => index >= 0)
+  return indices.length ? Math.min(...indices) : -1
+}
+
+function scoreDomainQueryMatch(domain: string, normalizedQuery: string): number {
+  if (!domain || !normalizedQuery) {
+    return 0
+  }
+
+  const index = domain.indexOf(normalizedQuery)
+  if (index === -1) {
+    return 0
+  }
+
+  if (domain === normalizedQuery) {
+    return 280
+  }
+
+  if (domain.startsWith(normalizedQuery)) {
+    return 240 + getBoundaryMatchBonus(domain, 0, normalizedQuery.length, 28)
+  }
+
+  return Math.max(
+    120,
+    170 - Math.min(index, 90) + getBoundaryMatchBonus(domain, index, normalizedQuery.length, 24)
+  )
+}
+
+function scoreDomainTermMatch(domain: string, term: string): number {
+  if (!domain || !term) {
+    return 0
+  }
+
+  const index = domain.indexOf(term)
+  if (index === -1) {
+    return 0
+  }
+
+  if (domain === term) {
+    return 72
+  }
+
+  if (domain.startsWith(term)) {
+    return 60 + getBoundaryMatchBonus(domain, 0, term.length, 18)
+  }
+
+  return Math.max(
+    20,
+    46 - Math.min(index, 48) + getBoundaryMatchBonus(domain, index, term.length, 16)
+  )
+}
+
+function getBoundaryMatchBonus(text: string, index: number, length: number, maxBonus: number): number {
+  if (!text || !Number.isFinite(index) || !Number.isFinite(length) || maxBonus <= 0) {
+    return 0
+  }
+
+  const start = Math.max(0, index)
+  const end = Math.max(start, index + length)
+  const leftBoundary = start <= 0 || isSearchBoundaryChar(text[start - 1] || '')
+  const rightBoundary = end >= text.length || isSearchBoundaryChar(text[end] || '')
+
+  if (leftBoundary && rightBoundary) {
+    return maxBonus
+  }
+  if (leftBoundary || rightBoundary) {
+    return Math.round(maxBonus * 0.6)
+  }
+  return 0
+}
+
+function isSearchBoundaryChar(value: string): boolean {
+  return !/[a-z0-9]/i.test(value)
+}
+
+function scoreOrderedTermProximity(text: string, terms: string[]): number {
+  const orderedTerms = [...new Set(terms.map((term) => normalizeText(term)).filter(Boolean))]
+  if (!text || orderedTerms.length < 2) {
+    return 0
+  }
+
+  let searchStart = 0
+  let firstIndex = -1
+  let lastEnd = -1
+
+  for (const term of orderedTerms) {
+    const index = text.indexOf(term, searchStart)
+    if (index === -1) {
+      return 0
+    }
+
+    if (firstIndex === -1) {
+      firstIndex = index
+    }
+    lastEnd = index + term.length
+    searchStart = index + term.length
+  }
+
+  const span = Math.max(1, lastEnd - firstIndex)
+  return Math.max(0, 48 - Math.min(span, 48))
 }
 
 function appendTopSearchResult(results: PopupSearchResult[], result: PopupSearchResult, limit = MAX_POPUP_SEARCH_RESULTS): void {

@@ -30,6 +30,7 @@ export const STORAGE_KEYS = {
   newTabCustomIcons: 'curatorBookmarkNewTabCustomIcons',
   newTabBackgroundSettings: 'curatorBookmarkNewTabBackgroundSettings',
   newTabFeaturedBackgroundGallery: 'curatorBookmarkNewTabFeaturedBackgroundGallery',
+  newTabFeaturedBackgroundPreviewCache: 'curatorBookmarkNewTabFeaturedBackgroundPreviewCache',
   newTabFeaturedBackgroundFavorites: 'curatorBookmarkNewTabFeaturedBackgroundFavorites',
   newTabFeaturedBackgroundPreferences: 'curatorBookmarkNewTabFeaturedBackgroundPreferences',
   newTabSearchSettings: 'curatorBookmarkNewTabSearchSettings',
@@ -61,8 +62,6 @@ export const STORAGE_KEYS = {
   contentSnapshotIndex: 'curatorBookmarkContentSnapshotIndex',
   savedSearches: 'curatorBookmarkSavedSearches'
 } as const
-
-type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS]
 
 export const BOOKMARK_ADD_HISTORY_LIMIT = 200
 export const RECYCLE_BIN_LIMIT = 200

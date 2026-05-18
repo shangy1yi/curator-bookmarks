@@ -2,8 +2,7 @@ import {
   BOOKMARKS_BAR_ID,
   NEWTAB_DASHBOARD_OPEN_MESSAGE_TYPE,
   ROOT_ID,
-  STORAGE_KEYS,
-  RECYCLE_BIN_LIMIT
+  STORAGE_KEYS
 } from '../shared/constants.js'
 import type { NavigationAttempt } from '../shared/types.js'
 import {
@@ -16,7 +15,6 @@ import {
   getBookmarkTree,
   moveBookmark,
   updateBookmark,
-  removeBookmark,
   createBookmark
 } from '../shared/bookmarks-api.js'
 import {
@@ -24,11 +22,9 @@ import {
 } from '../shared/bookmark-tree.js'
 import {
   normalizeText,
-  stripCommonUrlPrefix,
   normalizeUrl,
   displayUrl,
-  extractDomain,
-  buildDuplicateKey
+  extractDomain
 } from '../shared/text.js'
 import {
   buildBookmarkTagExport,
@@ -94,13 +90,10 @@ import {
   buildFailureClassification,
   shouldRetryNavigation,
   shouldAcceptNavigationSuccess,
-  summarizeNavigationEvidence,
-  shouldClassifyAsHighConfidence,
   shouldFallbackToGet,
   classifyProbeResponse,
   classifyProbeError,
-  isRedirectedNavigation,
-  normalizeNavigationUrl
+  isRedirectedNavigation
 } from './sections/classifier.js'
 import {
   buildFallbackPageContentFromUrl,
@@ -146,9 +139,7 @@ import {
   aiNamingManagerState,
   dashboardState,
   contentSnapshotState,
-  backupRestoreState,
-  createEmptyIgnoreRules,
-  createEmptyRedirectCache
+  backupRestoreState
 } from './shared-options/state.js'
 import { dom, cacheDom } from './shared-options/dom.js'
 import { escapeHtml, escapeAttr } from './shared-options/html.js'
@@ -169,7 +160,6 @@ import {
 import { truncateText } from './shared-options/text.js'
 import {
   normalizeIgnoreRules,
-  serializeIgnoreRules,
   saveIgnoreRules,
   matchesIgnoreRules,
   renderIgnoreSection,
@@ -220,7 +210,6 @@ import {
 } from './sections/redirects.js'
 import {
   hydrateDetectionHistory,
-  getHistoryRunsForScope,
   getHistoricalAbnormalStreak,
   syncHistoryComparisonScope,
   finalizeDetectionHistory,
@@ -8376,10 +8365,6 @@ function renderMoveModal() {
   dom.moveFolderResults.innerHTML = folders
     .map((folder) => buildMoveFolderCard(folder))
     .join('')
-}
-
-function buildAvailabilityResultCard(result, tone) {
-  return buildAvailabilityDisplayCard(result, tone === 'warning' ? 'review' : 'failed')
 }
 
 function buildAvailabilityDisplayCard(result, panel) {

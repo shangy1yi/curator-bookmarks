@@ -1,7 +1,7 @@
 import type { BookmarkRecord } from '../../shared/types.js'
 import type { NewTabSpeedDialStateMessage } from '../../shared/constants.js'
 
-type DashboardModule = typeof import('./dashboard.js')
+type DashboardModule = typeof import('./dashboard-runtime.js')
 type DashboardCallbacks = Parameters<DashboardModule['handleDashboardClick']>[1]
 
 let dashboardModule: DashboardModule | null = null
@@ -9,7 +9,7 @@ let dashboardModulePromise: Promise<DashboardModule> | null = null
 
 function loadDashboardModule(): Promise<DashboardModule> {
   if (!dashboardModulePromise) {
-    dashboardModulePromise = import('./dashboard.js').then((mod) => {
+    dashboardModulePromise = import('./dashboard-runtime.js').then((mod) => {
       dashboardModule = mod
       return mod
     })

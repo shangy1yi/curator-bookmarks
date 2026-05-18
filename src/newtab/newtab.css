@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #050506;
-  --wallpaper-placeholder-bg: #000000;
+  --wallpaper-placeholder-bg: #101013;
   --background-mask-blur: 12px;
   --text: #f5f5f7;
   --text-muted: rgba(245, 245, 247, 0.58);
@@ -120,7 +120,6 @@ body {
 body {
   height: 100vh;
   background: var(--bg);
-  background-attachment: fixed;
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
@@ -129,9 +128,33 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  inset: -24px;
+  z-index: 0;
+  background-color: var(--wallpaper-placeholder-bg, #101013);
+  background-image: var(--instant-wallpaper-preview-image, none);
+  background-position: var(--instant-wallpaper-position, center);
+  background-size: var(--instant-wallpaper-size, cover);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(1.035);
+  transition: opacity var(--motion-standard) var(--motion-ease-out);
+}
+
+html.instant-wallpaper-ready:not(.instant-wallpaper-remote-ready) body::before {
+  opacity: 1;
+  filter: blur(10px) saturate(1.03);
+}
+
+html.instant-wallpaper-remote-ready body::before {
+  opacity: 0;
+}
+
 html.loading-wallpaper,
 html.loading-wallpaper body {
-  background-color: var(--wallpaper-placeholder-bg, #000000);
+  background-color: var(--wallpaper-placeholder-bg, #101013);
 }
 
 html.loading-wallpaper:not(.instant-wallpaper-ready) body {
@@ -145,11 +168,7 @@ html.instant-wallpaper-ready body {
 }
 
 html.loading-wallpaper .newtab-shell,
-html.loading-wallpaper .settings-trigger-zone {
-  opacity: 0;
-  visibility: hidden;
-}
-
+html.loading-wallpaper .settings-trigger-zone,
 html:not(.loading-wallpaper) .newtab-shell,
 html:not(.loading-wallpaper) .settings-trigger-zone {
   opacity: 1;
@@ -287,12 +306,35 @@ body.background-mask-enabled .newtab-background-mask {
   backdrop-filter: blur(var(--background-mask-blur)) saturate(0.92);
 }
 
+.newtab-background-mask::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  transition: opacity var(--ease-standard);
+}
+
 .newtab-background-mask[data-mask-style="dark"] {
   background: rgba(0, 0, 0, 0.34);
 }
 
 .newtab-background-mask[data-mask-style="frosted"] {
   background: rgba(18, 18, 20, 0.2);
+}
+
+.newtab-background-mask[data-mask-style="noise"] {
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.newtab-background-mask[data-mask-style="noise"]::before {
+  opacity: 0.2;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.2) 0.65px, transparent 0.9px),
+    radial-gradient(rgba(0, 0, 0, 0.28) 0.7px, transparent 1px);
+  background-position: 0 0, 12px 14px;
+  background-size: 4px 4px, 5px 5px;
 }
 
 .newtab-background-mask[data-mask-style="light"] {
@@ -443,8 +485,6 @@ body.background-mask-enabled .newtab-background-mask {
   box-shadow:
     0 14px 32px rgba(0, 0, 0, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.045);
-  -webkit-backdrop-filter: blur(16px) saturate(128%);
-  backdrop-filter: blur(16px) saturate(128%);
 }
 
 .newtab-clock[data-clock-density="compact"] {
@@ -559,8 +599,6 @@ body.background-mask-enabled .newtab-background-mask {
   box-shadow:
     0 12px 34px rgba(0, 0, 0, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
   transition:
     border-color var(--ease-standard),
     background var(--ease-standard),
@@ -755,8 +793,6 @@ body.background-mask-enabled .newtab-background-mask {
   box-shadow:
     0 18px 44px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
   scrollbar-color: rgba(245, 245, 247, 0.22) transparent;
   scrollbar-width: thin;
   transform: translateX(-50%);
@@ -781,8 +817,6 @@ body.background-mask-enabled .newtab-background-mask {
   box-shadow:
     0 18px 44px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
 }
 
 .newtab-search-engine-item {
@@ -1374,12 +1408,12 @@ body.background-mask-enabled .newtab-background-mask {
 
 .newtab-speed-dial {
   padding: 10px;
-  border: 1px solid rgba(245, 245, 247, 0.1);
+  border: 1px solid rgba(245, 245, 247, 0.12);
   border-radius: 8px;
-  background: rgba(8, 8, 9, 0.28);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
+  background: rgba(8, 8, 9, 0.24);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  backdrop-filter: blur(14px) saturate(1.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
 }
 
 .newtab-speed-dial-grid {
@@ -1400,9 +1434,12 @@ body.background-mask-enabled .newtab-background-mask {
   align-items: center;
   gap: 9px;
   padding: 8px;
-  border: 1px solid rgba(245, 245, 247, 0.1);
+  border: 1px solid rgba(245, 245, 247, 0.14);
   border-radius: 7px;
-  background: rgba(var(--bookmark-card-rgb, 245, 245, 247), 0.05);
+  background: rgba(10, 10, 11, 0.24);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  backdrop-filter: blur(12px) saturate(1.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
   color: rgba(245, 245, 247, 0.86);
   cursor: pointer;
   text-decoration: none;
@@ -1418,8 +1455,8 @@ body.background-mask-enabled .newtab-background-mask {
 
 .newtab-speed-dial-card:hover,
 .newtab-speed-dial-card:focus-visible {
-  border-color: rgba(245, 245, 247, 0.22);
-  background: rgba(var(--bookmark-card-rgb, 245, 245, 247), 0.1);
+  border-color: rgba(245, 245, 247, 0.24);
+  background: rgba(16, 16, 18, 0.32);
   outline: none;
   transform: translateY(-1px);
 }
@@ -1442,8 +1479,8 @@ body.bookmark-drag-preview-initializing .newtab-speed-dial-card {
 body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):hover,
 body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):active,
 body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):focus-visible {
-  border-color: rgba(245, 245, 247, 0.1);
-  background: rgba(var(--bookmark-card-rgb, 245, 245, 247), 0.05);
+  border-color: rgba(245, 245, 247, 0.14);
+  background: rgba(10, 10, 11, 0.24);
   transform: none;
 }
 
@@ -1521,9 +1558,11 @@ body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):focus-visible {
   align-items: center;
   gap: 12px;
   padding: 8px;
-  border: 1px solid rgba(245, 245, 247, 0.08);
+  border: 1px solid rgba(245, 245, 247, 0.12);
   border-radius: 7px;
-  background: rgba(245, 245, 247, 0.045);
+  background: rgba(10, 10, 11, 0.24);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  backdrop-filter: blur(12px) saturate(1.08);
 }
 
 .newtab-speed-dial-empty-copy {
@@ -1554,12 +1593,12 @@ body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):focus-visible {
   gap: 14px;
   margin-bottom: 18px;
   padding: 10px;
-  border: 1px solid rgba(245, 245, 247, 0.1);
+  border: 1px solid rgba(245, 245, 247, 0.12);
   border-radius: 8px;
-  background: rgba(8, 8, 9, 0.3);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
+  background: rgba(8, 8, 9, 0.24);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  backdrop-filter: blur(14px) saturate(1.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
 }
 
 .newtab-portal.quick-only {
@@ -1610,9 +1649,11 @@ body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):focus-visible {
   align-items: center;
   gap: 7px;
   padding: 4px 8px 4px 5px;
-  border: 1px solid rgba(245, 245, 247, 0.1);
+  border: 1px solid rgba(245, 245, 247, 0.14);
   border-radius: 7px;
-  background: rgba(245, 245, 247, 0.035);
+  background: rgba(10, 10, 11, 0.22);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  backdrop-filter: blur(10px) saturate(1.08);
   color: rgba(245, 245, 247, 0.84);
   text-decoration: none;
   transition:
@@ -1623,8 +1664,8 @@ body.speed-dial-dragging .newtab-speed-dial-card:not(.dragging):focus-visible {
 
 .newtab-quick-link:hover,
 .newtab-quick-link:focus-visible {
-  border-color: rgba(245, 245, 247, 0.22);
-  background: rgba(245, 245, 247, 0.075);
+  border-color: rgba(245, 245, 247, 0.24);
+  background: rgba(16, 16, 18, 0.3);
   color: var(--text);
   outline: none;
 }
@@ -1993,9 +2034,9 @@ body.folder-names-hidden.folder-order-dragging .folder-section-header-row {
 
 .bookmark-tile {
   --bookmark-card-rgb: 245 245 247;
-  --bookmark-card-bg-alpha: 0.3;
-  --bookmark-card-border-alpha: 0.1;
-  --bookmark-card-hover-alpha: 0.38;
+  --bookmark-card-bg-alpha: 0.22;
+  --bookmark-card-border-alpha: 0.14;
+  --bookmark-card-hover-alpha: 0.32;
   display: grid;
   width: 100%;
   min-height: calc(var(--icon-shell-size) + 18px);
@@ -2007,9 +2048,11 @@ body.folder-names-hidden.folder-order-dragging .folder-section-header-row {
   border: 1px solid rgba(245, 245, 247, var(--bookmark-card-border-alpha));
   border-radius: 8px;
   background: rgba(8, 8, 9, var(--bookmark-card-bg-alpha));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  backdrop-filter: blur(12px) saturate(1.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 10px 26px rgba(0, 0, 0, 0.08);
   color: var(--text);
   text-align: left;
   text-decoration: none;
@@ -2041,9 +2084,11 @@ body.folder-names-hidden.folder-order-dragging .folder-section-header-row {
 
 .bookmark-tile:hover,
 .bookmark-tile:focus-visible {
-  border-color: rgba(245, 245, 247, 0.16);
+  border-color: rgba(245, 245, 247, 0.2);
   background: rgba(8, 8, 9, var(--bookmark-card-hover-alpha));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 14px 32px rgba(0, 0, 0, 0.12);
   transform: translateY(-1px);
 }
 
@@ -2075,7 +2120,9 @@ body.bookmark-dragging .bookmark-tile:not(.dragging):active,
 body.bookmark-dragging .bookmark-tile:not(.dragging):focus-visible {
   border-color: rgba(245, 245, 247, var(--bookmark-card-border-alpha));
   background: rgba(8, 8, 9, var(--bookmark-card-bg-alpha));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 10px 26px rgba(0, 0, 0, 0.08);
   transform: none;
 }
 
@@ -2233,7 +2280,6 @@ body.bookmark-dragging .bookmark-tile:not(.dragging):focus-visible .bookmark-tit
   cursor: pointer;
   opacity: 1;
   pointer-events: auto;
-  backdrop-filter: blur(16px);
   transition:
     opacity var(--ease-standard),
     background-color var(--ease-standard),
@@ -2270,7 +2316,6 @@ body.bookmark-dragging .bookmark-tile:not(.dragging):focus-visible .bookmark-tit
   pointer-events: none;
   text-overflow: ellipsis;
   white-space: nowrap;
-  backdrop-filter: blur(14px);
 }
 
 .dashboard-trigger span {
@@ -3186,7 +3231,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
 .featured-wallpaper-modal {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 10020;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -3251,27 +3296,6 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-}
-
-.featured-wallpaper-toggle {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px;
-  border: 1px solid rgba(245, 245, 247, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.045);
-  color: rgba(245, 245, 247, 0.72);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.featured-wallpaper-toggle input {
-  width: 14px;
-  height: 14px;
-  accent-color: #84da89;
 }
 
 .featured-wallpaper-action {
@@ -3380,6 +3404,8 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
     background-color var(--ease-standard),
     box-shadow var(--ease-standard),
     transform var(--ease-standard);
+  content-visibility: auto;
+  contain-intrinsic-size: 228px 248px;
 }
 
 .featured-wallpaper-card:hover,
@@ -3405,13 +3431,20 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   display: block;
   aspect-ratio: 16 / 10;
   background-color: #151515;
-  background-position: center;
-  background-size: cover;
+  overflow: hidden;
+}
+
+.featured-wallpaper-preview-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
 }
 
 .featured-wallpaper-hover-preview {
   position: fixed;
-  z-index: 85;
+  z-index: 10021;
   overflow: hidden;
   border: 1px solid rgba(245, 245, 247, 0.18);
   border-radius: 8px;
@@ -5143,7 +5176,7 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
   letter-spacing: 0;
 }
 
-.settings-drawer :where(.settings-card, .setting-row, .setting-switch, .settings-group-tab, .settings-close, .setting-trust-note, .settings-save-status, .setting-select, .setting-native-select, .setting-color, .setting-file-button, .setting-picker-button, .setting-text-input, .setting-url-input, .setting-link, .setting-floating-field, .setting-segmented, .setting-segmented-button, .search-engine-toggle, .folder-source-selected-item, .folder-candidate-card, .folder-candidates-toggle, .folder-candidate-badge, .setting-help, .icon-live-preview, .icon-live-preview-tile, .icon-live-preview-shell, .module-setting-order-button, .featured-wallpaper-panel, .featured-wallpaper-card, .featured-wallpaper-close, .featured-wallpaper-state, .newtab-delete-toast, .newtab-delete-toast-actions button) {
+.settings-drawer :where(.settings-card, .setting-row, .setting-switch, .settings-group-tab, .settings-close, .setting-trust-note, .settings-save-status, .setting-select, .setting-native-select, .setting-color, .setting-file-button, .setting-picker-button, .setting-text-input, .setting-url-input, .setting-link, .setting-floating-field, .setting-segmented, .setting-segmented-button, .search-engine-toggle, .folder-source-selected-item, .folder-candidate-card, .folder-candidates-toggle, .folder-candidate-badge, .setting-help, .icon-preset-card, .icon-advanced-toggle, .icon-live-preview, .icon-live-preview-tile, .icon-live-preview-shell, .module-setting-order-button, .featured-wallpaper-panel, .featured-wallpaper-card, .featured-wallpaper-close, .featured-wallpaper-state, .newtab-delete-toast, .newtab-delete-toast-actions button) {
   border-radius: 0;
 }
 
@@ -5564,44 +5597,6 @@ body.settings-trigger-auto-hide .settings-trigger[aria-expanded="true"] ~ .dashb
 .setting-range::-moz-range-progress,
 .setting-range::-moz-range-thumb {
   border-radius: 0;
-}
-
-.featured-wallpaper-modal {
-  background: rgba(0, 0, 0, 0.82);
-}
-
-.featured-wallpaper-panel {
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: #000000;
-  box-shadow: none;
-}
-
-.featured-wallpaper-head {
-  border-bottom-color: rgba(255, 255, 255, 0.16);
-}
-
-.featured-wallpaper-kicker {
-  color: #b7ff8a;
-  letter-spacing: 0;
-}
-
-.featured-wallpaper-card,
-.featured-wallpaper-toggle,
-.featured-wallpaper-action,
-.featured-wallpaper-close {
-  border-color: rgba(255, 255, 255, 0.14);
-  background: #0f0f10;
-  box-shadow: none;
-}
-
-.featured-wallpaper-card:hover,
-.featured-wallpaper-card:focus-visible,
-.featured-wallpaper-action:hover,
-.featured-wallpaper-action:focus-visible,
-.featured-wallpaper-card.is-selected {
-  border-color: rgba(183, 255, 138, 0.5);
-  background: #132012;
-  box-shadow: none;
 }
 
 .newtab-delete-toast {

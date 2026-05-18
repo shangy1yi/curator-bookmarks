@@ -7887,7 +7887,13 @@ body {
 }
 
 .options-nav-link.active::before {
-  content: ">";
+  content: "-";
+  top: auto;
+  bottom: auto;
+  left: 9px;
+  width: auto;
+  border-radius: 0;
+  background: transparent;
   color: var(--accent-blue);
 }
 

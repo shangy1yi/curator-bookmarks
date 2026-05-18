@@ -23,6 +23,13 @@
     "http://*/*",
     "https://*/*"
   ],
+  "host_permissions": [
+    "https://images-assets.nasa.gov/*",
+    "https://images.metmuseum.org/*",
+    "https://upload.wikimedia.org/*",
+    "https://www.artic.edu/*",
+    "https://openaccess-cdn.clevelandart.org/*"
+  ],
   "background": {
     "service_worker": "src/service-worker/service-worker.ts",
     "type": "module"

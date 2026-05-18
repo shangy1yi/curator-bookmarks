@@ -126,7 +126,6 @@ import {
   DEFAULT_ENABLED_SEARCH_ENGINE_IDS,
   SEARCH_ENGINE_CONFIG_BY_ID,
   SEARCH_MULTI_OPEN_LIMIT,
-  buildSearchEngineUrl,
   normalizeEnabledSearchEngineIds,
   normalizeSearchEngineId,
   planSearchOpenTargets,
@@ -150,6 +149,7 @@ import {
   type FeaturedBackgroundPreferences
 } from './featured-gallery-preferences.js'
 import { buildFeaturedBackgroundPickerItems } from './featured-gallery-list.js'
+import type { FeaturedBackgroundItem } from './background-gallery.js'
 import {
   clearInstantWallpaper,
   clearInstantWallpaperTarget,
@@ -158,6 +158,8 @@ import {
   readInstantWallpaperTarget,
   saveInstantWallpaper,
   saveInstantWallpaperTarget,
+  getInstantWallpaperFallbackColor,
+  normalizeInstantWallpaperColor,
   type InstantWallpaperTargetRecord
 } from './instant-wallpaper.js'
 import {
@@ -166,7 +168,7 @@ import {
   toggleNewTabWorkspacePin,
   updateNewTabWorkspace,
   type NewTabWorkspaceSettings
-} from './workspace-settings.js'
+} from '../shared/newtab-workspace-settings.js'
 import { mark as perfMark, measure as perfMeasure, measureNow } from '../shared/perf.js'
 import { runIdle, runMicroIdle } from '../shared/idle.js'
 const FAVICON_SIZE = 64
@@ -176,22 +178,33 @@ const BOOKMARK_DRAG_LONG_PRESS_MS = 320
 const FOLDER_DRAG_LONG_PRESS_MS = BOOKMARK_DRAG_LONG_PRESS_MS
 const SETTINGS_SAVE_DEBOUNCE_MS = 260
 const FAVICON_ACCENT_SAVE_DEBOUNCE_MS = 900
-const EAGER_FAVICON_LIMIT = 24
-const HIGH_PRIORITY_FAVICON_LIMIT = 12
-const FAVICON_ACCENT_EXTRACTION_INITIAL_BUDGET = 48
+const EAGER_FAVICON_LIMIT = 12
+const HIGH_PRIORITY_FAVICON_LIMIT = 6
 const FAVICON_ACCENT_EXTRACTION_IDLE_TIMEOUT_MS = 1500
 const BACKGROUND_MEDIA_DB_NAME = 'curatorNewTabBackgroundMedia'
 const BACKGROUND_MEDIA_STORE = 'media'
 const BACKGROUND_URL_CACHE_KEY = 'urlImage'
 const BACKGROUND_URL_CACHE_KEY_PREFIX = `${BACKGROUND_URL_CACHE_KEY}:`
+const FEATURED_BACKGROUND_PREVIEW_CACHE_KEY_PREFIX = 'featuredPreview:'
 const BACKGROUND_URL_CACHE_MAX_DIMENSION = 2560
 const BACKGROUND_URL_CACHE_QUALITY = 0.86
+const FEATURED_BACKGROUND_PREVIEW_CACHE_MAX_DIMENSION = 1120
+const FEATURED_BACKGROUND_PREVIEW_CACHE_QUALITY = 0.74
+const FEATURED_BACKGROUND_PREVIEW_CACHE_CONCURRENCY = 4
 const BACKGROUND_IMAGE_READY_TIMEOUT_MS = 2200
+const REMOTE_BACKGROUND_READY_TIMEOUT_MS = 900
 const BACKGROUND_VIDEO_READY_TIMEOUT_MS = 2800
+const BACKGROUND_STARTUP_CACHE_IDLE_DELAY_MS = 2400
+const INSTANT_WALLPAPER_REMOTE_READY_FALLBACK_MS = 1400
+const INSTANT_WALLPAPER_STARTUP_CACHE_ATTEMPTS = [
+  { maxDimension: 320, quality: 0.54 },
+  { maxDimension: 224, quality: 0.5 },
+  { maxDimension: 144, quality: 0.46 }
+] as const
 const FEATURED_BACKGROUND_DAILY_REFRESH_GRACE_MS = 1500
 const DEFAULT_BACKGROUND_SETTINGS = {
   type: 'color',
-  color: '#000000',
+  color: '#101013',
   imageName: '',
   videoName: '',
   url: '',
@@ -200,8 +213,9 @@ const DEFAULT_BACKGROUND_SETTINGS = {
   maskStyle: 'dark',
   maskBlur: 12
 }
+const DEFAULT_FEATURED_BACKGROUND_PLACEHOLDER_COLOR = '#18200f'
 const SUPPORTED_BACKGROUND_TYPES = new Set(['featured', 'image', 'video', 'urls', 'color'])
-const SUPPORTED_BACKGROUND_MASK_STYLES = new Set(['dark', 'frosted', 'light'])
+const SUPPORTED_BACKGROUND_MASK_STYLES = new Set(['dark', 'frosted', 'noise', 'light'])
 const DEFAULT_SEARCH_SETTINGS = {
   enabled: true,
   webSearchEnabled: true,
@@ -240,7 +254,7 @@ interface NewTabCommandSuggestion {
   title: string
   subtitle: string
   keywords: string[]
-  run: () => void
+  run: () => void | Promise<void>
 }
 
 type NewTabCommandSearchSuggestion = {
@@ -259,7 +273,6 @@ type NewTabSearchSuggestion =
   | (SearchBookmarkSuggestion & { suggestionType?: 'bookmark' })
   | NewTabCommandSearchSuggestion
 type BackgroundGalleryModule = typeof import('./background-gallery.js')
-type FeaturedBackgroundItem = BackgroundGalleryModule['FEATURED_BACKGROUND_ITEMS'][number]
 type BackgroundGalleryRefreshModule = typeof import('./background-gallery-refresh.js')
 type SpeedDialModule = typeof import('./speed-dial.js')
 type SpeedDialItem = ReturnType<SpeedDialModule['buildSpeedDialItems']>[number]
@@ -276,6 +289,7 @@ let timeSettingsModule: TimeSettingsModule | null = null
 let faviconAccentModulePromise: Promise<FaviconAccentModule> | null = null
 let customIconPickerModulePromise: Promise<CustomIconPickerModule> | null = null
 let featuredBackgroundUiVersion = 0
+let featuredBackgroundPickerRenderSignature = ''
 let speedDialRenderVersion = 0
 let clockHydrationVersion = 0
 
@@ -351,6 +365,8 @@ function loadBackgroundGalleryModule(): Promise<BackgroundGalleryModule> {
   backgroundGalleryModulePromise ||= import('./background-gallery.js').then((mod) => {
     backgroundGalleryModule = mod
     migrateStoredFeaturedBackgroundId(mod)
+    scheduleFeaturedBackgroundGalleryPreviewObjectUrlWarm()
+    void cacheFeaturedBackgroundGalleryPreviewImages()
     return mod
   })
   return backgroundGalleryModulePromise
@@ -384,9 +400,9 @@ function loadCustomIconPickerModule(): Promise<CustomIconPickerModule> {
   return customIconPickerModulePromise
 }
 
-const BOOKMARK_TILE_INITIAL_RENDER_LIMIT = 160
-const BOOKMARK_TILE_RENDER_CHUNK_SIZE = 80
-const BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS = 120
+const BOOKMARK_TILE_INITIAL_RENDER_LIMIT = 72
+const BOOKMARK_TILE_RENDER_CHUNK_SIZE = 48
+const BOOKMARK_CHANGE_REFRESH_DEBOUNCE_MS = 320
 const QUICK_ACCESS_ITEM_LIMIT = 6
 const ACTIVITY_RECORD_LIMIT = 160
 const DASHBOARD_FRAME_READY_TIMEOUT_MS = 12000
@@ -519,7 +535,6 @@ const state = {
   featuredBackgroundGallery: [] as FeaturedBackgroundItem[],
   featuredBackgroundFavoriteIds: [] as string[],
   featuredBackgroundGalleryHydrated: false,
-  featuredBackgroundAllow1080p: false,
   featuredBackgroundPreferences: { ...DEFAULT_FEATURED_BACKGROUND_PREFERENCES } as FeaturedBackgroundPreferences,
   featuredBackgroundRefreshing: false,
   featuredBackgroundStatus: '',
@@ -612,7 +627,6 @@ const featuredBackgroundModalClose = document.getElementById('background-feature
 const featuredBackgroundPicker = document.getElementById('background-featured-picker')
 const featuredBackgroundRefreshButton = document.getElementById('background-featured-refresh')
 const featuredBackgroundStatus = document.getElementById('background-featured-status')
-const featuredBackgroundAllow1080pInput = document.getElementById('background-featured-allow-1080p')
 const featuredBackgroundDisplayModeInput = document.getElementById('background-featured-display-mode')
 const featuredBackgroundDisplaySizeInput = document.getElementById('background-featured-display-size')
 const featuredBackgroundPositionYInput = document.getElementById('background-featured-position-y')
@@ -638,6 +652,19 @@ let settingsDrawerReturnFocusElement: HTMLElement | null = null
 let featuredBackgroundModalReturnFocusElement: HTMLElement | null = null
 let featuredBackgroundPreviewElement: HTMLElement | null = null
 let featuredBackgroundPreviewCard: HTMLElement | null = null
+let featuredBackgroundGalleryObjectUrlByImageUrl = new Map<string, string>()
+let featuredBackgroundGalleryObjectUrlTaskByImageUrl = new Map<string, Promise<string>>()
+let featuredBackgroundGalleryObjectUrlGeneration = 0
+let featuredBackgroundGalleryPreviewObjectUrlByImageUrl = new Map<string, string>()
+let featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl = new Map<string, Promise<string>>()
+let featuredBackgroundGalleryPreviewObjectUrlGeneration = 0
+let featuredBackgroundGalleryCacheTask: Promise<void> | null = null
+let featuredBackgroundGalleryCacheSignature = ''
+let featuredBackgroundGalleryPreviewCacheTask: Promise<void> | null = null
+let featuredBackgroundGalleryPreviewCacheSignature = ''
+let featuredBackgroundGalleryPreviewObjectUrlWarmTask: Promise<void> | null = null
+let featuredBackgroundGalleryPreviewObjectUrlWarmSignature = ''
+let instantWallpaperRemoteReadyFallbackTimer = 0
 let deferredRenderClockUpdate = false
 let searchSettingsSaveTimer = 0
 let searchSettingsSettleTimer = 0
@@ -650,6 +677,9 @@ let bookmarkChangeRefreshTimer = 0
 let bookmarkChangeRefreshInFlight = false
 let bookmarkChangeRefreshQueued = false
 let dashboardFrameReadyTimeout = 0
+let backgroundStartupCacheTimer = 0
+let backgroundStartupCacheRequestId = 0
+let backgroundUrlCacheTaskByUrl = new Map<string, BackgroundUrlCacheTask>()
 let preloadedBackgroundSettings: typeof DEFAULT_BACKGROUND_SETTINGS | null = null
 let backgroundSettingsMutationVersion = 0
 let bookmarkDragSlotRects = new Map<string, DOMRect>()
@@ -673,6 +703,11 @@ let bookmarkLazyExpansionTargets = new WeakMap<HTMLElement, BookmarkLazyExpansio
 const backgroundPreloadPromise = preloadBackgroundSettings()
 
 state.searchIndexReadyPromise = searchIndexReadyPromise
+
+interface BackgroundUrlCacheTask {
+  startupBlob: Promise<Blob>
+  durableBlob: Promise<Blob>
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   recordNewTabDomContentLoaded()
@@ -1108,9 +1143,6 @@ function bindTimeSettingsEvents(): void {
 function bindBackgroundSettingsEvents(): void {
   document.getElementById('background-type')?.addEventListener('change', handleBackgroundSettingsChange)
   document.getElementById('background-featured-id')?.addEventListener('change', handleBackgroundSettingsChange)
-  featuredBackgroundAllow1080pInput?.addEventListener('change', () => {
-    void handleFeaturedBackgroundPreferenceChange()
-  })
   featuredBackgroundDisplayModeInput?.addEventListener('change', handleFeaturedBackgroundDisplayPreferenceCommit)
   featuredBackgroundDisplaySizeInput?.addEventListener('input', handleFeaturedBackgroundDisplayPreferencePreview)
   featuredBackgroundPositionYInput?.addEventListener('input', handleFeaturedBackgroundDisplayPreferencePreview)
@@ -1122,17 +1154,17 @@ function bindBackgroundSettingsEvents(): void {
   featuredBackgroundRefreshButton?.addEventListener('click', () => {
     void refreshFeaturedBackgroundGallery()
   })
-  featuredBackgroundModalClose?.addEventListener('click', closeFeaturedBackgroundPicker)
+  featuredBackgroundModalClose?.addEventListener('click', handleFeaturedBackgroundModalCloseRequest)
   featuredBackgroundModalGrid?.addEventListener('scroll', () => {
     clearFeaturedBackgroundHoverPreview()
   })
-  featuredBackgroundModal?.addEventListener('click', (event) => {
-    if (event.target === featuredBackgroundModal) {
-      closeFeaturedBackgroundPicker()
-    }
-  })
+  featuredBackgroundModal?.addEventListener('pointerdown', handleFeaturedBackgroundModalPointerDown, true)
   document.getElementById('background-color')?.addEventListener('input', handleBackgroundSettingsChange)
-  document.getElementById('background-url')?.addEventListener('input', handleBackgroundSettingsChange)
+  const backgroundUrlInput = document.getElementById('background-url')
+  backgroundUrlInput?.addEventListener('input', handleBackgroundSettingsChange)
+  backgroundUrlInput?.addEventListener('change', () => {
+    void handleBackgroundUrlCommit()
+  })
   document.getElementById('background-mask-enabled')?.addEventListener('change', handleBackgroundSettingsChange)
   document.getElementById('background-mask-style')?.addEventListener('change', handleBackgroundSettingsChange)
   document.getElementById('background-mask-blur')?.addEventListener('input', handleBackgroundSettingsChange)
@@ -1663,7 +1695,6 @@ function handleSearchSettingsCommit(): void {
 
 function handleFeaturedBackgroundDisplayPreferencePreview(): void {
   state.featuredBackgroundPreferences = readFeaturedBackgroundPreferencesFromControls()
-  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
   applyFeaturedBackgroundDisplayPreferences()
   syncFeaturedBackgroundDisplayPreferenceControls()
   scheduleFeaturedBackgroundPreferencesSave()
@@ -1671,7 +1702,6 @@ function handleFeaturedBackgroundDisplayPreferencePreview(): void {
 
 function handleFeaturedBackgroundDisplayPreferenceCommit(): void {
   state.featuredBackgroundPreferences = readFeaturedBackgroundPreferencesFromControls()
-  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
   applyFeaturedBackgroundDisplayPreferences()
   syncFeaturedBackgroundDisplayPreferenceControls()
   void saveFeaturedBackgroundPreferences().catch((error) => {
@@ -1716,8 +1746,8 @@ function handleBackgroundSettingsChange(): void {
   const previousSettings = state.backgroundSettings
   const nextSettings = readBackgroundSettingsFromControls()
   const shouldClearUrlCache = shouldClearBackgroundUrlCache(previousSettings, nextSettings)
-  state.backgroundUrlCacheStatus = ''
   state.backgroundSettings = nextSettings
+  updateBackgroundStartupCacheStatus(nextSettings)
   backgroundSettingsMutationVersion += 1
   preloadedBackgroundSettings = nextSettings
   setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(nextSettings))
@@ -1727,8 +1757,27 @@ function handleBackgroundSettingsChange(): void {
   })
   syncBackgroundSettingsControls()
   scheduleFeaturedBackgroundDailyRefresh()
+  scheduleCurrentBackgroundStartupCache(nextSettings)
   void applyBackgroundSettingsAfterCacheUpdate(shouldClearUrlCache)
-  scheduleFeaturedBackgroundGalleryCache()
+}
+
+async function handleBackgroundUrlCommit(): Promise<void> {
+  if (state.backgroundSettings.type !== 'urls') {
+    return
+  }
+
+  const imageUrl = getRemoteBackgroundImageUrl(state.backgroundSettings)
+  if (!imageUrl) {
+    return
+  }
+
+  const permissionGranted = await ensureBackgroundImageFetchPermission(imageUrl, { request: true })
+  if (!permissionGranted) {
+    setBackgroundStatus('未授权该图片域名，首屏缓存可能无法准备。', 'warning')
+    syncBackgroundSettingsControls()
+    return
+  }
+  await ensureCurrentBackgroundStartupCache(state.backgroundSettings)
 }
 
 async function applyBackgroundSettingsAfterCacheUpdate(shouldClearUrlCache: boolean): Promise<void> {
@@ -1779,13 +1828,13 @@ async function handleBackgroundFileChange(
     backgroundSettingsMutationVersion += 1
     preloadedBackgroundSettings = state.backgroundSettings
     await saveBackgroundSettings()
+    await ensureCurrentBackgroundStartupCache(state.backgroundSettings)
     if (shouldClearBackgroundUrlCache(previousSettings, state.backgroundSettings)) {
       await clearBackgroundUrlCache()
     }
     syncBackgroundSettingsControls()
     scheduleFeaturedBackgroundDailyRefresh()
     await applyBackgroundSettings()
-    scheduleFeaturedBackgroundGalleryCache()
     setBackgroundStatus(
       mediaType === 'image' ? '背景图片已保存。' : '背景视频已保存。',
       'success'
@@ -3945,12 +3994,6 @@ function openAiProviderSettings(): void {
   openOptionsHash('#general:ai-provider')
 }
 
-function focusNewTabSearchInput(): void {
-  const input = document.querySelector<HTMLInputElement>('.newtab-search-input')
-  input?.focus()
-  input?.select()
-}
-
 function getBookmarkDisplayTitle(bookmark: chrome.bookmarks.BookmarkTreeNode): string {
   return String(bookmark.title || '').trim() || String(bookmark.url || '').trim() || '未命名书签'
 }
@@ -4021,6 +4064,7 @@ async function refreshNewTab(): Promise<void> {
   render()
 
   try {
+    void backgroundPreloadPromise
     const [tree, stored] = await Promise.all([
       getBookmarkTree(),
       getLocalStorage([
@@ -4037,8 +4081,7 @@ async function refreshNewTab(): Promise<void> {
         STORAGE_KEYS.newTabWorkspaceSettings,
         STORAGE_KEYS.newTabModuleSettings,
         STORAGE_KEYS.onboardingState
-      ]),
-      backgroundPreloadPromise
+      ])
     ])
     perfMark('newtab.storageLoaded')
     const rootNode = tree[0] || null
@@ -4068,7 +4111,6 @@ async function refreshNewTab(): Promise<void> {
     state.featuredBackgroundFavoriteIds = normalizeFeaturedBackgroundFavoriteIds(stored[STORAGE_KEYS.newTabFeaturedBackgroundFavorites])
     state.featuredBackgroundGalleryHydrated = true
     state.featuredBackgroundPreferences = featuredBackgroundPreferences
-    state.featuredBackgroundAllow1080p = featuredBackgroundPreferences.allow1080p
     state.faviconAccentCache = normalizeFaviconAccentCache(stored[STORAGE_KEYS.newTabFaviconAccentCache])
     state.activity = normalizeNewTabActivity(null, state.allBookmarks)
     state.workspaceSettings = normalizeNewTabWorkspaceSettings(stored[STORAGE_KEYS.newTabWorkspaceSettings], {
@@ -4096,21 +4138,22 @@ async function refreshNewTab(): Promise<void> {
     onboardingCompleted = normalizeNewTabOnboardingCompleted(stored[STORAGE_KEYS.onboardingState])
   } catch (error) {
     state.error = error instanceof Error ? error.message : '新标签页加载失败，请刷新后重试。'
+    resolveSearchIndexReady()
   } finally {
     state.loading = false
     render()
     renderDeleteToast()
+    scheduleFeaturedBackgroundDailyRefresh()
+    void cacheFeaturedBackgroundGalleryPreviewImages()
+    void applyBackgroundSettings()
+    applyGeneralSettings()
+    applyFolderSettings()
     syncBackgroundSettingsControls()
     syncFeaturedBackgroundDisplayPreferenceControls()
-    scheduleFeaturedBackgroundDailyRefresh()
-    void applyBackgroundSettings()
-    scheduleFeaturedBackgroundGalleryCache()
     syncSearchSettingsControls()
     syncIconSettingsControls()
     syncGeneralSettingsControls()
-    applyGeneralSettings()
     syncFolderSettingsControls()
-    applyFolderSettings()
     syncNewTabModernSettingsControls()
     syncTimeSettingsControls()
     updateAllSettingRangeVisuals()
@@ -4145,6 +4188,7 @@ async function hydrateNewTabSearchAndTags(refreshVersion = newTabRefreshVersion)
   } catch (error) {
     console.warn('新标签页 idle 数据加载失败。', error)
     scheduleNewTabSearchIndexRebuild()
+    resolveSearchIndexReady()
   }
 }
 
@@ -4186,11 +4230,11 @@ async function preloadBackgroundSettings(): Promise<typeof DEFAULT_BACKGROUND_SE
       preloadedBackgroundSettings = nextSettings
       setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(state.backgroundSettings))
       syncInstantWallpaperTargetForSettings(nextSettings)
+      scheduleCurrentBackgroundStartupCache(nextSettings, { delay: 0 })
       syncBackgroundSettingsControls()
       syncFeaturedBackgroundDisplayPreferenceControls()
       scheduleFeaturedBackgroundDailyRefresh()
       void applyBackgroundSettings()
-      scheduleFeaturedBackgroundGalleryCache()
     }
     return nextSettings
   } catch (error) {
@@ -6870,7 +6914,10 @@ function createSpeedDialLink(
   link.dataset.speedDialBookmarkId = item.id
   link.setAttribute('aria-label', `打开固定入口：${item.title}。长按拖拽调整 Speed Dial 顺序`)
   bindBookmarkNavigation(link, bookmark)
-  if (!customIcon) {
+  const cachedAccent = !customIcon
+    ? getFaviconAccentCacheEntry(state.faviconAccentCache, item.id, item.url)
+    : null
+  if (cachedAccent) {
     applyCachedFaviconAccent(link, item.id, item.url)
   }
   if (String(item.id) === state.speedDialDraggingBookmarkId && state.speedDialDragOriginalOrderIds.length) {
@@ -6895,9 +6942,9 @@ function createSpeedDialLink(
   icon.addEventListener('error', () => {
     mark.classList.add('favicon-missing')
   })
-  if (!customIcon) {
+  if (!customIcon && !cachedAccent) {
     icon.addEventListener('load', () => {
-      scheduleFaviconAccentExtraction(icon, link, item.id, item.url, true)
+      scheduleFaviconAccentExtraction(icon, link, item.id, item.url)
     }, { once: true })
   }
 
@@ -7258,11 +7305,15 @@ function createBookmarkTile(
   item.dataset.bookmarkId = String(bookmark.id)
   item.dataset.folderId = folderId
   bindBookmarkNavigation(item, bookmark)
-  const customIcon = state.customIcons[String(bookmark.id)]
-  if (!customIcon) {
-    applyCachedFaviconAccent(item, String(bookmark.id), url)
+  const bookmarkId = String(bookmark.id)
+  const customIcon = state.customIcons[bookmarkId]
+  const cachedAccent = !customIcon
+    ? getFaviconAccentCacheEntry(state.faviconAccentCache, bookmarkId, url)
+    : null
+  if (cachedAccent) {
+    applyCachedFaviconAccent(item, bookmarkId, url)
   }
-  if (String(bookmark.id) === state.draggingBookmarkId && state.dragOriginalOrderIds.length) {
+  if (bookmarkId === state.draggingBookmarkId && state.dragOriginalOrderIds.length) {
     item.classList.add('dragging')
   }
 
@@ -7275,7 +7326,7 @@ function createBookmarkTile(
   if (customIcon) {
     icon.classList.add('custom-icon')
   }
-  icon.src = customIcon || getFaviconUrl(url, String(bookmark.id))
+  icon.src = customIcon || getFaviconUrl(url, bookmarkId)
   icon.alt = ''
   icon.draggable = false
   icon.loading = renderIndex < EAGER_FAVICON_LIMIT ? 'eager' : 'lazy'
@@ -7287,14 +7338,13 @@ function createBookmarkTile(
   icon.addEventListener('error', () => {
     iconShell.classList.add('favicon-missing')
   })
-  if (!customIcon && renderIndex < FAVICON_ACCENT_EXTRACTION_INITIAL_BUDGET) {
+  if (!customIcon && !cachedAccent && renderIndex >= BOOKMARK_TILE_INITIAL_RENDER_LIMIT) {
     icon.addEventListener('load', () => {
       scheduleFaviconAccentExtraction(
         icon,
         item,
-        String(bookmark.id),
-        url,
-        renderIndex < HIGH_PRIORITY_FAVICON_LIMIT
+        bookmarkId,
+        url
       )
     }, { once: true })
   }
@@ -7357,19 +7407,13 @@ function scheduleFaviconAccentExtraction(
   icon: HTMLImageElement,
   item: HTMLElement,
   bookmarkId: string,
-  url: string,
-  highPriority: boolean
+  url: string
 ): void {
   const run = () => {
     if (!icon.isConnected || !item.isConnected) {
       return
     }
     handleFaviconLoaded(icon, item, bookmarkId, url)
-  }
-
-  if (highPriority) {
-    window.requestAnimationFrame(run)
-    return
   }
 
   const requestIdle = window.requestIdleCallback
@@ -7437,6 +7481,8 @@ function cleanupNewTabRuntime(): void {
   window.clearTimeout(featuredBackgroundPreferencesSaveTimer)
   featuredBackgroundPreferencesSaveTimer = 0
   clearFeaturedBackgroundHoverPreview()
+  revokeFeaturedBackgroundGalleryObjectUrls()
+  revokeFeaturedBackgroundGalleryPreviewObjectUrls()
   window.clearTimeout(searchSettingsSaveTimer)
   searchSettingsSaveTimer = 0
   window.clearTimeout(searchSettingsSettleTimer)
@@ -7487,6 +7533,215 @@ function cleanupNewTabRuntime(): void {
     state.dashboardFrameLoaded = false
     state.dashboardFrameReady = false
   }
+}
+
+function getFeaturedBackgroundPreviewCacheKey(imageUrl: string): string {
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!normalizedUrl) {
+    return ''
+  }
+  return `${FEATURED_BACKGROUND_PREVIEW_CACHE_KEY_PREFIX}${normalizedUrl}`
+}
+
+function getFeaturedBackgroundPreviewCandidates(imageUrl: string, provider: FeaturedBackgroundItem['provider']): string[] {
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!normalizedUrl) {
+    return []
+  }
+
+  const urls = new Set<string>()
+  const fallbackUrl = getFeaturedBackgroundPreviewImageUrl({ provider }, normalizedUrl)
+  if (fallbackUrl) {
+    urls.add(fallbackUrl)
+  }
+  urls.add(normalizedUrl)
+  return [...urls]
+}
+
+async function getFeaturedBackgroundPreviewCacheRecord(imageUrl: string): Promise<{
+  blob: Blob
+  url: string
+  type: string
+  updatedAt: number
+} | null> {
+  const key = getFeaturedBackgroundPreviewCacheKey(imageUrl)
+  if (!key) {
+    return null
+  }
+
+  const db = await openBackgroundMediaDb()
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(BACKGROUND_MEDIA_STORE, 'readonly')
+      const store = transaction.objectStore(BACKGROUND_MEDIA_STORE)
+      const request = store.get(key)
+      request.onsuccess = () => {
+        const record = request.result as {
+          blob?: unknown
+          url?: unknown
+          type?: unknown
+          updatedAt?: unknown
+        } | undefined
+        if (!record?.blob || !(record.blob instanceof Blob) || String(record.url || '') !== normalizeBackgroundImageUrl(imageUrl)) {
+          resolve(null)
+          return
+        }
+        resolve({
+          blob: record.blob,
+          url: String(record.url || ''),
+          type: String(record.type || ''),
+          updatedAt: Number(record.updatedAt) || 0
+        })
+      }
+      request.onerror = () => {
+        reject(request.error || new Error('精选图库预览缓存读取失败。'))
+      }
+    })
+  } finally {
+    db.close()
+  }
+}
+
+async function saveFeaturedBackgroundPreviewCache(imageUrl: string, blob: Blob): Promise<void> {
+  const key = getFeaturedBackgroundPreviewCacheKey(imageUrl)
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!key || !normalizedUrl || !blob.size) {
+    return
+  }
+
+  const db = await openBackgroundMediaDb()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(BACKGROUND_MEDIA_STORE, 'readwrite')
+      transaction.objectStore(BACKGROUND_MEDIA_STORE).put({
+        blob,
+        url: normalizedUrl,
+        type: blob.type,
+        updatedAt: Date.now()
+      }, key)
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error || new Error('精选图库预览缓存保存失败。'))
+      transaction.onabort = () => reject(transaction.error || new Error('精选图库预览缓存保存失败。'))
+    })
+  } finally {
+    db.close()
+  }
+}
+
+async function clearFeaturedBackgroundPreviewCache(): Promise<void> {
+  const db = await openBackgroundMediaDb()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(BACKGROUND_MEDIA_STORE, 'readwrite')
+      const store = transaction.objectStore(BACKGROUND_MEDIA_STORE)
+      const prefix = FEATURED_BACKGROUND_PREVIEW_CACHE_KEY_PREFIX
+      const request = store.openKeyCursor(IDBKeyRange.bound(prefix, `${prefix}\uffff`))
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (!cursor) {
+          resolve()
+          return
+        }
+        cursor.delete()
+        cursor.continue()
+      }
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error || new Error('精选图库预览缓存清除失败。'))
+      transaction.onabort = () => reject(transaction.error || new Error('精选图库预览缓存清除失败。'))
+    })
+  } finally {
+    db.close()
+  }
+}
+
+async function createFeaturedBackgroundPreviewBlob(blob: Blob): Promise<Blob> {
+  if (!blob.type.toLowerCase().startsWith('image/')) {
+    return blob
+  }
+  if (blob.type.toLowerCase() === 'image/gif') {
+    return blob
+  }
+
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(blob)
+  } catch {
+    return blob
+  }
+
+  try {
+    const sourceMaxDimension = Math.max(bitmap.width, bitmap.height)
+    if (!sourceMaxDimension) {
+      return blob
+    }
+
+    const targetMaxDimension = Math.min(FEATURED_BACKGROUND_PREVIEW_CACHE_MAX_DIMENSION, getBackgroundCacheTargetDimension())
+    if (sourceMaxDimension <= targetMaxDimension) {
+      return blob
+    }
+
+    const scale = targetMaxDimension / sourceMaxDimension
+    const targetWidth = Math.max(1, Math.round(bitmap.width * scale))
+    const targetHeight = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = targetWidth
+    canvas.height = targetHeight
+    const context = canvas.getContext('2d')
+    if (!context) {
+      return blob
+    }
+
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
+    context.drawImage(bitmap, 0, 0, targetWidth, targetHeight)
+    const optimizedBlob = await canvasToBlob(canvas, 'image/webp', FEATURED_BACKGROUND_PREVIEW_CACHE_QUALITY)
+    return optimizedBlob && optimizedBlob.size < blob.size ? optimizedBlob : blob
+  } finally {
+    bitmap.close()
+  }
+}
+
+async function createFeaturedBackgroundPreviewObjectUrl(imageUrl: string): Promise<string> {
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!normalizedUrl) {
+    return ''
+  }
+
+  const cachedObjectUrl = featuredBackgroundGalleryPreviewObjectUrlByImageUrl.get(normalizedUrl)
+  if (cachedObjectUrl) {
+    return cachedObjectUrl
+  }
+
+  const existingTask = featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.get(normalizedUrl)
+  if (existingTask) {
+    return existingTask
+  }
+
+  const generation = featuredBackgroundGalleryPreviewObjectUrlGeneration
+  const task = getFeaturedBackgroundPreviewCacheRecord(normalizedUrl).then((record) => {
+    if (!record?.blob || generation !== featuredBackgroundGalleryPreviewObjectUrlGeneration) {
+      return ''
+    }
+    const objectUrl = URL.createObjectURL(record.blob)
+    featuredBackgroundGalleryPreviewObjectUrlByImageUrl.set(normalizedUrl, objectUrl)
+    return objectUrl
+  }).catch(() => '').finally(() => {
+    if (featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.get(normalizedUrl) === task) {
+      featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.delete(normalizedUrl)
+    }
+  })
+
+  featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.set(normalizedUrl, task)
+  return task
+}
+
+function revokeFeaturedBackgroundGalleryPreviewObjectUrls(): void {
+  featuredBackgroundGalleryPreviewObjectUrlGeneration += 1
+  for (const objectUrl of featuredBackgroundGalleryPreviewObjectUrlByImageUrl.values()) {
+    URL.revokeObjectURL(objectUrl)
+  }
+  featuredBackgroundGalleryPreviewObjectUrlByImageUrl.clear()
+  featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.clear()
 }
 
 function bindBookmarkNavigation(
@@ -7727,14 +7982,6 @@ async function removeBookmarkFromWorkspacePins(bookmarkId: string): Promise<void
   state.workspaceSettings = nextSettings
   await saveNewTabWorkspaceSettings()
   postDashboardSpeedDialState()
-}
-
-async function saveNewTabActivity(): Promise<void> {
-  const activityRepository = await loadNewTabActivityRepositoryLazy()
-  state.activity = await activityRepository.saveNewTabActivityToRepository(
-    state.activity,
-    normalizeNewTabActivityForCurrentBookmarks
-  )
 }
 
 async function saveNewTabActivityRecord(record: NewTabActivityRecord): Promise<void> {
@@ -8409,14 +8656,18 @@ function normalizeFeaturedBackgroundGalleryItem(rawItem: unknown): FeaturedBackg
   const credit = String(item.credit || '').trim()
   const license = String(item.license || '').trim()
   if (!id || !title || !imageUrl || !sourceUrl || !credit || !license ||
-    (provider !== 'nasa' && provider !== 'met' && provider !== 'wikimedia')) {
+    (provider !== 'nasa' &&
+      provider !== 'met' &&
+      provider !== 'wikimedia' &&
+      provider !== 'artic' &&
+      provider !== 'cleveland')) {
     return null
   }
 
   return {
     id,
     title,
-    provider,
+    provider: provider as FeaturedBackgroundItem['provider'],
     imageUrl,
     sourceUrl,
     credit,
@@ -8470,6 +8721,7 @@ function readBackgroundSettingsFromControls(): typeof DEFAULT_BACKGROUND_SETTING
 
 function syncBackgroundSettingsControls(): void {
   const settings = state.backgroundSettings
+  updateBackgroundStartupCacheStatus(settings)
   const typeInput = document.getElementById('background-type')
   const colorInput = document.getElementById('background-color')
   const featuredInput = document.getElementById('background-featured-id')
@@ -8544,7 +8796,9 @@ function syncBackgroundSettingsControls(): void {
       featuredCredit.textContent = '正在载入精选图库'
       featuredCredit.href = 'https://images.nasa.gov/'
       featuredCredit.title = ''
-      void hydrateFeaturedBackgroundCredit(settings)
+      if (settings.type === 'featured') {
+        void hydrateFeaturedBackgroundCredit(settings)
+      }
     }
   }
   if (colorRow instanceof HTMLElement) {
@@ -8618,6 +8872,62 @@ async function saveBackgroundSettings(): Promise<void> {
   preloadedBackgroundSettings = state.backgroundSettings
 }
 
+async function ensureCurrentBackgroundStartupCache(
+  settings = state.backgroundSettings,
+  mediaSignature = getBackgroundMediaSignature(settings)
+): Promise<void> {
+  if (!mediaSignature || settings.type === 'color') {
+    return
+  }
+  if (getCurrentInstantWallpaper(mediaSignature)) {
+    updateBackgroundStartupCacheStatus(settings)
+    return
+  }
+
+  if (settings.type === 'image' || settings.type === 'video') {
+    const mediaRecord = await getBackgroundMedia(settings.type).catch(() => null)
+    if (mediaRecord?.blob) {
+      await updateInstantWallpaperFromBlob(mediaRecord.blob, mediaSignature, settings)
+    }
+    return
+  }
+
+  if (isRemoteBackgroundType(settings.type)) {
+    const imageUrl = getRemoteBackgroundImageUrl(settings)
+    if (!imageUrl) {
+      return
+    }
+    await ensureBackgroundImageFetchPermission(imageUrl)
+    await cacheBackgroundUrlImage(imageUrl, mediaSignature, settings)
+  }
+}
+
+function scheduleCurrentBackgroundStartupCache(
+  settings = state.backgroundSettings,
+  { delay = BACKGROUND_STARTUP_CACHE_IDLE_DELAY_MS }: { delay?: number } = {}
+): void {
+  window.clearTimeout(backgroundStartupCacheTimer)
+  backgroundStartupCacheTimer = 0
+  const requestId = ++backgroundStartupCacheRequestId
+  if (!getBackgroundMediaSignature(settings) || settings.type === 'color') {
+    return
+  }
+  if (getCurrentInstantWallpaper(getBackgroundMediaSignature(settings))) {
+    updateBackgroundStartupCacheStatus(settings)
+    return
+  }
+
+  backgroundStartupCacheTimer = window.setTimeout(() => {
+    backgroundStartupCacheTimer = 0
+    runIdle(() => {
+      if (requestId !== backgroundStartupCacheRequestId) {
+        return
+      }
+      void ensureCurrentBackgroundStartupCache(settings)
+    }, { timeout: 6000 })
+  }, Math.max(0, delay))
+}
+
 function migrateStoredFeaturedBackgroundId(gallery = backgroundGalleryModule): void {
   if (!gallery || state.backgroundSettings.type !== 'featured' || !state.backgroundSettings.featuredId) {
     return
@@ -8658,7 +8968,10 @@ function shouldClearBackgroundUrlCache(
 }
 
 function getBackgroundMediaSignature(settings: typeof DEFAULT_BACKGROUND_SETTINGS): string {
-  return [
+  const featuredItem = settings.type === 'featured'
+    ? getActiveFeaturedBackgroundItemSync(settings)
+    : null
+  const signatureParts = [
     settings.type,
     normalizeHexColor(settings.color, DEFAULT_BACKGROUND_SETTINGS.color),
     settings.imageName,
@@ -8666,8 +8979,35 @@ function getBackgroundMediaSignature(settings: typeof DEFAULT_BACKGROUND_SETTING
     normalizeBackgroundImageUrl(settings.url),
     settings.type === 'featured' ? settings.featuredId : '',
     settings.type === 'featured' && !settings.featuredId ? getFeaturedBackgroundDateSeed() : '',
-    settings.type === 'featured' ? getActiveFeaturedBackgroundItemSync(settings)?.id || 'pending-featured' : ''
-  ].join('|')
+    settings.type === 'featured' ? featuredItem?.id || 'pending-featured' : ''
+  ]
+  if (settings.type === 'featured' && !featuredItem) {
+    const reusableSignature = getReusableFeaturedBackgroundSignature(`${signatureParts.slice(0, -1).join('|')}|`)
+    if (reusableSignature) {
+      return reusableSignature
+    }
+  }
+  return signatureParts.join('|')
+}
+
+function getReusableFeaturedBackgroundSignature(signaturePrefix: string): string {
+  const targetSignature = readInstantWallpaperTarget()?.signature || ''
+  if (isConcreteFeaturedBackgroundSignature(targetSignature, signaturePrefix)) {
+    return targetSignature
+  }
+  const instantSignature = readInstantWallpaper()?.signature || ''
+  if (isConcreteFeaturedBackgroundSignature(instantSignature, signaturePrefix)) {
+    return instantSignature
+  }
+  return ''
+}
+
+function isConcreteFeaturedBackgroundSignature(signature: string, signaturePrefix: string): boolean {
+  return Boolean(
+    signature &&
+    signature.startsWith(signaturePrefix) &&
+    !signature.endsWith('|pending-featured')
+  )
 }
 
 function setBackgroundStatus(
@@ -8686,24 +9026,21 @@ function getBackgroundMediaSaveErrorMessage(error: unknown): string {
   return '保存失败：请确认文件可读取，或换用更小的图片/视频后重试。'
 }
 
-function getBackgroundUrlCacheErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : ''
-  if (/不是图片|content/i.test(message)) {
-    return '远程缓存失败：链接返回的不是图片，请换用直连图片地址。'
+function updateBackgroundStartupCacheStatus(settings = state.backgroundSettings): void {
+  const mediaSignature = getBackgroundMediaSignature(settings)
+  const instantWallpaper = readInstantWallpaper()
+  const cacheRequired = settings.type !== 'color'
+  const cacheReady = !cacheRequired ||
+    (Boolean(mediaSignature) && instantWallpaper?.signature === mediaSignature && instantWallpaper.ready !== false)
+
+  if (!cacheRequired) {
+    state.backgroundUrlCacheStatus = ''
+    return
   }
-  if (/请求失败|status|404|403|401|500/i.test(message)) {
-    return '远程缓存失败：图片请求失败，请检查链接是否可访问或重新授权后重试。'
-  }
-  if (/太大|上限|size|large/i.test(message)) {
-    return message || '远程缓存失败：图片文件超过本地缓存上限，请换用更小的图片。'
-  }
-  if (/超时|timeout|abort/i.test(message)) {
-    return '远程缓存失败：图片下载超时，请检查网络或换用更稳定的直连图片。'
-  }
-  if (/quota|storage|空间|容量/i.test(message)) {
-    return '远程缓存失败：本地存储空间可能不足，请清理空间后重试。'
-  }
-  return '远程缓存失败：仍会使用原图片链接，请检查网络、图片地址或授权后重试。'
+
+  state.backgroundUrlCacheStatus = cacheReady
+    ? '首屏缓存已准备'
+    : '首屏缓存准备中...'
 }
 
 function hasAppliedBackgroundMedia(settings: typeof DEFAULT_BACKGROUND_SETTINGS): boolean {
@@ -8722,15 +9059,21 @@ function hasAppliedBackgroundMedia(settings: typeof DEFAULT_BACKGROUND_SETTINGS)
 function setWallpaperPlaceholderColor(color = getBackgroundPlaceholderColor(state.backgroundSettings)): void {
   document.documentElement.style.setProperty(
     '--wallpaper-placeholder-bg',
-    normalizeHexColor(color, DEFAULT_BACKGROUND_SETTINGS.color)
+    normalizeInstantWallpaperColor(color)
   )
 }
 
 function getBackgroundPlaceholderColor(settings: typeof DEFAULT_BACKGROUND_SETTINGS): string {
+  const allowDarkColor = settings.type === 'color'
   if (settings.type === 'featured') {
-    return getActiveFeaturedBackgroundItemSync(settings)?.accentColor || settings.color
+    return getNonBlackPlaceholderColor(
+      getActiveFeaturedBackgroundItemSync(settings)?.accentColor ||
+      settings.color ||
+      DEFAULT_FEATURED_BACKGROUND_PLACEHOLDER_COLOR
+    )
   }
-  return settings.color
+  const color = normalizeInstantWallpaperColor(settings.color || getInstantWallpaperFallbackColor())
+  return allowDarkColor ? color : getNonBlackPlaceholderColor(color)
 }
 
 function markWallpaperReady(): void {
@@ -8739,27 +9082,93 @@ function markWallpaperReady(): void {
 }
 
 function markWallpaperPending(): void {
-  document.documentElement.classList.add('loading-wallpaper')
+  const rootElement = document.documentElement
+  rootElement.classList.add('loading-wallpaper')
+  rootElement.classList.remove('instant-wallpaper-ready')
+  rootElement.classList.remove('instant-wallpaper-remote-ready')
+  delete rootElement.dataset.instantWallpaperRemoteReady
+}
+
+function cleanupInstantWallpaperStartupStyle(): void {
+  document.getElementById('instant-wallpaper-startup-style')?.remove()
+}
+
+function markRuntimeWallpaperApplied(): void {
+  cleanupInstantWallpaperStartupStyle()
+}
+
+function markInstantWallpaperRemoteReady(mediaSignature = lastAppliedBackgroundMediaSignature): void {
+  if (!mediaSignature) {
+    return
+  }
+  window.clearTimeout(instantWallpaperRemoteReadyFallbackTimer)
+  instantWallpaperRemoteReadyFallbackTimer = 0
+  const rootElement = document.documentElement
+  if (rootElement.dataset.instantWallpaperSignature && rootElement.dataset.instantWallpaperSignature !== mediaSignature) {
+    return
+  }
+  rootElement.classList.add('instant-wallpaper-remote-ready')
+  rootElement.dataset.instantWallpaperRemoteReady = 'true'
+}
+
+function getCurrentInstantWallpaper(mediaSignature: string): ReturnType<typeof readInstantWallpaper> {
+  const instantWallpaper = readInstantWallpaper()
+  return (
+    mediaSignature &&
+    instantWallpaper?.signature === mediaSignature &&
+    instantWallpaper.ready !== false
+  ) ? instantWallpaper : null
+}
+
+function ensureInstantWallpaperFallbackStyles(mediaSignature: string): boolean {
+  const rootElement = document.documentElement
+  if (
+    rootElement.dataset.instantWallpaperRemoteReady === 'true' &&
+    rootElement.dataset.instantWallpaperSignature === mediaSignature
+  ) {
+    delete rootElement.dataset.instantWallpaperPending
+    rootElement.classList.add('instant-wallpaper-ready')
+    return true
+  }
+
+  const instantWallpaper = getCurrentInstantWallpaper(mediaSignature)
+  if (!instantWallpaper) {
+    return false
+  }
+
+  rootElement.style.setProperty('--instant-wallpaper-image', `url("${escapeCssUrl(instantWallpaper.dataUrl)}")`)
+  rootElement.style.setProperty('--instant-wallpaper-preview-image', `url("${escapeCssUrl(instantWallpaper.dataUrl)}")`)
+  rootElement.style.setProperty('--instant-wallpaper-size', instantWallpaper.backgroundSize || 'cover')
+  rootElement.style.setProperty('--instant-wallpaper-position', instantWallpaper.backgroundPosition || 'center')
+  rootElement.style.setProperty('--wallpaper-placeholder-bg', instantWallpaper.placeholderColor || getBackgroundPlaceholderColor(state.backgroundSettings))
+  rootElement.dataset.instantWallpaperSignature = mediaSignature
+  rootElement.classList.add('instant-wallpaper-ready')
+  delete rootElement.dataset.instantWallpaperPending
+  delete rootElement.dataset.instantWallpaperRemoteReady
+  window.clearTimeout(instantWallpaperRemoteReadyFallbackTimer)
+  instantWallpaperRemoteReadyFallbackTimer = window.setTimeout(() => {
+    instantWallpaperRemoteReadyFallbackTimer = 0
+    markInstantWallpaperRemoteReady(mediaSignature)
+  }, INSTANT_WALLPAPER_REMOTE_READY_FALLBACK_MS)
+  return true
 }
 
 async function applyBackgroundSettings(): Promise<void> {
   const applyToken = ++backgroundApplyToken
   const settings = state.backgroundSettings
-  if (settings.type === 'featured' && !backgroundGalleryModule) {
-    markWallpaperPending()
+  if (settings.type === 'featured' && !backgroundGalleryModule && !getActiveFeaturedBackgroundItemSync(settings)) {
+    const mediaSignature = getBackgroundMediaSignature(settings)
+    setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(settings))
+    syncInstantWallpaperTargetForSettings(settings, mediaSignature)
+    ensureInstantWallpaperFallbackStyles(mediaSignature)
+    markWallpaperReady()
     void loadBackgroundGalleryModule()
       .then(() => {
-        if (applyToken === backgroundApplyToken) {
-          setWallpaperPlaceholderColor(getBackgroundPlaceholderColor(settings))
-          syncBackgroundSettingsControls()
+        if (applyToken === backgroundApplyToken && state.backgroundSettings.type === 'featured') {
           void applyBackgroundSettings()
         }
       })
-      .catch(() => {
-        if (applyToken === backgroundApplyToken) {
-          markWallpaperReady()
-        }
-      })
+      .catch(() => {})
     return
   }
   const mediaSignature = getBackgroundMediaSignature(settings)
@@ -8771,6 +9180,7 @@ async function applyBackgroundSettings(): Promise<void> {
     mediaSignature === lastAppliedBackgroundMediaSignature &&
     hasAppliedBackgroundMedia(settings)
   ) {
+    markInstantWallpaperRemoteReady(mediaSignature)
     markWallpaperReady()
     return
   }
@@ -8779,26 +9189,32 @@ async function applyBackgroundSettings(): Promise<void> {
     clearVideoBackground()
     setActiveBackgroundObjectUrl('')
     document.body.style.backgroundImage = ''
+    markRuntimeWallpaperApplied()
     clearInstantWallpaperIfSignatureChanged('')
     syncInstantWallpaperTargetForSettings(settings, mediaSignature)
-    document.documentElement.style.setProperty('--bg', settings.color)
+    document.documentElement.style.setProperty('--bg', getBackgroundPlaceholderColor(settings))
     lastAppliedBackgroundMediaSignature = mediaSignature
     markWallpaperReady()
     return
   }
 
-  document.documentElement.style.setProperty('--bg', settings.color)
+  document.documentElement.style.setProperty('--bg', getBackgroundPlaceholderColor(settings))
 
   if (isRemoteBackgroundType(settings.type)) {
-    const imageUrl = getRemoteBackgroundImageUrl(settings)
-    if (imageUrl) {
+  const imageUrl = getRemoteBackgroundImageUrl(settings)
+  if (imageUrl) {
       syncInstantWallpaperTargetForSettings(settings, mediaSignature)
+      clearVideoBackground()
+      setActiveBackgroundObjectUrl('')
+      ensureInstantWallpaperFallbackStyles(mediaSignature)
+      applyDirectRemoteBackgroundImage(imageUrl, mediaSignature)
       markWallpaperReady()
-      void applyUrlBackgroundImage(imageUrl, applyToken, mediaSignature)
+      void applyUrlBackgroundImage(imageUrl, applyToken, mediaSignature, settings)
     } else {
       clearVideoBackground()
       setActiveBackgroundObjectUrl('')
       document.body.style.backgroundImage = ''
+      markRuntimeWallpaperApplied()
       clearInstantWallpaperIfSignatureChanged('')
       syncInstantWallpaperTargetForSettings(settings, mediaSignature)
       lastAppliedBackgroundMediaSignature = mediaSignature
@@ -8818,7 +9234,11 @@ async function applyBackgroundSettings(): Promise<void> {
   document.body.style.backgroundImage = ''
   clearInstantWallpaperIfSignatureChanged('')
   syncInstantWallpaperTargetForSettings(settings, mediaSignature)
-  markWallpaperPending()
+  if (ensureInstantWallpaperFallbackStyles(mediaSignature)) {
+    markWallpaperReady()
+  } else {
+    markWallpaperPending()
+  }
 
   const mediaType = settings.type
   let mediaRecord: Awaited<ReturnType<typeof getBackgroundMedia>>
@@ -8846,6 +9266,7 @@ async function applyBackgroundSettings(): Promise<void> {
     }
     if (ready) {
       document.body.style.backgroundImage = `url("${escapeCssUrl(objectUrl)}")`
+      markRuntimeWallpaperApplied()
       lastAppliedBackgroundMediaSignature = mediaSignature
       void updateInstantWallpaperFromBlob(mediaRecord.blob, mediaSignature)
     } else {
@@ -8869,6 +9290,7 @@ async function applyBackgroundSettings(): Promise<void> {
   }
   if (ready) {
     void video.play()
+    markRuntimeWallpaperApplied()
     lastAppliedBackgroundMediaSignature = mediaSignature
   } else {
     video.remove()
@@ -8877,7 +9299,11 @@ async function applyBackgroundSettings(): Promise<void> {
   markWallpaperReady()
 }
 
-function waitForBackgroundImageReady(imageUrl: string, applyToken: number): Promise<boolean> {
+function waitForBackgroundImageReady(
+  imageUrl: string,
+  applyToken: number,
+  timeoutMs = BACKGROUND_IMAGE_READY_TIMEOUT_MS
+): Promise<boolean> {
   return new Promise((resolve) => {
     const image = new Image()
     let settled = false
@@ -8896,7 +9322,7 @@ function waitForBackgroundImageReady(imageUrl: string, applyToken: number): Prom
 
     timeout = window.setTimeout(() => {
       settle(false)
-    }, BACKGROUND_IMAGE_READY_TIMEOUT_MS)
+    }, timeoutMs)
     image.onload = () => {
       settle(true)
     }
@@ -8952,9 +9378,9 @@ function waitForBackgroundVideoReady(video: HTMLVideoElement, applyToken: number
 async function applyUrlBackgroundImage(
   imageUrl: string,
   applyToken: number,
-  mediaSignature: string
+  mediaSignature: string,
+  settings = state.backgroundSettings
 ): Promise<void> {
-  let directImageApplied = false
   try {
     const cachedRecord = await getBackgroundUrlCache(imageUrl)
     if (applyToken !== backgroundApplyToken) {
@@ -8971,87 +9397,320 @@ async function applyUrlBackgroundImage(
       if (ready) {
         clearVideoBackground()
         lastAppliedBackgroundMediaSignature = mediaSignature
-        void updateInstantWallpaperFromBlob(cachedRecord.blob, mediaSignature)
+        markInstantWallpaperRemoteReady(mediaSignature)
+        await updateInstantWallpaperFromBlob(cachedRecord.blob, mediaSignature, settings)
       }
       markWallpaperReady()
       return
     }
 
-    applyDirectRemoteBackgroundImage(imageUrl, mediaSignature)
-    directImageApplied = true
-    markWallpaperReady()
-    void cacheBackgroundUrlImage(imageUrl, mediaSignature)
+    void cacheBackgroundUrlImage(imageUrl, mediaSignature, settings)
   } catch {
     if (applyToken === backgroundApplyToken) {
-      if (!directImageApplied) {
-        applyDirectRemoteBackgroundImage(imageUrl, mediaSignature)
-      }
+      applyDirectRemoteBackgroundImage(imageUrl, mediaSignature)
       markWallpaperReady()
+      void cacheBackgroundUrlImage(imageUrl, mediaSignature, settings)
     }
   }
 }
 
-function applyDirectRemoteBackgroundImage(imageUrl: string, mediaSignature: string): void {
+function applyDirectRemoteBackgroundImage(
+  imageUrl: string,
+  mediaSignature: string,
+  { markApplied = true }: { markApplied?: boolean } = {}
+): void {
+  const applyToken = backgroundApplyToken
   clearVideoBackground()
   setActiveBackgroundObjectUrl('')
   applyFeaturedBackgroundDisplayPreferences()
   syncInstantWallpaperTargetForSettings(state.backgroundSettings, mediaSignature)
-  const remoteLayer = `url("${escapeCssUrl(imageUrl)}")`
-  const fallbackLayer = getInstantWallpaperFallbackLayer(mediaSignature)
-  document.body.style.backgroundImage = fallbackLayer
-    ? `${remoteLayer}, ${fallbackLayer}`
-    : remoteLayer
-  lastAppliedBackgroundMediaSignature = mediaSignature
-}
-
-function getInstantWallpaperFallbackLayer(mediaSignature = lastAppliedBackgroundMediaSignature): string {
-  const instantWallpaper = readInstantWallpaper()
-  if (!instantWallpaper || instantWallpaper.signature !== mediaSignature) {
-    return ''
+  document.body.style.backgroundImage = `url("${escapeCssUrl(imageUrl)}")`
+  markRuntimeWallpaperApplied()
+  if (markApplied) {
+    lastAppliedBackgroundMediaSignature = mediaSignature
+    void waitForBackgroundImageReady(imageUrl, applyToken).then((ready) => {
+      if (!ready || mediaSignature !== lastAppliedBackgroundMediaSignature) {
+        return
+      }
+      markInstantWallpaperRemoteReady(mediaSignature)
+    })
   }
-  return `url("${escapeCssUrl(instantWallpaper.dataUrl)}")`
 }
 
-async function cacheBackgroundUrlImage(imageUrl: string, mediaSignature = ''): Promise<void> {
+async function cacheBackgroundUrlImage(
+  imageUrl: string,
+  mediaSignature = '',
+  settings = state.backgroundSettings,
+  options: { applyToCurrentPage?: boolean; applyToken?: number } = {}
+): Promise<void> {
   const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
-  if (!normalizedUrl || state.backgroundUrlCachePendingUrls.has(normalizedUrl)) {
+  if (!normalizedUrl) {
     return
   }
 
-  state.backgroundUrlCachePendingUrls.add(normalizedUrl)
-  state.backgroundUrlCacheBusy = state.backgroundUrlCachePendingUrls.size > 0
-  state.backgroundUrlCacheStatus = '下载中...'
-  try {
-    const blob = await fetchBackgroundUrlImage(normalizedUrl)
-    await saveBackgroundUrlCache(normalizedUrl, blob)
+  const applyToken = options.applyToken ?? backgroundApplyToken
+  const shouldApplyToCurrentPage = options.applyToCurrentPage === true && Boolean(mediaSignature)
+  const cachedRecord = await getBackgroundUrlCache(normalizedUrl)
+  if (cachedRecord) {
     if (mediaSignature) {
-      void updateInstantWallpaperFromBlob(blob, mediaSignature)
+      await updateInstantWallpaperFromBlob(cachedRecord.blob, mediaSignature, settings)
+    }
+    if (shouldApplyToCurrentPage) {
+      await applyCachedRemoteBackgroundBlobToCurrentPage(cachedRecord.blob, mediaSignature, applyToken)
+    }
+    state.backgroundUrlCacheStatus = `已缓存 ${formatBytes(cachedRecord.blob.size)}`
+    updateBackgroundStartupCacheStatus(settings)
+    syncBackgroundSettingsControls()
+    return
+  }
+
+  await ensureBackgroundImageFetchPermission(normalizedUrl)
+
+  let cacheTask = backgroundUrlCacheTaskByUrl.get(normalizedUrl)
+  if (!cacheTask) {
+    cacheTask = createBackgroundUrlCacheTask(normalizedUrl, settings)
+    backgroundUrlCacheTaskByUrl.set(normalizedUrl, cacheTask)
+    state.backgroundUrlCachePendingUrls.add(normalizedUrl)
+    state.backgroundUrlCacheBusy = state.backgroundUrlCachePendingUrls.size > 0
+    state.backgroundUrlCacheStatus = '下载中...'
+  }
+
+  try {
+    const startupBlob = await cacheTask.startupBlob
+    if (mediaSignature) {
+      await updateInstantWallpaperFromBlob(startupBlob, mediaSignature, settings)
+    }
+    if (shouldApplyToCurrentPage) {
+      await applyCachedRemoteBackgroundBlobToCurrentPage(startupBlob, mediaSignature, applyToken)
     }
 
-    state.backgroundUrlCacheStatus = `已缓存 ${formatBytes(blob.size)}`
-  } catch {
-    // 缓存是增强能力，失败时继续使用原图片链接，不向扩展错误页写入噪音。
+    state.backgroundUrlCacheStatus = mediaSignature ? '首屏缓存已准备' : `已缓存 ${formatBytes(startupBlob.size)}`
+    updateBackgroundStartupCacheStatus(settings)
+    syncBackgroundSettingsControls()
+
+    const durableBlob = await cacheTask.durableBlob
+    if (mediaSignature) {
+      await updateInstantWallpaperFromBlob(durableBlob, mediaSignature, settings)
+    }
+    if (shouldApplyToCurrentPage && durableBlob !== startupBlob) {
+      await applyCachedRemoteBackgroundBlobToCurrentPage(durableBlob, mediaSignature, applyToken)
+    }
+    state.backgroundUrlCacheStatus = `已缓存 ${formatBytes(durableBlob.size)}`
+    syncBackgroundSettingsControls()
+  } catch (error) {
+    state.backgroundUrlCacheStatus = '首屏缓存准备失败'
+    syncBackgroundSettingsControls()
+    console.warn('新标签页背景首屏缓存准备失败。', error)
   } finally {
-    state.backgroundUrlCachePendingUrls.delete(normalizedUrl)
-    state.backgroundUrlCacheBusy = state.backgroundUrlCachePendingUrls.size > 0
+    if (backgroundUrlCacheTaskByUrl.get(normalizedUrl) === cacheTask) {
+      backgroundUrlCacheTaskByUrl.delete(normalizedUrl)
+      state.backgroundUrlCachePendingUrls.delete(normalizedUrl)
+      state.backgroundUrlCacheBusy = state.backgroundUrlCachePendingUrls.size > 0
+    }
   }
+}
+
+function createBackgroundUrlCacheTask(
+  imageUrl: string,
+  settings: typeof DEFAULT_BACKGROUND_SETTINGS
+): BackgroundUrlCacheTask {
+  const startupPreviewUrl = getStartupPreviewImageUrl(settings, imageUrl)
+  const startupBlob = fetchStartupBackgroundUrlImage(startupPreviewUrl, imageUrl)
+  const durableBlob = startupBlob.then(async (blob) => {
+    let durable = blob
+    if (startupPreviewUrl && startupPreviewUrl !== imageUrl) {
+      try {
+        durable = await fetchBackgroundUrlImage(imageUrl)
+      } catch {
+        durable = blob
+      }
+    }
+    try {
+      await saveBackgroundUrlCache(imageUrl, durable)
+    } catch {
+      // The visible wallpaper and instant startup cache are more important than the durable cache.
+    }
+    return durable
+  })
+
+  return {
+    startupBlob,
+    durableBlob
+  }
+}
+
+async function fetchStartupBackgroundUrlImage(previewUrl: string, imageUrl: string): Promise<Blob> {
+  const normalizedPreviewUrl = normalizeBackgroundImageUrl(previewUrl)
+  if (!normalizedPreviewUrl || normalizedPreviewUrl === imageUrl) {
+    return fetchBackgroundUrlImage(imageUrl)
+  }
+
+  try {
+    await ensureBackgroundImageFetchPermission(normalizedPreviewUrl)
+    return await fetchBackgroundUrlImage(normalizedPreviewUrl)
+  } catch {
+    return fetchBackgroundUrlImage(imageUrl)
+  }
+}
+
+async function applyCachedRemoteBackgroundBlobToCurrentPage(
+  blob: Blob,
+  mediaSignature: string,
+  applyToken: number
+): Promise<boolean> {
+  if (
+    applyToken !== backgroundApplyToken ||
+    !mediaSignature ||
+    mediaSignature !== getBackgroundMediaSignature(state.backgroundSettings)
+  ) {
+    return false
+  }
+
+  const ready = await setBackgroundImageFromBlob(blob, applyToken, {
+    preserveCurrentUntilReady: true
+  }, mediaSignature)
+  if (
+    !ready ||
+    applyToken !== backgroundApplyToken ||
+    mediaSignature !== getBackgroundMediaSignature(state.backgroundSettings)
+  ) {
+    return false
+  }
+
+  clearVideoBackground()
+  lastAppliedBackgroundMediaSignature = mediaSignature
+  markInstantWallpaperRemoteReady(mediaSignature)
+  markWallpaperReady()
+  return true
 }
 
 async function cacheFeaturedBackgroundGalleryImages(): Promise<void> {
   const urls = getFeaturedBackgroundCacheUrls()
+  const signature = urls.join('|')
+  if (
+    featuredBackgroundGalleryCacheTask &&
+    featuredBackgroundGalleryCacheSignature === signature
+  ) {
+    return featuredBackgroundGalleryCacheTask
+  }
+
+  featuredBackgroundGalleryCacheSignature = signature
+  featuredBackgroundGalleryCacheTask = cacheFeaturedBackgroundGalleryImageUrls(urls).finally(() => {
+    if (featuredBackgroundGalleryCacheSignature === signature) {
+      featuredBackgroundGalleryCacheTask = null
+    }
+  })
+  return featuredBackgroundGalleryCacheTask
+}
+
+async function cacheFeaturedBackgroundGalleryImageUrls(urls: string[]): Promise<void> {
   for (const imageUrl of urls) {
     await cacheBackgroundUrlImage(imageUrl)
   }
 }
 
-function scheduleFeaturedBackgroundGalleryCache(): void {
-  if (state.backgroundSettings.type !== 'featured') {
-    return
+async function cacheFeaturedBackgroundGalleryPreviewImages(): Promise<void> {
+  const urls = getFeaturedBackgroundPreviewCacheUrls()
+  const signature = urls.join('|')
+  if (
+    featuredBackgroundGalleryPreviewCacheTask &&
+    featuredBackgroundGalleryPreviewCacheSignature === signature
+  ) {
+    return featuredBackgroundGalleryPreviewCacheTask
   }
 
-  runIdle(() => {
-    void cacheFeaturedBackgroundGalleryImages()
+  featuredBackgroundGalleryPreviewCacheSignature = signature
+  featuredBackgroundGalleryPreviewCacheTask = cacheFeaturedBackgroundGalleryPreviewImageUrls(urls).finally(() => {
+    if (featuredBackgroundGalleryPreviewCacheSignature === signature) {
+      featuredBackgroundGalleryPreviewCacheTask = null
+    }
   })
+  return featuredBackgroundGalleryPreviewCacheTask
+}
+
+async function cacheFeaturedBackgroundGalleryPreviewImageUrls(urls: string[]): Promise<void> {
+  const workers = Array.from(
+    { length: Math.min(FEATURED_BACKGROUND_PREVIEW_CACHE_CONCURRENCY, urls.length) },
+    async (_, workerIndex) => {
+      for (let index = workerIndex; index < urls.length; index += FEATURED_BACKGROUND_PREVIEW_CACHE_CONCURRENCY) {
+        await resolveFeaturedBackgroundGalleryPreviewObjectUrl(urls[index], { fetchOnMiss: true })
+      }
+    }
+  )
+  await Promise.all(workers)
+}
+
+function scheduleFeaturedBackgroundGalleryPreviewObjectUrlWarm(): void {
+  runIdle(() => {
+    if (!backgroundGalleryModule) {
+      return
+    }
+    void warmFeaturedBackgroundPickerPreviewObjectUrls(backgroundGalleryModule)
+  }, { timeout: 1600 })
+}
+
+async function warmFeaturedBackgroundPickerPreviewObjectUrls(gallery: BackgroundGalleryModule): Promise<void> {
+  const urls = getFeaturedBackgroundPickerPreviewUrls(gallery)
+  const signature = urls.join('|')
+  if (!signature) {
+    return
+  }
+  if (
+    featuredBackgroundGalleryPreviewObjectUrlWarmTask &&
+    featuredBackgroundGalleryPreviewObjectUrlWarmSignature === signature
+  ) {
+    return featuredBackgroundGalleryPreviewObjectUrlWarmTask
+  }
+
+  featuredBackgroundGalleryPreviewObjectUrlWarmSignature = signature
+  featuredBackgroundGalleryPreviewObjectUrlWarmTask = warmFeaturedBackgroundPreviewObjectUrls(urls).finally(() => {
+    if (featuredBackgroundGalleryPreviewObjectUrlWarmSignature === signature) {
+      featuredBackgroundGalleryPreviewObjectUrlWarmTask = null
+    }
+  })
+  return featuredBackgroundGalleryPreviewObjectUrlWarmTask
+}
+
+async function warmFeaturedBackgroundPreviewObjectUrls(urls: string[]): Promise<void> {
+  const workers = Array.from(
+    { length: Math.min(FEATURED_BACKGROUND_PREVIEW_CACHE_CONCURRENCY, urls.length) },
+    async (_, workerIndex) => {
+      for (let index = workerIndex; index < urls.length; index += FEATURED_BACKGROUND_PREVIEW_CACHE_CONCURRENCY) {
+        await createFeaturedBackgroundPreviewObjectUrl(urls[index])
+      }
+    }
+  )
+  await Promise.all(workers)
+}
+
+async function ensureBackgroundImageFetchPermission(
+  imageUrl: string,
+  { request = false }: { request?: boolean } = {}
+): Promise<boolean> {
+  const originPattern = getBackgroundImageOriginPattern(imageUrl)
+  if (!originPattern || !chrome.permissions?.contains) {
+    return true
+  }
+  const query = { origins: [originPattern] }
+  if (await containsChromePermissions(query)) {
+    return true
+  }
+  if (!request || !chrome.permissions?.request) {
+    return false
+  }
+  return requestChromePermissions(query)
+}
+
+function getBackgroundImageOriginPattern(imageUrl: string): string {
+  try {
+    const url = new URL(imageUrl)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return ''
+    }
+    return `${url.protocol}//${url.host}/*`
+  } catch {
+    return ''
+  }
 }
 
 function getFeaturedBackgroundCacheUrls(): string[] {
@@ -9075,10 +9734,54 @@ function getFeaturedBackgroundCacheUrls(): string[] {
   return [...urls]
 }
 
+function getFeaturedBackgroundPreviewCacheUrls(): string[] {
+  const urls = new Set<string>()
+  const activeFeaturedItem = getActiveFeaturedBackgroundItemSync()
+  const activePreviewUrl = activeFeaturedItem
+    ? getFeaturedBackgroundPreviewSourceUrl(activeFeaturedItem.provider, activeFeaturedItem.imageUrl)
+    : ''
+  if (activePreviewUrl) {
+    urls.add(activePreviewUrl)
+  }
+  for (const item of state.featuredBackgroundGallery) {
+    const previewUrl = getFeaturedBackgroundPreviewSourceUrl(item.provider, item.imageUrl)
+    if (previewUrl) {
+      urls.add(previewUrl)
+    }
+  }
+  if (backgroundGalleryModule) {
+    for (const item of getFeaturedBackgroundPickerItems(backgroundGalleryModule)) {
+      const previewUrl = getFeaturedBackgroundPreviewSourceUrl(item.provider, item.imageUrl)
+      if (previewUrl) {
+        urls.add(previewUrl)
+      }
+    }
+  }
+  return [...urls]
+}
+
+function getFeaturedBackgroundPickerPreviewUrls(gallery: BackgroundGalleryModule): string[] {
+  const urls = new Set<string>()
+  const dailyItem = gallery.selectFeaturedBackgroundItem(getFeaturedBackgroundDateSeed())
+  const dailyPreviewUrl = getFeaturedBackgroundPreviewSourceUrl(dailyItem.provider, dailyItem.imageUrl)
+  if (dailyPreviewUrl) {
+    urls.add(dailyPreviewUrl)
+  }
+
+  for (const item of getFeaturedBackgroundPickerItems(gallery)) {
+    const previewUrl = getFeaturedBackgroundPreviewSourceUrl(item.provider, item.imageUrl)
+    if (previewUrl) {
+      urls.add(previewUrl)
+    }
+  }
+  return [...urls]
+}
+
 async function setBackgroundImageFromBlob(
   blob: Blob,
   applyToken = backgroundApplyToken,
-  { preserveCurrentUntilReady = false }: { preserveCurrentUntilReady?: boolean } = {}
+  { preserveCurrentUntilReady = false }: { preserveCurrentUntilReady?: boolean } = {},
+  mediaSignature = ''
 ): Promise<boolean> {
   const objectUrl = URL.createObjectURL(blob)
   if (!preserveCurrentUntilReady) {
@@ -9097,6 +9800,8 @@ async function setBackgroundImageFromBlob(
     }
     applyFeaturedBackgroundDisplayPreferences()
     document.body.style.backgroundImage = `url("${escapeCssUrl(objectUrl)}")`
+    markRuntimeWallpaperApplied()
+    markInstantWallpaperRemoteReady(mediaSignature)
   } else {
     if (preserveCurrentUntilReady) {
       URL.revokeObjectURL(objectUrl)
@@ -9107,24 +9812,43 @@ async function setBackgroundImageFromBlob(
   return ready
 }
 
-async function updateInstantWallpaperFromBlob(blob: Blob, mediaSignature: string): Promise<void> {
-  if (!mediaSignature || mediaSignature !== lastAppliedBackgroundMediaSignature) {
+async function updateInstantWallpaperFromBlob(
+  blob: Blob,
+  mediaSignature: string,
+  settings = state.backgroundSettings
+): Promise<void> {
+  if (!mediaSignature) {
     return
   }
 
-  const dataUrl = await createInstantWallpaperDataUrl(blob)
-  if (!dataUrl || mediaSignature !== lastAppliedBackgroundMediaSignature) {
-    return
-  }
-
-  const displayCss = getFeaturedBackgroundDisplayCss(state.featuredBackgroundPreferences)
-  saveInstantWallpaper({
+  const placeholderColor = await extractBackgroundPlaceholderColor(blob)
+  const displayCss = getBackgroundDisplayCssForSettings(settings)
+  const recordBase = {
     signature: mediaSignature,
-    dataUrl,
     backgroundSize: displayCss.backgroundSize,
     backgroundPosition: displayCss.backgroundPosition,
-    updatedAt: Date.now()
-  })
+    placeholderColor: placeholderColor || getBackgroundPlaceholderColor(settings),
+    updatedAt: Date.now(),
+    ready: true
+  }
+
+  for (const attempt of INSTANT_WALLPAPER_STARTUP_CACHE_ATTEMPTS) {
+    const dataUrl = await createInstantWallpaperDataUrl(blob, attempt)
+    if (!dataUrl) {
+      continue
+    }
+    if (saveInstantWallpaper({
+      ...recordBase,
+      dataUrl
+    })) {
+      syncInstantWallpaperTargetForSettings(settings, mediaSignature)
+      updateBackgroundStartupCacheStatus(settings)
+      return
+    }
+  }
+
+  syncInstantWallpaperTargetForSettings(settings, mediaSignature)
+  updateBackgroundStartupCacheStatus(settings)
 }
 
 function syncInstantWallpaperTargetForSettings(
@@ -9155,14 +9879,80 @@ function buildInstantWallpaperTargetForSettings(
   }
 
   const displayCss = getBackgroundDisplayCssForSettings(settings)
+  const instantWallpaper = readInstantWallpaper()
+  const existingTarget = readInstantWallpaperTarget()
+  const existingTargetMatches = existingTarget?.signature === mediaSignature
+  const resolvedImageUrl = isRemoteBackgroundType(settings.type) ? getRemoteBackgroundImageUrl(settings) : ''
+  const imageUrl = resolvedImageUrl || (existingTargetMatches ? existingTarget.imageUrl : '')
+  const previewUrl = getStartupPreviewImageUrl(settings, imageUrl) ||
+    (existingTargetMatches ? existingTarget.previewUrl : '')
   return {
     signature: mediaSignature,
-    imageUrl: isRemoteBackgroundType(settings.type) ? getRemoteBackgroundImageUrl(settings) : '',
+    imageUrl,
+    previewUrl,
     backgroundSize: displayCss.backgroundSize,
     backgroundPosition: displayCss.backgroundPosition,
     placeholderColor: getBackgroundPlaceholderColor(settings),
+    cacheRequired: settings.type !== 'color',
+    cacheReady: instantWallpaper?.signature === mediaSignature && instantWallpaper.ready !== false,
     updatedAt: Date.now()
   }
+}
+
+function getStartupPreviewImageUrl(settings: typeof DEFAULT_BACKGROUND_SETTINGS, imageUrl = getRemoteBackgroundImageUrl(settings)): string {
+  if (settings.type !== 'featured') {
+    return ''
+  }
+
+  const item = getActiveFeaturedBackgroundItemSync(settings)
+  if (!item) {
+    return ''
+  }
+  return getFeaturedBackgroundPreviewImageUrl(item, imageUrl)
+}
+
+function getFeaturedBackgroundPreviewImageUrl(
+  item: Pick<FeaturedBackgroundItem, 'provider'>,
+  imageUrl: string
+): string {
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!normalizedUrl) {
+    return ''
+  }
+
+  try {
+    const url = new URL(normalizedUrl)
+    if (item.provider === 'met' && url.hostname === 'images.metmuseum.org') {
+      url.pathname = url.pathname.replace('/original/', '/web-large/')
+      return url.href
+    }
+    if (item.provider === 'nasa' && url.hostname === 'images-assets.nasa.gov') {
+      url.pathname = url.pathname.replace(/~(?:orig|large|medium)(\.[a-z0-9]+)$/i, '~small$1')
+      return url.href
+    }
+    if (item.provider === 'wikimedia' && url.hostname === 'upload.wikimedia.org') {
+      const pathParts = url.pathname.split('/')
+      const filename = pathParts[pathParts.length - 1] || ''
+      const resizedFilename = filename.replace(/^\d+px-/, '960px-')
+      if (resizedFilename !== filename) {
+        pathParts[pathParts.length - 1] = resizedFilename
+        url.pathname = pathParts.join('/')
+        return url.href
+      }
+    }
+    if (item.provider === 'artic' && url.hostname === 'www.artic.edu') {
+      url.pathname = url.pathname.replace('/full/2560,/', '/full/960,/')
+      return url.href
+    }
+    if (item.provider === 'cleveland' && url.hostname === 'openaccess-cdn.clevelandart.org') {
+      url.pathname = url.pathname.replace(/_print\.jpg$/i, '_web.jpg')
+      return url.href
+    }
+  } catch {
+    return ''
+  }
+
+  return ''
 }
 
 function getBackgroundDisplayCssForSettings(
@@ -9187,10 +9977,109 @@ function clearInstantWallpaperIfSignatureChanged(mediaSignature: string): void {
 
 function clearInstantWallpaperFallbackStyles(): void {
   const rootElement = document.documentElement
+  window.clearTimeout(instantWallpaperRemoteReadyFallbackTimer)
+  instantWallpaperRemoteReadyFallbackTimer = 0
   rootElement.classList.remove('instant-wallpaper-ready')
+  rootElement.classList.remove('instant-wallpaper-remote-ready')
+  delete rootElement.dataset.instantWallpaperSignature
+  delete rootElement.dataset.instantWallpaperPending
+  delete rootElement.dataset.instantWallpaperRemoteReady
   rootElement.style.removeProperty('--instant-wallpaper-image')
+  rootElement.style.removeProperty('--instant-wallpaper-preview-image')
   rootElement.style.removeProperty('--instant-wallpaper-size')
   rootElement.style.removeProperty('--instant-wallpaper-position')
+}
+
+async function extractBackgroundPlaceholderColor(blob: Blob): Promise<string> {
+  if (!blob.type.toLowerCase().startsWith('image/')) {
+    return ''
+  }
+
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(blob, {
+      resizeWidth: 24,
+      resizeHeight: 24,
+      resizeQuality: 'low'
+    })
+  } catch {
+    return ''
+  }
+
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) {
+      return ''
+    }
+
+    context.drawImage(bitmap, 0, 0)
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
+    let red = 0
+    let green = 0
+    let blue = 0
+    let count = 0
+    for (let index = 0; index < data.length; index += 4) {
+      const alpha = data[index + 3]
+      if (alpha < 16) {
+        continue
+      }
+      red += data[index]
+      green += data[index + 1]
+      blue += data[index + 2]
+      count += 1
+    }
+    if (!count) {
+      return ''
+    }
+    return toReadablePlaceholderColor(
+      Math.round(red / count),
+      Math.round(green / count),
+      Math.round(blue / count)
+    )
+  } catch {
+    return ''
+  } finally {
+    bitmap.close()
+  }
+}
+
+function toReadablePlaceholderColor(red: number, green: number, blue: number): string {
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255
+  const lift = luminance < 0.08 ? 28 : 0
+  const clampChannel = (value: number) => Math.max(12, Math.min(235, value + lift))
+  return rgbToHex(clampChannel(red), clampChannel(green), clampChannel(blue))
+}
+
+function getNonBlackPlaceholderColor(value: unknown): string {
+  const color = normalizeInstantWallpaperColor(value)
+  const parsed = parseHexColor(color)
+  if (!parsed) {
+    return getInstantWallpaperFallbackColor()
+  }
+  const luminance = (0.2126 * parsed.red + 0.7152 * parsed.green + 0.0722 * parsed.blue) / 255
+  return luminance < 0.035 ? getInstantWallpaperFallbackColor() : color
+}
+
+function parseHexColor(value: string): { red: number; green: number; blue: number } | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(value)
+  if (!match) {
+    return null
+  }
+  const raw = match[1]
+  return {
+    red: Number.parseInt(raw.slice(0, 2), 16),
+    green: Number.parseInt(raw.slice(2, 4), 16),
+    blue: Number.parseInt(raw.slice(4, 6), 16)
+  }
+}
+
+function rgbToHex(red: number, green: number, blue: number): string {
+  return `#${[red, green, blue]
+    .map((value) => Math.round(value).toString(16).padStart(2, '0'))
+    .join('')}`
 }
 
 function applyBackgroundMaskSettings(settings = state.backgroundSettings): void {
@@ -9239,7 +10128,16 @@ function isRemoteBackgroundType(type: unknown): boolean {
 
 function getRemoteBackgroundImageUrl(settings: typeof DEFAULT_BACKGROUND_SETTINGS): string {
   if (settings.type === 'featured') {
-    return getActiveFeaturedBackgroundItemSync(settings)?.imageUrl || ''
+    const featuredItem = getActiveFeaturedBackgroundItemSync(settings)
+    if (featuredItem) {
+      return featuredItem.imageUrl
+    }
+    void loadBackgroundGalleryModule().then(() => {
+      if (settings === state.backgroundSettings) {
+        void applyBackgroundSettings()
+      }
+    }).catch(() => {})
+    return ''
   }
 
   if (settings.type === 'urls') {
@@ -9327,7 +10225,6 @@ function applyFeaturedBackgroundDailyRefreshIfNeeded(): void {
   void hydrateFeaturedBackgroundOptions(true)
   syncBackgroundSettingsControls()
   void applyBackgroundSettings()
-  scheduleFeaturedBackgroundGalleryCache()
   scheduleFeaturedBackgroundDailyRefresh()
 }
 
@@ -9340,7 +10237,9 @@ function hasExplicitFeaturedBackgroundSelection(settings = state.backgroundSetti
   if (getStoredFeaturedBackgroundItemById(featuredId)) {
     return true
   }
-  return Boolean(backgroundGalleryModule?.getFeaturedBackgroundItemById(featuredId))
+  return backgroundGalleryModule
+    ? Boolean(backgroundGalleryModule.getFeaturedBackgroundItemById(featuredId))
+    : true
 }
 
 function escapeCssUrl(value: string): string {
@@ -9778,7 +10677,6 @@ function syncSearchSettingsControls(): void {
   const placeholderInput = document.getElementById('search-placeholder')
   const widthInput = document.getElementById('search-width')
   const heightInput = document.getElementById('search-height')
-  const offsetYInput = document.getElementById('search-offset-y')
   const autoVerticalCenterInput = document.getElementById('search-auto-vertical-center')
   const backgroundInput = document.getElementById('search-background')
   const dependentControls = [
@@ -10670,10 +11568,6 @@ function syncIconSegmentButtons(selector: string, selectedValue: string, disable
   }
 }
 
-function isAppearanceSettingsGroupActive(): boolean {
-  return state.activeSettingsGroup === 'appearance'
-}
-
 function renderIconPreviewIfNeeded(): void {
   const preview = document.getElementById('icon-live-preview')
   if (!preview) {
@@ -10747,12 +11641,13 @@ function renderIconPresetCards(): void {
 async function hydrateFeaturedBackgroundOptions(force = false): Promise<void> {
   const input = document.getElementById('background-featured-id')
   const dateSeed = getFeaturedBackgroundDateSeed()
-  if (!(input instanceof HTMLInputElement) ||
+  if (state.backgroundSettings.type !== 'featured' ||
+    !(input instanceof HTMLInputElement) ||
     (!force && input.dataset.hydrated === 'true' && input.dataset.dateSeed === dateSeed)) {
     return
   }
 
-  const gallery = await loadBackgroundGalleryModule()
+  await loadBackgroundGalleryModule()
   const currentDateSeed = getFeaturedBackgroundDateSeed()
   if (!input.isConnected ||
     (!force && input.dataset.hydrated === 'true' && input.dataset.dateSeed === currentDateSeed)) {
@@ -10778,10 +11673,25 @@ async function openFeaturedBackgroundPicker(): Promise<void> {
   featuredBackgroundModal.setAttribute('aria-hidden', 'false')
   featuredBackgroundModal.removeAttribute('inert')
   featuredBackgroundPicker?.setAttribute('aria-expanded', 'true')
-  featuredBackgroundModalGrid.replaceChildren(createFeaturedBackgroundLoadingCard())
 
   try {
+    if (backgroundGalleryModule) {
+      await warmFeaturedBackgroundPickerPreviewObjectUrls(backgroundGalleryModule)
+      renderFeaturedBackgroundPicker(backgroundGalleryModule)
+      window.requestAnimationFrame(() => {
+        const activeCard = featuredBackgroundModalGrid.querySelector<HTMLElement>('.featured-wallpaper-card.is-selected')
+        const firstCard = featuredBackgroundModalGrid.querySelector<HTMLElement>('.featured-wallpaper-card')
+        ;(activeCard || firstCard || featuredBackgroundModalClose as HTMLElement | null)?.focus()
+      })
+      return
+    }
+
+    featuredBackgroundModalGrid.replaceChildren(createFeaturedBackgroundLoadingCard())
     const gallery = await loadBackgroundGalleryModule()
+    if (!isFeaturedBackgroundPickerOpen()) {
+      return
+    }
+    await warmFeaturedBackgroundPickerPreviewObjectUrls(gallery)
     if (!isFeaturedBackgroundPickerOpen()) {
       return
     }
@@ -10816,6 +11726,23 @@ function closeFeaturedBackgroundPicker(): void {
   featuredBackgroundPicker?.focus()
 }
 
+function handleFeaturedBackgroundModalCloseRequest(event: Event): void {
+  event.preventDefault()
+  event.stopPropagation()
+  closeFeaturedBackgroundPicker()
+}
+
+function handleFeaturedBackgroundModalPointerDown(event: PointerEvent): void {
+  const target = event.target
+  if (!(target instanceof Element)) {
+    return
+  }
+
+  if (target === featuredBackgroundModal || target.closest('#background-featured-modal-close')) {
+    handleFeaturedBackgroundModalCloseRequest(event)
+  }
+}
+
 function isFeaturedBackgroundPickerOpen(): boolean {
   return featuredBackgroundModal instanceof HTMLElement && featuredBackgroundModal.classList.contains('open')
 }
@@ -10829,6 +11756,24 @@ function renderFeaturedBackgroundPicker(gallery: BackgroundGalleryModule): void 
   const currentDateSeed = getFeaturedBackgroundDateSeed()
   const dailyItem = gallery.selectFeaturedBackgroundItem(currentDateSeed)
   const selectedId = state.backgroundSettings.featuredId
+  const pickerItems = getFeaturedBackgroundPickerItems(gallery)
+  const renderSignature = [
+    currentDateSeed,
+    selectedId,
+    state.featuredBackgroundFavoriteIds.join(','),
+    dailyItem.id,
+    dailyItem.imageUrl,
+    ...pickerItems.map((item) => `${item.id}:${item.imageUrl}`)
+  ].join('|')
+  if (featuredBackgroundPickerRenderSignature === renderSignature &&
+    featuredBackgroundModalGrid.querySelector('.featured-wallpaper-card')) {
+    syncFeaturedBackgroundModalControls()
+    hydrateFeaturedBackgroundPickerCachedImages()
+    scheduleFeaturedBackgroundGalleryImageCache()
+    scheduleFeaturedBackgroundGalleryPreviewCache()
+    return
+  }
+
   const fragment = document.createDocumentFragment()
   syncFeaturedBackgroundModalControls()
   fragment.appendChild(createFeaturedBackgroundCard({
@@ -10837,19 +11782,21 @@ function renderFeaturedBackgroundPicker(gallery: BackgroundGalleryModule): void 
     subtitle: dailyItem.title,
     imageUrl: dailyItem.imageUrl,
     source: dailyItem.credit,
+    previewProvider: dailyItem.provider,
     selected: !selectedId,
     daily: true,
     width: dailyItem.width,
     height: dailyItem.height
   }))
 
-  for (const item of getFeaturedBackgroundPickerItems(gallery)) {
+  for (const item of pickerItems) {
     fragment.appendChild(createFeaturedBackgroundCard({
       value: item.id,
       title: item.title,
       subtitle: item.credit,
       imageUrl: item.imageUrl,
       source: item.license,
+      previewProvider: item.provider,
       selected: selectedId === item.id,
       daily: false,
       favorite: isFeaturedBackgroundFavorite(item.id),
@@ -10859,6 +11806,96 @@ function renderFeaturedBackgroundPicker(gallery: BackgroundGalleryModule): void 
   }
 
   featuredBackgroundModalGrid.replaceChildren(fragment)
+  featuredBackgroundPickerRenderSignature = renderSignature
+  hydrateFeaturedBackgroundPickerCachedImages()
+  scheduleFeaturedBackgroundGalleryImageCache()
+  scheduleFeaturedBackgroundGalleryPreviewCache()
+}
+
+function scheduleFeaturedBackgroundGalleryImageCache(): void {
+  runIdle(() => {
+    if (!isFeaturedBackgroundPickerOpen()) {
+      return
+    }
+    void cacheFeaturedBackgroundGalleryImages()
+  }, { timeout: 4000 })
+}
+
+function scheduleFeaturedBackgroundGalleryPreviewCache(): void {
+  runIdle(() => {
+    void cacheFeaturedBackgroundGalleryPreviewImages()
+  }, { timeout: 4000 })
+}
+
+function hydrateFeaturedBackgroundPickerCachedImages(): void {
+  if (!(featuredBackgroundModalGrid instanceof HTMLElement)) {
+    return
+  }
+
+  const cards = featuredBackgroundModalGrid.querySelectorAll<HTMLElement>('.featured-wallpaper-card')
+  for (const card of cards) {
+    const imageUrl = card.dataset.featuredBackgroundPreviewUrl || ''
+    const image = card.querySelector<HTMLImageElement>('.featured-wallpaper-preview-image')
+    if (!imageUrl || !(image instanceof HTMLImageElement)) {
+      continue
+    }
+    const cachedObjectUrl = getCachedFeaturedBackgroundPreviewObjectUrl(image.dataset.remotePreviewUrl || imageUrl)
+    if (cachedObjectUrl) {
+      if (image.src !== cachedObjectUrl) {
+        image.src = cachedObjectUrl
+      }
+      card.dataset.featuredBackgroundResolvedPreviewUrl = cachedObjectUrl
+      card.classList.add('has-preview-image')
+      continue
+    }
+    void applyFeaturedBackgroundCachedPreview(card, image, imageUrl, image.dataset.remotePreviewUrl || imageUrl)
+  }
+}
+
+function getCachedFeaturedBackgroundPreviewObjectUrl(imageUrl: string): string {
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!normalizedUrl) {
+    return ''
+  }
+  return featuredBackgroundGalleryPreviewObjectUrlByImageUrl.get(normalizedUrl) || ''
+}
+
+async function applyFeaturedBackgroundCachedPreview(
+  card: HTMLElement,
+  image: HTMLImageElement,
+  imageUrl: string,
+  fallbackUrl: string
+): Promise<void> {
+  const previewUrl = fallbackUrl || imageUrl
+  if (!previewUrl) {
+    return
+  }
+
+  const normalizedUrl = normalizeBackgroundImageUrl(previewUrl)
+  const cachedObjectUrl = normalizedUrl ? featuredBackgroundGalleryPreviewObjectUrlByImageUrl.get(normalizedUrl) || '' : ''
+  if (cachedObjectUrl && image.src !== cachedObjectUrl) {
+    image.src = cachedObjectUrl
+    card.dataset.featuredBackgroundResolvedPreviewUrl = cachedObjectUrl
+    card.classList.add('has-preview-image')
+  }
+
+  const cachedUrl = await resolveFeaturedBackgroundGalleryPreviewObjectUrl(previewUrl, {
+    fallbackUrl: previewUrl,
+    fetchOnMiss: false
+  }).catch(() => '')
+  if (!image.isConnected || !card.isConnected) {
+    return
+  }
+
+  const nextUrl = cachedUrl || previewUrl
+  if (!nextUrl) {
+    return
+  }
+  if (image.src !== nextUrl) {
+    image.src = nextUrl
+  }
+  card.dataset.featuredBackgroundResolvedPreviewUrl = nextUrl
+  card.classList.toggle('has-preview-image', Boolean(nextUrl))
 }
 
 function getFeaturedBackgroundPickerItems(gallery: BackgroundGalleryModule): FeaturedBackgroundItem[] {
@@ -10870,12 +11907,165 @@ function getFeaturedBackgroundPickerItems(gallery: BackgroundGalleryModule): Fea
   })
 }
 
+function getFeaturedBackgroundPreviewSourceUrl(
+  itemOrProvider: FeaturedBackgroundItem['provider'] | Pick<FeaturedBackgroundItem, 'provider'>,
+  imageUrl: string
+): string {
+  const provider = typeof itemOrProvider === 'string'
+    ? itemOrProvider
+    : itemOrProvider.provider
+  const candidates = getFeaturedBackgroundPreviewCandidates(imageUrl, provider)
+  return candidates[0] || ''
+}
+
+async function resolveFeaturedBackgroundGalleryPreviewObjectUrl(
+  imageUrl: string,
+  { fallbackUrl = '', fetchOnMiss = false }: { fallbackUrl?: string; fetchOnMiss?: boolean } = {}
+): Promise<string> {
+  return resolveFeaturedBackgroundGalleryPreviewObjectUrlWithSource(imageUrl, {
+    fallbackUrl,
+    fetchOnMiss
+  })
+}
+
+function getFeaturedBackgroundProviderForUrl(imageUrl: string): FeaturedBackgroundItem['provider'] {
+  try {
+    const url = new URL(normalizeBackgroundImageUrl(imageUrl))
+    if (url.hostname === 'images-assets.nasa.gov') {
+      return 'nasa'
+    }
+    if (url.hostname === 'images.metmuseum.org') {
+      return 'met'
+    }
+    if (url.hostname === 'upload.wikimedia.org') {
+      return 'wikimedia'
+    }
+    if (url.hostname === 'www.artic.edu') {
+      return 'artic'
+    }
+    if (url.hostname === 'openaccess-cdn.clevelandart.org') {
+      return 'cleveland'
+    }
+  } catch {
+    // ignore
+  }
+  return 'wikimedia'
+}
+
+async function resolveFeaturedBackgroundGalleryPreviewObjectUrlWithSource(
+  imageUrl: string,
+  { fallbackUrl = '', fetchOnMiss = false }: { fallbackUrl?: string; fetchOnMiss?: boolean } = {}
+): Promise<string> {
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!normalizedUrl) {
+    return ''
+  }
+
+  const cachedObjectUrl = featuredBackgroundGalleryPreviewObjectUrlByImageUrl.get(normalizedUrl)
+  if (cachedObjectUrl) {
+    return cachedObjectUrl
+  }
+
+  const existingTask = featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.get(normalizedUrl)
+  if (existingTask) {
+    return existingTask
+  }
+
+  const generation = featuredBackgroundGalleryPreviewObjectUrlGeneration
+  const task = getFeaturedBackgroundPreviewCacheRecord(normalizedUrl).then(async (record) => {
+    if (record?.blob && generation === featuredBackgroundGalleryPreviewObjectUrlGeneration) {
+      const objectUrl = URL.createObjectURL(record.blob)
+      featuredBackgroundGalleryPreviewObjectUrlByImageUrl.set(normalizedUrl, objectUrl)
+      return objectUrl
+    }
+    if (!fetchOnMiss) {
+      return fallbackUrl || ''
+    }
+
+    const fetched = await fetchFeaturedBackgroundPreviewBlob(normalizedUrl).catch(() => null)
+    if (!fetched || generation !== featuredBackgroundGalleryPreviewObjectUrlGeneration) {
+      return fallbackUrl || ''
+    }
+    const previewBlob = await createFeaturedBackgroundPreviewBlob(fetched)
+    try {
+      await saveFeaturedBackgroundPreviewCache(normalizedUrl, previewBlob)
+    } catch {
+      // Preview cache is best-effort; the visible card can still fall back to the remote preview URL.
+    }
+    const objectUrl = URL.createObjectURL(previewBlob)
+    featuredBackgroundGalleryPreviewObjectUrlByImageUrl.set(normalizedUrl, objectUrl)
+    return objectUrl
+  }).catch(() => fallbackUrl || '').finally(() => {
+    if (featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.get(normalizedUrl) === task) {
+      featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.delete(normalizedUrl)
+    }
+  })
+
+  featuredBackgroundGalleryPreviewObjectUrlTaskByImageUrl.set(normalizedUrl, task)
+  return task
+}
+
+async function fetchFeaturedBackgroundPreviewBlob(imageUrl: string): Promise<Blob> {
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!normalizedUrl) {
+    throw new Error('预览图片地址无效。')
+  }
+
+  await ensureBackgroundImageFetchPermission(normalizedUrl)
+  return fetchBackgroundUrlImage(normalizedUrl)
+}
+
+async function resolveFeaturedBackgroundGalleryObjectUrl(imageUrl: string): Promise<string> {
+  const normalizedUrl = normalizeBackgroundImageUrl(imageUrl)
+  if (!normalizedUrl) {
+    return ''
+  }
+
+  const cachedObjectUrl = featuredBackgroundGalleryObjectUrlByImageUrl.get(normalizedUrl)
+  if (cachedObjectUrl) {
+    return cachedObjectUrl
+  }
+
+  const existingTask = featuredBackgroundGalleryObjectUrlTaskByImageUrl.get(normalizedUrl)
+  if (existingTask) {
+    return existingTask
+  }
+
+  const generation = featuredBackgroundGalleryObjectUrlGeneration
+  const task = getBackgroundUrlCache(normalizedUrl).then((record) => {
+    if (!record?.blob || generation !== featuredBackgroundGalleryObjectUrlGeneration) {
+      return ''
+    }
+
+    const objectUrl = URL.createObjectURL(record.blob)
+    featuredBackgroundGalleryObjectUrlByImageUrl.set(normalizedUrl, objectUrl)
+    return objectUrl
+  }).catch(() => '').finally(() => {
+    if (featuredBackgroundGalleryObjectUrlTaskByImageUrl.get(normalizedUrl) === task) {
+      featuredBackgroundGalleryObjectUrlTaskByImageUrl.delete(normalizedUrl)
+    }
+  })
+
+  featuredBackgroundGalleryObjectUrlTaskByImageUrl.set(normalizedUrl, task)
+  return task
+}
+
+function revokeFeaturedBackgroundGalleryObjectUrls(): void {
+  featuredBackgroundGalleryObjectUrlGeneration += 1
+  for (const objectUrl of featuredBackgroundGalleryObjectUrlByImageUrl.values()) {
+    URL.revokeObjectURL(objectUrl)
+  }
+  featuredBackgroundGalleryObjectUrlByImageUrl.clear()
+  featuredBackgroundGalleryObjectUrlTaskByImageUrl.clear()
+}
+
 function createFeaturedBackgroundCard({
   value,
   title,
   subtitle,
   imageUrl,
   source,
+  previewProvider,
   selected,
   daily,
   favorite = false,
@@ -10887,6 +12077,7 @@ function createFeaturedBackgroundCard({
   subtitle: string
   imageUrl: string
   source: string
+  previewProvider: FeaturedBackgroundItem['provider']
   selected: boolean
   daily: boolean
   favorite?: boolean
@@ -10908,16 +12099,30 @@ function createFeaturedBackgroundCard({
 
   const preview = document.createElement('span')
   preview.className = 'featured-wallpaper-preview'
-  preview.style.backgroundImage = `url("${escapeCssUrl(imageUrl)}")`
+  const previewImage = document.createElement('img')
+  previewImage.className = 'featured-wallpaper-preview-image'
+  previewImage.alt = ''
+  previewImage.decoding = 'async'
+  previewImage.loading = 'eager'
+  previewImage.setAttribute('fetchpriority', 'high')
+  previewImage.draggable = false
+  const remotePreviewUrl = getFeaturedBackgroundPreviewImageUrl({ provider: previewProvider }, imageUrl) || imageUrl
+  previewImage.dataset.remotePreviewUrl = remotePreviewUrl
+  const cachedPreviewObjectUrl = featuredBackgroundGalleryPreviewObjectUrlByImageUrl.get(normalizeBackgroundImageUrl(remotePreviewUrl))
+  const initialPreviewUrl = cachedPreviewObjectUrl || remotePreviewUrl
+  if (initialPreviewUrl) {
+    previewImage.src = initialPreviewUrl
+    card.dataset.featuredBackgroundResolvedPreviewUrl = initialPreviewUrl
+    card.classList.add('has-preview-image')
+  }
+  void applyFeaturedBackgroundCachedPreview(card, previewImage, imageUrl, remotePreviewUrl)
+  preview.appendChild(previewImage)
   const resolution = document.createElement('span')
   resolution.className = 'featured-wallpaper-resolution'
   const resolutionText = formatFeaturedBackgroundResolution({ width, height })
   resolution.textContent = resolutionText || '检测中'
-  resolution.hidden = !resolutionText
+  resolution.dataset.state = resolutionText ? 'ready' : 'pending'
   preview.appendChild(resolution)
-  if (!resolutionText) {
-    void hydrateFeaturedBackgroundCardResolution(imageUrl, resolution)
-  }
 
   if (!daily && value) {
     const favoriteButton = document.createElement('button')
@@ -10945,10 +12150,10 @@ function createFeaturedBackgroundCard({
   const detail = document.createElement('span')
   detail.textContent = subtitle
 
-  const provider = document.createElement('small')
-  provider.textContent = source
+    const sourceLabel = document.createElement('small')
+    sourceLabel.textContent = source
 
-  meta.append(name, detail, provider)
+  meta.append(name, detail, sourceLabel)
   card.append(preview, meta)
   card.addEventListener('pointerenter', (event) => {
     if (event.pointerType !== 'mouse') {
@@ -11017,7 +12222,8 @@ function showFeaturedBackgroundHoverPreview(card: HTMLElement): void {
   }
 
   const preview = getFeaturedBackgroundHoverPreviewElement()
-  preview.style.backgroundImage = `url("${escapeCssUrl(imageUrl)}")`
+  const fallbackUrl = card.dataset.featuredBackgroundResolvedPreviewUrl || imageUrl
+  preview.style.backgroundImage = `url("${escapeCssUrl(fallbackUrl)}")`
   preview.setAttribute(
     'aria-label',
     `${card.dataset.featuredBackgroundPreviewTitle || '精选图库壁纸'} 大图预览`
@@ -11026,6 +12232,12 @@ function showFeaturedBackgroundHoverPreview(card: HTMLElement): void {
   positionFeaturedBackgroundHoverPreview(card, preview)
   featuredBackgroundPreviewCard = card
   preview.classList.add('is-visible')
+  void resolveFeaturedBackgroundGalleryObjectUrl(imageUrl).then((cachedUrl) => {
+    if (!cachedUrl || featuredBackgroundPreviewCard !== card || !preview.isConnected) {
+      return
+    }
+    preview.style.backgroundImage = `url("${escapeCssUrl(cachedUrl)}")`
+  })
 }
 
 function getFeaturedBackgroundHoverPreviewElement(): HTMLElement {
@@ -11093,16 +12305,6 @@ function formatFeaturedBackgroundResolution(item: Pick<FeaturedBackgroundItem, '
   return `${Math.round(width)} x ${Math.round(height)}`
 }
 
-async function hydrateFeaturedBackgroundCardResolution(imageUrl: string, target: HTMLElement): Promise<void> {
-  const size = await getRemoteImageSize(imageUrl)
-  if (!target.isConnected || !size) {
-    return
-  }
-  const label = formatFeaturedBackgroundResolution(size)
-  target.textContent = label
-  target.hidden = !label
-}
-
 function createFeaturedFavoriteIcon(): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
@@ -11130,9 +12332,6 @@ function createFeaturedBackgroundErrorCard(): HTMLElement {
 function readFeaturedBackgroundPreferencesFromControls(): FeaturedBackgroundPreferences {
   return normalizeFeaturedBackgroundPreferences({
     ...state.featuredBackgroundPreferences,
-    allow1080p: featuredBackgroundAllow1080pInput instanceof HTMLInputElement
-      ? featuredBackgroundAllow1080pInput.checked
-      : state.featuredBackgroundPreferences.allow1080p,
     displayMode: featuredBackgroundDisplayModeInput instanceof HTMLSelectElement
       ? featuredBackgroundDisplayModeInput.value
       : state.featuredBackgroundPreferences.displayMode,
@@ -11196,12 +12395,7 @@ function syncFeaturedBackgroundDisplayPreferenceControls(): void {
 
 function syncFeaturedBackgroundModalControls(): void {
   state.featuredBackgroundPreferences = normalizeFeaturedBackgroundPreferences(state.featuredBackgroundPreferences)
-  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
   syncFeaturedBackgroundDisplayPreferenceControls()
-  if (featuredBackgroundAllow1080pInput instanceof HTMLInputElement) {
-    featuredBackgroundAllow1080pInput.checked = state.featuredBackgroundAllow1080p
-    featuredBackgroundAllow1080pInput.disabled = state.featuredBackgroundRefreshing
-  }
   if (featuredBackgroundRefreshButton instanceof HTMLButtonElement) {
     featuredBackgroundRefreshButton.disabled = state.featuredBackgroundRefreshing
     featuredBackgroundRefreshButton.textContent = state.featuredBackgroundRefreshing ? '刷新中...' : '刷新图库'
@@ -11215,23 +12409,6 @@ function syncFeaturedBackgroundModalControls(): void {
 
 function isFeaturedBackgroundFavorite(featuredId: string): boolean {
   return state.featuredBackgroundFavoriteIds.includes(featuredId)
-}
-
-async function handleFeaturedBackgroundPreferenceChange(): Promise<void> {
-  const allow1080p = featuredBackgroundAllow1080pInput instanceof HTMLInputElement
-    ? featuredBackgroundAllow1080pInput.checked
-    : false
-  state.featuredBackgroundPreferences = normalizeFeaturedBackgroundPreferences({
-    ...state.featuredBackgroundPreferences,
-    allow1080p
-  })
-  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
-  await saveFeaturedBackgroundPreferences()
-  setFeaturedBackgroundStatus(
-    allow1080p ? '已允许刷新时拉取 1080P 图片。' : '已切回只拉取高分辨率图片。',
-    'info'
-  )
-  syncFeaturedBackgroundModalControls()
 }
 
 function scheduleFeaturedBackgroundPreferencesSave(): void {
@@ -11248,7 +12425,6 @@ async function saveFeaturedBackgroundPreferences(): Promise<void> {
   window.clearTimeout(featuredBackgroundPreferencesSaveTimer)
   featuredBackgroundPreferencesSaveTimer = 0
   state.featuredBackgroundPreferences = normalizeFeaturedBackgroundPreferences(state.featuredBackgroundPreferences)
-  state.featuredBackgroundAllow1080p = state.featuredBackgroundPreferences.allow1080p
   await setLocalStorage({
     [STORAGE_KEYS.newTabFeaturedBackgroundPreferences]: state.featuredBackgroundPreferences
   })
@@ -11292,7 +12468,7 @@ async function refreshFeaturedBackgroundGallery(): Promise<void> {
   }
 
   state.featuredBackgroundRefreshing = true
-  setFeaturedBackgroundStatus('正在从 NASA、The Met 与 Wikimedia 拉取高清图...', 'info')
+  setFeaturedBackgroundStatus('正在从 NASA、The Met、Wikimedia 拉取高清图...', 'info')
   syncFeaturedBackgroundModalControls()
   try {
     const permissionGranted = await ensureFeaturedBackgroundPermissions()
@@ -11305,7 +12481,7 @@ async function refreshFeaturedBackgroundGallery(): Promise<void> {
       fetchJson,
       getImageSize: getRemoteImageSize
     }, {
-      allow1080p: state.featuredBackgroundAllow1080p
+      refreshSeed: `${getFeaturedBackgroundDateSeed()}:${Date.now()}`
     })
     if (!fetchedItems.length) {
       setFeaturedBackgroundStatus('没有拉取到满足高清要求的新图片。', 'warning')
@@ -11318,11 +12494,13 @@ async function refreshFeaturedBackgroundGallery(): Promise<void> {
       fetchedItems
     })
     await saveFeaturedBackgroundGallery()
+    await clearFeaturedBackgroundPreviewCache()
     setFeaturedBackgroundStatus(
-      `已拉取 ${fetchedItems.length} 张${state.featuredBackgroundAllow1080p ? ' 1080P 或更高' : '高分辨率'}图片，收藏图片已保留。`,
+      `已拉取 ${fetchedItems.length} 张高分辨率图片，收藏图片已保留。`,
       'success'
     )
     void cacheFeaturedBackgroundGalleryImages()
+    void cacheFeaturedBackgroundGalleryPreviewImages()
     const gallery = await loadBackgroundGalleryModule()
     renderFeaturedBackgroundPicker(gallery)
   } catch (error) {
@@ -11394,7 +12572,7 @@ function getRemoteImageSize(imageUrl: string): Promise<{ width: number; height: 
       resolve(size)
     }
 
-    timeout = window.setTimeout(() => settle(null), BACKGROUND_IMAGE_READY_TIMEOUT_MS)
+    timeout = window.setTimeout(() => settle(null), REMOTE_BACKGROUND_READY_TIMEOUT_MS)
     image.onload = () => {
       settle({
         width: image.naturalWidth,
@@ -11437,12 +12615,12 @@ function selectFeaturedBackgroundFromPicker(featuredId: string): void {
 }
 
 function getFeaturedBackgroundPickerLabel(settings = state.backgroundSettings): string {
+  const activeItem = getActiveFeaturedBackgroundItemSync(settings)
   if (!settings.featuredId) {
-    const dailyItem = getActiveFeaturedBackgroundItemSync(settings)
-    return dailyItem ? `每日精选 · ${dailyItem.title}` : '每日精选'
+    return activeItem ? `每日精选 · ${activeItem.title}` : '每日精选'
   }
 
-  return getActiveFeaturedBackgroundItemSync(settings)?.title || '当前精选图片'
+  return activeItem?.title || '当前精选图片'
 }
 
 function syncFeaturedBackgroundPickerLabel(): void {
@@ -11522,10 +12700,6 @@ function getDirectNavigationUrl(value: string): string {
   } catch {
     return ''
   }
-}
-
-function getSearchUrl(query: string, engine: string): string {
-  return buildSearchEngineUrl(query, normalizeSearchEngineId(engine))
 }
 
 function openSearchTarget(targetUrl: string): void {

@@ -3171,14 +3171,6 @@ function normalizeDashboardSearchText(value: unknown): string {
   return normalizeText(value).trim()
 }
 
-function truncateDashboardText(value: unknown, limit = 60): string {
-  const text = String(value || '').replace(/\s+/g, ' ').trim()
-  if (text.length <= limit) {
-    return text
-  }
-  return `${text.slice(0, Math.max(0, limit - 1)).trim()}…`
-}
-
 function formatDashboardLocalDate(value: unknown): string {
   const date = new Date(Number(value))
   if (Number.isNaN(date.getTime())) {
@@ -3944,10 +3936,6 @@ function getDashboardVirtualCardRenderMode(): 'full' | 'scroll' {
 
 function getDashboardRenderedCardMode(): 'full' | 'scroll' {
   return virtualState.renderedStateKey.startsWith('scroll\u0001') ? 'scroll' : 'full'
-}
-
-function isDashboardScrollActive(): boolean {
-  return virtualState.isFastScrolling || Boolean(virtualState.scrollIdleTimer)
 }
 
 function getDashboardFaviconWarmupStartIndex(window: DashboardVirtualWindow): number {
@@ -5962,10 +5950,6 @@ function stopDashboardFaviconWarmup(): void {
     dashboardFaviconDirtySyncTimer = 0
   }
   flushDashboardFaviconWarmupDebugSummary()
-}
-
-function resetDashboardFaviconWarmupForCacheChange(): void {
-  stopDashboardFaviconWarmup()
 }
 
 function getDashboardFaviconWarmupStableKey(items: DashboardItem[]): string {

@@ -19,7 +19,6 @@ export default defineConfig(({ mode }) => {
             }
             if (
               id.includes('/src/options/sections/dashboard-runtime.ts') ||
-              id.includes('/src/options/sections/dashboard.ts') ||
               id.includes('/src/options/sections/dashboard-virtual.ts') ||
               id.includes('/src/options/sections/dashboard-favicons.ts')
             ) {
@@ -73,7 +72,7 @@ export default defineConfig(({ mode }) => {
             if (id.includes('/src/newtab/search-engines.ts')) {
               return 'newtab-search-engines'
             }
-            if (id.includes('/src/newtab/workspace-settings.ts')) {
+            if (id.includes('/src/shared/newtab-workspace-settings.ts')) {
               return 'newtab-workspace-settings'
             }
             if (id.includes('/src/newtab/favicon-cache.ts')) {

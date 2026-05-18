@@ -5,7 +5,8 @@ import type {
 } from '../shared/content-snapshots.js'
 import type { BookmarkRecord } from '../shared/types.js'
 import type { NaturalSearchPlan, NaturalSearchResultSet } from '../popup/natural-search.js'
-import type { PopupSearchBookmark } from '../popup/search.js'
+import { extractDomain } from '../shared/text.js'
+import { searchBookmarksTopK, type PopupSearchBookmark } from '../popup/search.js'
 
 export type NewTabContentState =
   | { type: 'loading' }
@@ -586,31 +587,11 @@ export function getSearchBookmarkSuggestionsFromIndex(
   }
 
   const preparedIndex = Array.isArray(index) ? prepareNewTabSearchIndex(index) : index
-  const suggestions: SearchBookmarkSuggestion[] = []
-  for (const entry of preparedIndex.entries) {
-    const score = getSearchSuggestionScore(
-      normalizedQuery,
-      entry.normalizedTitle,
-      entry.normalizedUrl,
-      entry.normalizedFolderTitle,
-      entry.normalizedSearchText
-    )
-    if (score < 0) {
-      continue
-    }
-
-    retainTopSearchBookmarkSuggestion(suggestions, {
-      id: entry.id,
-      title: entry.title,
-      url: entry.url,
-      folderTitle: entry.folderTitle,
-      folderPath: entry.folderPath,
-      score,
-      order: entry.order
-    }, limit)
-  }
-
-  return suggestions.sort(compareSearchBookmarkSuggestions)
+  const popupBookmarks = getFallbackPopupSearchBookmarks(preparedIndex.entries)
+  const results = searchBookmarksTopK(query, popupBookmarks, limit)
+  return results
+    .map((result) => getSuggestionFromFallbackPopupResult(preparedIndex, result.id, result.score))
+    .filter((suggestion): suggestion is SearchBookmarkSuggestion => Boolean(suggestion))
 }
 
 export async function getPopupSearchBookmarkSuggestionsFromIndex(
@@ -631,15 +612,14 @@ export async function getPopupSearchBookmarkSuggestionsFromIndex(
 
   const {
     indexBookmarkForSearch,
-    searchBookmarks
+    searchBookmarksTopK
   } = await import('../popup/search.js')
   const popupBookmarks = getPreparedPopupSearchBookmarks(preparedIndex, indexBookmarkForSearch)
   await ensurePopupBookmarksHavePinyinIfNeeded(query, preparedIndex, popupBookmarks)
 
-  return searchBookmarks(query, popupBookmarks)
+  return searchBookmarksTopK(query, popupBookmarks, limit)
     .map((result) => getSuggestionFromPopupResult(preparedIndex, result.id, result.score))
     .filter((suggestion): suggestion is SearchBookmarkSuggestion => Boolean(suggestion))
-    .slice(0, limit)
 }
 
 export async function getNaturalSearchBookmarkSuggestionsFromIndex(
@@ -660,7 +640,7 @@ export async function getNaturalSearchBookmarkSuggestionsFromIndex(
 
   const {
     indexBookmarkForSearch,
-    searchBookmarks
+    searchBookmarksTopK
   } = await import('../popup/search.js')
   const {
     buildLocalNaturalSearchPlan,
@@ -683,7 +663,7 @@ export async function getNaturalSearchBookmarkSuggestionsFromIndex(
 
   const directQuery = normalizeNewTabSearchText(query)
   if (directQuery) {
-    const directResults = searchBookmarks(query, bookmarks)
+    const directResults = searchBookmarksTopK(query, bookmarks, limit)
     if (directResults.length) {
       resultSets.push({ query, results: directResults })
       seenQueries.add(directQuery)
@@ -697,7 +677,7 @@ export async function getNaturalSearchBookmarkSuggestionsFromIndex(
     }
 
     seenQueries.add(normalizedNaturalQuery)
-    const results = searchBookmarks(naturalQuery, bookmarks)
+    const results = searchBookmarksTopK(naturalQuery, bookmarks, limit)
     if (results.length) {
       resultSets.push({ query: naturalQuery, results })
     }
@@ -769,33 +749,71 @@ function getSuggestionFromPopupResult(
   }
 }
 
-function retainTopSearchBookmarkSuggestion(
-  suggestions: SearchBookmarkSuggestion[],
-  suggestion: SearchBookmarkSuggestion,
-  limit: number
-): void {
-  if (suggestions.length < limit) {
-    suggestions.push(suggestion)
-    return
+function getSuggestionFromFallbackPopupResult(
+  index: NewTabPreparedSearchIndex,
+  resultId: string,
+  score: number
+): SearchBookmarkSuggestion | null {
+  const entry = index.entriesById.get(resultId)
+  if (!entry) {
+    return null
   }
 
-  let worstIndex = 0
-  for (let index = 1; index < suggestions.length; index += 1) {
-    if (compareSearchBookmarkSuggestions(suggestions[index], suggestions[worstIndex]) > 0) {
-      worstIndex = index
-    }
-  }
-
-  if (compareSearchBookmarkSuggestions(suggestion, suggestions[worstIndex]) < 0) {
-    suggestions[worstIndex] = suggestion
+  return {
+    id: entry.id,
+    title: entry.title,
+    url: entry.url,
+    folderTitle: entry.folderTitle,
+    folderPath: entry.folderPath,
+    score,
+    order: entry.order
   }
 }
 
-function compareSearchBookmarkSuggestions(
-  left: SearchBookmarkSuggestion,
-  right: SearchBookmarkSuggestion
-): number {
-  return left.score - right.score || left.order - right.order
+function getFallbackPopupSearchBookmarks(entries: NewTabSearchIndexEntry[]): PopupSearchBookmark[] {
+  return entries.map((entry) => {
+    const url = String(entry.url || '').trim()
+    const title = String(entry.title || '').trim() || url
+    const folderPath = String(entry.folderPath || '').trim()
+    const domain = extractDomain(url)
+    const normalizedTitle = normalizeNewTabSearchText(title)
+    const normalizedUrl = normalizeNewTabSearchText(url)
+    const normalizedFolderPath = normalizeNewTabSearchText(folderPath)
+
+    return {
+      id: entry.id,
+      title,
+      url,
+      displayUrl: url,
+      normalizedTitle,
+      normalizedUrl,
+      duplicateKey: normalizedUrl || normalizedTitle || entry.id,
+      domain,
+      path: folderPath,
+      ancestorIds: [],
+      parentId: '',
+      index: entry.order,
+      dateAdded: 0,
+      normalizedPath: normalizedFolderPath,
+      tagSummary: '',
+      tagContentType: '',
+      tagTopics: [],
+      tagTags: [],
+      tagAliases: [],
+      tagPinyinFull: [],
+      tagPinyinInitials: [],
+      searchText: [
+        title,
+        url,
+        domain,
+        entry.folderTitle,
+        folderPath
+      ]
+        .map((value) => normalizeNewTabSearchText(String(value || '')))
+        .filter(Boolean)
+        .join(' ')
+    } as PopupSearchBookmark
+  })
 }
 
 export function getPortalQuickAccessItems({
